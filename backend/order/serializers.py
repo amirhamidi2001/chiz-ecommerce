@@ -1,6 +1,8 @@
 from decimal import Decimal
 
+from django.db import transaction
 from rest_framework import serializers
+from shop.models import Product
 
 from .models import Order, OrderItem
 
@@ -143,64 +145,77 @@ class OrderCreateSerializer(serializers.Serializer):
         tax = (subtotal * TAX_RATE).quantize(Decimal("0.01"))
         total = (subtotal + SHIPPING_COST + tax - discount).quantize(Decimal("0.01"))
 
-        order = Order.objects.create(
-            user=request.user,
-            first_name=validated_data["first_name"],
-            last_name=validated_data["last_name"],
-            email=validated_data["email"],
-            phone=validated_data["phone"],
-            shipping_address=validated_data["address"],
-            shipping_apartment=validated_data.get("apartment", ""),
-            shipping_city=validated_data["city"],
-            shipping_state=validated_data["state"],
-            shipping_zip=validated_data["zip"],
-            shipping_country=validated_data["country"],
-            billing_same_as_shipping=validated_data.get("billing_same", True),
-            payment_method=validated_data["payment_method"],
-            card_last_four=validated_data.get("card_last_four", ""),
-            subtotal=subtotal,
-            shipping_cost=SHIPPING_COST,
-            tax=tax,
-            discount=discount,
-            total=total,
-            notes=validated_data.get("notes", ""),
-            status=Order.Status.PROCESSING,
-        )
-
-        # ── Snapshot each cart item ────────────────────────────────────────
-        for cart_item in (
-            cart.items.select_related("product")
-            .prefetch_related("product__images")
-            .all()
-        ):
-            product = cart_item.product
-
-            # Build absolute image URL
-            image_url = ""
-            first_img = product.images.first()
-            if first_img and first_img.image:
-                try:
-                    image_url = request.build_absolute_uri(first_img.image.url)
-                except Exception:
-                    image_url = ""
-            elif product.thumbnail:
-                try:
-                    image_url = request.build_absolute_uri(product.thumbnail.url)
-                except Exception:
-                    image_url = ""
-
-            OrderItem.objects.create(
-                order=order,
-                product=product,
-                product_name=product.name,
-                product_slug=product.slug,
-                product_image=image_url,
-                unit_price=cart_item.unit_price,
-                quantity=cart_item.quantity,
+        with transaction.atomic():
+            order = Order.objects.create(
+                user=request.user,
+                first_name=validated_data["first_name"],
+                last_name=validated_data["last_name"],
+                email=validated_data["email"],
+                phone=validated_data["phone"],
+                shipping_address=validated_data["address"],
+                shipping_apartment=validated_data.get("apartment", ""),
+                shipping_city=validated_data["city"],
+                shipping_state=validated_data["state"],
+                shipping_zip=validated_data["zip"],
+                shipping_country=validated_data["country"],
+                billing_same_as_shipping=validated_data.get("billing_same", True),
+                payment_method=validated_data["payment_method"],
+                card_last_four=validated_data.get("card_last_four", ""),
+                subtotal=subtotal,
+                shipping_cost=SHIPPING_COST,
+                tax=tax,
+                discount=discount,
+                total=total,
+                notes=validated_data.get("notes", ""),
+                status=Order.Status.PROCESSING,
             )
 
-        # ── Clear the cart ─────────────────────────────────────────────────
-        cart.items.all().delete()
+            # ── Lock the referenced Product rows ────────────────────────────
+            # Row-level lock so concurrent checkouts against the same
+            # product(s) serialize instead of racing on stock.
+            cart_items = list(
+                cart.items.select_related("product")
+                .prefetch_related("product__images")
+                .all()
+            )
+            product_ids = {cart_item.product_id for cart_item in cart_items}
+            locked_products = {
+                product.id: product
+                for product in Product.objects.select_for_update().filter(
+                    id__in=product_ids
+                )
+            }
+
+            # ── Snapshot each cart item ────────────────────────────────────
+            for cart_item in cart_items:
+                product = locked_products[cart_item.product_id]
+
+                # Build absolute image URL
+                image_url = ""
+                first_img = product.images.first()
+                if first_img and first_img.image:
+                    try:
+                        image_url = request.build_absolute_uri(first_img.image.url)
+                    except Exception:
+                        image_url = ""
+                elif product.thumbnail:
+                    try:
+                        image_url = request.build_absolute_uri(product.thumbnail.url)
+                    except Exception:
+                        image_url = ""
+
+                OrderItem.objects.create(
+                    order=order,
+                    product=product,
+                    product_name=product.name,
+                    product_slug=product.slug,
+                    product_image=image_url,
+                    unit_price=cart_item.unit_price,
+                    quantity=cart_item.quantity,
+                )
+
+            # ── Clear the cart ───────────────────────────────────────────────
+            cart.items.all().delete()
 
         return order
 

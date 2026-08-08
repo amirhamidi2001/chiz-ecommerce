@@ -441,6 +441,119 @@ class OrderCreateSerializerTests(TestCase):
         order = s.save()
         self.assertEqual(order.user, self.user)
 
+    # ── Atomicity: partial failure must not leave orphaned data ──────────────
+
+    def test_failure_mid_loop_rolls_back_order_and_preserves_cart(self):
+        """
+        If OrderItem creation blows up partway through the loop, the whole
+        create() call must roll back: no Order row should be committed and
+        the cart's items must remain untouched.
+        """
+        from unittest.mock import patch
+
+        # Cart needs 2+ items so the failure happens mid-loop, not on the
+        # first iteration.
+        product2 = make_product(name="Trousers", slug="trousers", price="60.00")
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(
+            self.user,
+            [
+                {"product": self.product, "quantity": 2},
+                {"product": product2, "quantity": 1},
+            ],
+        )
+
+        orders_before = Order.objects.count()
+        cart = Cart.objects.get(user=self.user)
+        items_before = cart.items.count()
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        real_create = OrderItem.objects.create
+        call_count = {"n": 0}
+
+        def flaky_create(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("simulated mid-loop failure")
+            return real_create(*args, **kwargs)
+
+        with patch(
+            "order.serializers.OrderItem.objects.create", side_effect=flaky_create
+        ):
+            with self.assertRaises(RuntimeError):
+                s.save()
+
+        # No orphaned Order row was committed.
+        self.assertEqual(Order.objects.count(), orders_before)
+
+        # Cart items were not deleted.
+        cart.refresh_from_db()
+        self.assertEqual(cart.items.count(), items_before)
+
+    # ── Row-level locking on checkout ─────────────────────────────────────────
+
+    def test_checkout_locks_only_the_products_in_the_cart(self):
+        """
+        select_for_update() must be invoked on the Product queryset, scoped
+        to exactly the product ids referenced by the cart being checked
+        out — not the whole table.
+        """
+        from unittest.mock import patch
+
+        from shop.models import Product
+
+        other_product = make_product(
+            name="Untouched", slug="untouched", price="15.00"
+        )  # not in the cart — must not be locked
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        real_qs = Product.objects.select_for_update()
+        with patch(
+            "order.serializers.Product.objects.select_for_update",
+            return_value=real_qs,
+        ) as mock_select_for_update:
+            order = s.save()
+
+        mock_select_for_update.assert_called_once_with()
+
+        locked_product_ids = set(order.items.values_list("product_id", flat=True))
+        self.assertEqual(locked_product_ids, {self.product.id})
+        self.assertNotIn(other_product.id, locked_product_ids)
+
+    def test_checkout_product_query_uses_for_update(self):
+        """
+        The locking queryset's compiled SQL must contain FOR UPDATE. This
+        only has real meaning on Postgres (the project's configured engine
+        in core/settings/base.py); skip on backends where SELECT ... FOR
+        UPDATE isn't part of the compiled SQL the same way.
+        """
+        from django.db import connection
+
+        from shop.models import Product
+
+        if connection.vendor == "sqlite":
+            self.skipTest("SELECT ... FOR UPDATE semantics differ on SQLite")
+
+        qs = Product.objects.select_for_update().filter(id=self.product.id)
+        self.assertIn("FOR UPDATE", str(qs.query))
+
+    def test_order_item_product_is_the_locked_instance(self):
+        """
+        The Product referenced on the created OrderItem must be the same
+        row fetched (and locked) by the select_for_update() query, not a
+        stale copy obtained earlier via the cart's select_related.
+        """
+        s = self._serialize()
+        s.is_valid()
+        order = s.save()
+        item = order.items.first()
+        self.assertEqual(item.product_id, self.product.id)
+        self.assertEqual(item.product_name, self.product.name)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. Order List + Create API  —  GET / POST  /api/orders/
