@@ -190,6 +190,21 @@ class OrderCreateSerializer(serializers.Serializer):
             for cart_item in cart_items:
                 product = locked_products[cart_item.product_id]
 
+                # Validate stock, then decrement it. Raising here inside the
+                # atomic block rolls back the Order (and any earlier
+                # OrderItem/stock writes from this same loop) as a unit.
+                if product.stock < cart_item.quantity:
+                    raise serializers.ValidationError(
+                        {
+                            "stock": (
+                                f"Only {product.stock} of '{product.name}' "
+                                "left in stock."
+                            )
+                        }
+                    )
+                product.stock -= cart_item.quantity
+                product.save(update_fields=["stock"])
+
                 # Build absolute image URL
                 image_url = ""
                 first_img = product.images.first()

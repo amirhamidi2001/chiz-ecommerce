@@ -1,7 +1,9 @@
+from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from shop.models import Product
 
 from .models import Order
 from .serializers import OrderCreateSerializer, OrderListSerializer, OrderSerializer
@@ -87,8 +89,22 @@ class OrderDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        order.status = Order.Status.CANCELLED
-        order.save(update_fields=["status", "updated_at"])
+        with transaction.atomic():
+            order.status = Order.Status.CANCELLED
+            order.save(update_fields=["status", "updated_at"])
+
+            # ── Restore stock for each item ──────────────────────────────
+            for order_item in order.items.all():
+                if order_item.product_id is None:
+                    # Product was deleted after the order was placed
+                    # (OrderItem.product is SET_NULL) — nothing to restore.
+                    continue
+
+                product = Product.objects.select_for_update().get(
+                    pk=order_item.product_id
+                )
+                product.stock += order_item.quantity
+                product.save(update_fields=["stock"])
 
         serializer = OrderSerializer(order, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)

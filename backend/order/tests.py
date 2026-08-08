@@ -4,7 +4,7 @@ from cart.models import Cart, CartItem
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from order.models import Order, OrderItem
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.test import APITestCase
 from shop.models import Category, Product
 
@@ -479,9 +479,7 @@ class OrderCreateSerializerTests(TestCase):
                 raise RuntimeError("simulated mid-loop failure")
             return real_create(*args, **kwargs)
 
-        with patch(
-            "order.serializers.OrderItem.objects.create", side_effect=flaky_create
-        ):
+        with patch("order.serializers.OrderItem.objects.create", side_effect=flaky_create):
             with self.assertRaises(RuntimeError):
                 s.save()
 
@@ -553,6 +551,91 @@ class OrderCreateSerializerTests(TestCase):
         item = order.items.first()
         self.assertEqual(item.product_id, self.product.id)
         self.assertEqual(item.product_name, self.product.name)
+
+    # ── Stock validation + decrement ──────────────────────────────────────────
+
+    def test_sufficient_stock_decrements_by_ordered_quantity(self):
+        """
+        Ordering a quantity within available stock succeeds, and the
+        product's stock is reduced by exactly the ordered quantity.
+        """
+        # self.product has stock=5, cart quantity=2 (see setUp).
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5 - 2)
+
+    def test_insufficient_stock_raises_and_rolls_back_everything(self):
+        """
+        Ordering more than available stock must raise a ValidationError,
+        and afterward: no Order or OrderItem rows exist, and the
+        product's stock is completely unchanged — proving the atomic
+        rollback covers the new stock-decrement logic too.
+        """
+        low_stock_product = make_product(
+            name="Scarce Item", slug="scarce-item", price="40.00", stock=1
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(
+            self.user, [{"product": low_stock_product, "quantity": 3}]
+        )
+
+        orders_before = Order.objects.count()
+        items_before = OrderItem.objects.count()
+        stock_before = low_stock_product.stock
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        with self.assertRaises(serializers.ValidationError) as ctx:
+            s.save()
+        self.assertIn("stock", ctx.exception.detail)
+
+        self.assertEqual(Order.objects.count(), orders_before)
+        self.assertEqual(OrderItem.objects.count(), items_before)
+
+        low_stock_product.refresh_from_db()
+        self.assertEqual(low_stock_product.stock, stock_before)
+
+    def test_second_item_out_of_stock_prevents_first_item_decrement_too(self):
+        """
+        Cart with two items: the first has enough stock, the second does
+        not. Neither product's stock should be decremented — partial
+        success across items is not allowed.
+        """
+        healthy_product = make_product(
+            name="Plenty", slug="plenty", price="10.00", stock=10
+        )
+        scarce_product = make_product(
+            name="Scarce Two", slug="scarce-two", price="20.00", stock=1
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(
+            self.user,
+            [
+                {"product": healthy_product, "quantity": 2},
+                {"product": scarce_product, "quantity": 5},
+            ],
+        )
+
+        orders_before = Order.objects.count()
+        healthy_stock_before = healthy_product.stock
+        scarce_stock_before = scarce_product.stock
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        with self.assertRaises(serializers.ValidationError):
+            s.save()
+
+        self.assertEqual(Order.objects.count(), orders_before)
+
+        healthy_product.refresh_from_db()
+        scarce_product.refresh_from_db()
+        self.assertEqual(healthy_product.stock, healthy_stock_before)
+        self.assertEqual(scarce_product.stock, scarce_stock_before)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -682,6 +765,25 @@ class OrderListCreateAPITests(APITestCase):
         payload = {**VALID_PAYLOAD, "address": ""}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_post_insufficient_stock_returns_400_and_nothing_committed(self):
+        Cart.objects.filter(user=self.user).delete()
+        low_stock = make_product(
+            name="API Scarce", slug="api-scarce", price="12.00", stock=1
+        )
+        make_cart_with_items(self.user, [{"product": low_stock, "quantity": 2}])
+
+        orders_before = Order.objects.count()
+        stock_before = low_stock.stock
+
+        res = self._post_order()
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("stock", res.data)
+        self.assertEqual(Order.objects.count(), orders_before)
+
+        low_stock.refresh_from_db()
+        self.assertEqual(low_stock.stock, stock_before)
 
     def test_post_multiple_orders_each_get_unique_numbers(self):
         res1 = self._post_order()
@@ -910,6 +1012,90 @@ class OrderDetailAPITests(APITestCase):
         # Verify other user's order was not changed
         other_order = Order.objects.get(pk=other_order_id)
         self.assertNotEqual(other_order.status, Order.Status.CANCELLED)
+
+    # ── PATCH: cancel restores stock ────────────────────────────────────────
+
+    def test_patch_cancel_restores_stock_for_each_item(self):
+        """
+        Cancelling an order returns every OrderItem's quantity back to its
+        product's stock.
+        """
+        # setUp() created self.order for 2 units of self.product (stock
+        # started at 10, and Task 1.1.1.3's decrement left it at 8).
+        self.product.refresh_from_db()
+        stock_after_purchase = self.product.stock
+        self.assertEqual(stock_after_purchase, 8)
+
+        res = self.client.patch(
+            self._detail_url(self.order.pk), {"status": "cancelled"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, stock_after_purchase + 2)
+        self.assertEqual(self.product.stock, 10)
+
+    def test_patch_cancel_with_deleted_product_skips_gracefully(self):
+        """
+        If one of the order's OrderItem.product rows was deleted after the
+        order was placed (SET_NULL), cancelling must not raise, and stock
+        restoration should still happen for the remaining valid items.
+        """
+        second_product = make_product(
+            name="Backpack", slug="backpack", price="45.00", stock=10
+        )
+        make_cart_with_items(
+            self.user,
+            [
+                {"product": self.product, "quantity": 1},
+                {"product": second_product, "quantity": 3},
+            ],
+        )
+        res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        order = Order.objects.get(pk=res.data["id"])
+
+        second_product.refresh_from_db()
+        self.assertEqual(second_product.stock, 7)  # 10 - 3
+
+        # Simulate the product having been deleted after the order was
+        # placed — OrderItem.product is SET_NULL, so this leaves the
+        # OrderItem with product=None.
+        second_product.delete()
+
+        other_item = order.items.exclude(product__isnull=True).first()
+        self.assertIsNotNone(other_item)
+        restored_product = other_item.product
+        stock_before_cancel = restored_product.stock
+
+        res = self.client.patch(
+            self._detail_url(order.pk), {"status": "cancelled"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        restored_product.refresh_from_db()
+        self.assertEqual(
+            restored_product.stock, stock_before_cancel + other_item.quantity
+        )
+
+    def test_patch_cancel_shipped_order_does_not_modify_stock(self):
+        """
+        Regression: the shipped/delivered guard clause must still run
+        before any stock-restoration logic, so a rejected cancellation
+        leaves product stock untouched.
+        """
+        self.product.refresh_from_db()
+        stock_before = self.product.stock
+
+        self.order.status = Order.Status.SHIPPED
+        self.order.save()
+
+        res = self.client.patch(
+            self._detail_url(self.order.pk), {"status": "cancelled"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, stock_before)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
