@@ -1,0 +1,396 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AdminUsers > Snapshot > matches stable snapshot after data loads 1`] = `
+<DocumentFragment>
+  <div
+    class="space-y-5"
+  >
+    <div>
+      <h1
+        class="text-2xl font-bold text-gray-800"
+      >
+        Users
+      </h1>
+      <p
+        class="text-sm text-gray-500"
+      >
+        3 registered users
+      </p>
+    </div>
+    <div
+      data-testid="data-table"
+    >
+      <div
+        data-testid="dt-filters"
+      >
+        <select
+          class="px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:outline-none"
+        >
+          <option
+            value=""
+          >
+            All Users
+          </option>
+          <option
+            value="true"
+          >
+            Active
+          </option>
+          <option
+            value="false"
+          >
+            Inactive
+          </option>
+        </select>
+      </div>
+      <input
+        data-testid="dt-search"
+        placeholder="Search by name or email…"
+        value=""
+      />
+      <button
+        data-testid="dt-sort"
+      >
+        sort
+      </button>
+      <button
+        data-testid="dt-next-page"
+      >
+        next
+      </button>
+      <span
+        data-testid="dt-total"
+      >
+        3
+      </span>
+      <div
+        data-testid="dt-row-0"
+      >
+        <div
+          data-testid="cell-avatar_url"
+        >
+          <div
+            class="w-9 h-9 rounded-full bg-teal-100 flex items-center justify-center overflow-hidden flex-shrink-0"
+          >
+            <span
+              class="text-teal-700 font-bold text-sm"
+            >
+              U
+            </span>
+          </div>
+        </div>
+        <div
+          data-testid="cell-email"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800 text-sm"
+            >
+              User 1
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              user1@test.com
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-type"
+        >
+          <select
+            class="px-2 py-1 border border-gray-200 rounded-lg text-xs bg-white focus:outline-none disabled:opacity-50"
+          >
+            <option
+              value="1"
+            >
+              Customer
+            </option>
+            <option
+              value="2"
+            >
+              Admin
+            </option>
+            <option
+              value="3"
+            >
+              Superuser
+            </option>
+          </select>
+        </div>
+        <div
+          data-testid="cell-is_active"
+        >
+          <span
+            class="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700"
+          >
+            Active
+          </span>
+        </div>
+        <div
+          data-testid="cell-is_verified"
+        >
+          <i
+            class="bi bi-shield-x text-gray-300 text-lg"
+          />
+        </div>
+        <div
+          data-testid="cell-total_orders"
+        >
+          <span
+            class="text-sm text-gray-700"
+          >
+            0
+          </span>
+        </div>
+        <div
+          data-testid="cell-total_spent"
+        >
+          <span
+            class="text-sm font-medium text-gray-800"
+          >
+            $0
+          </span>
+        </div>
+        <div
+          data-testid="cell-created_date"
+        >
+          <span
+            class="text-xs text-gray-500"
+          >
+            6/1/2024
+          </span>
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-3 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-50 border-red-200 text-red-600 hover:bg-red-50"
+            title="Deactivate"
+          >
+            Deactivate
+          </button>
+        </div>
+      </div>
+      <div
+        data-testid="dt-row-1"
+      >
+        <div
+          data-testid="cell-avatar_url"
+        >
+          <div
+            class="w-9 h-9 rounded-full bg-teal-100 flex items-center justify-center overflow-hidden flex-shrink-0"
+          >
+            <span
+              class="text-teal-700 font-bold text-sm"
+            >
+              U
+            </span>
+          </div>
+        </div>
+        <div
+          data-testid="cell-email"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800 text-sm"
+            >
+              User 2
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              user2@test.com
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-type"
+        >
+          <select
+            class="px-2 py-1 border border-gray-200 rounded-lg text-xs bg-white focus:outline-none disabled:opacity-50"
+          >
+            <option
+              value="1"
+            >
+              Customer
+            </option>
+            <option
+              value="2"
+            >
+              Admin
+            </option>
+            <option
+              value="3"
+            >
+              Superuser
+            </option>
+          </select>
+        </div>
+        <div
+          data-testid="cell-is_active"
+        >
+          <span
+            class="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700"
+          >
+            Active
+          </span>
+        </div>
+        <div
+          data-testid="cell-is_verified"
+        >
+          <i
+            class="bi bi-shield-x text-gray-300 text-lg"
+          />
+        </div>
+        <div
+          data-testid="cell-total_orders"
+        >
+          <span
+            class="text-sm text-gray-700"
+          >
+            1
+          </span>
+        </div>
+        <div
+          data-testid="cell-total_spent"
+        >
+          <span
+            class="text-sm font-medium text-gray-800"
+          >
+            $50
+          </span>
+        </div>
+        <div
+          data-testid="cell-created_date"
+        >
+          <span
+            class="text-xs text-gray-500"
+          >
+            6/1/2024
+          </span>
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-3 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-50 border-red-200 text-red-600 hover:bg-red-50"
+            title="Deactivate"
+          >
+            Deactivate
+          </button>
+        </div>
+      </div>
+      <div
+        data-testid="dt-row-2"
+      >
+        <div
+          data-testid="cell-avatar_url"
+        >
+          <div
+            class="w-9 h-9 rounded-full bg-teal-100 flex items-center justify-center overflow-hidden flex-shrink-0"
+          >
+            <span
+              class="text-teal-700 font-bold text-sm"
+            >
+              U
+            </span>
+          </div>
+        </div>
+        <div
+          data-testid="cell-email"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800 text-sm"
+            >
+              User 3
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              user3@test.com
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-type"
+        >
+          <select
+            class="px-2 py-1 border border-gray-200 rounded-lg text-xs bg-white focus:outline-none disabled:opacity-50"
+          >
+            <option
+              value="1"
+            >
+              Customer
+            </option>
+            <option
+              value="2"
+            >
+              Admin
+            </option>
+            <option
+              value="3"
+            >
+              Superuser
+            </option>
+          </select>
+        </div>
+        <div
+          data-testid="cell-is_active"
+        >
+          <span
+            class="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700"
+          >
+            Active
+          </span>
+        </div>
+        <div
+          data-testid="cell-is_verified"
+        >
+          <i
+            class="bi bi-shield-x text-gray-300 text-lg"
+          />
+        </div>
+        <div
+          data-testid="cell-total_orders"
+        >
+          <span
+            class="text-sm text-gray-700"
+          >
+            2
+          </span>
+        </div>
+        <div
+          data-testid="cell-total_spent"
+        >
+          <span
+            class="text-sm font-medium text-gray-800"
+          >
+            $100
+          </span>
+        </div>
+        <div
+          data-testid="cell-created_date"
+        >
+          <span
+            class="text-xs text-gray-500"
+          >
+            6/1/2024
+          </span>
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-3 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-50 border-red-200 text-red-600 hover:bg-red-50"
+            title="Deactivate"
+          >
+            Deactivate
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</DocumentFragment>
+`;

@@ -1,0 +1,372 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AdminProducts > Snapshot > matches stable snapshot after data loads 1`] = `
+<DocumentFragment>
+  <div
+    class="space-y-5"
+  >
+    <div
+      class="flex justify-between items-center"
+    >
+      <div>
+        <h1
+          class="text-2xl font-bold text-gray-800"
+        >
+          Products
+        </h1>
+        <p
+          class="text-sm text-gray-500"
+        >
+          3 total products
+        </p>
+      </div>
+      <button
+        class="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-xl hover:bg-teal-700 transition text-sm font-semibold"
+      >
+        <i
+          class="bi bi-plus-lg"
+        />
+         Add Product
+      </button>
+    </div>
+    <div
+      data-testid="data-table"
+    >
+      <div
+        data-testid="dt-filters"
+      >
+        <select
+          class="px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:outline-none"
+        >
+          <option
+            value=""
+          >
+            All Categories
+          </option>
+          <option
+            value="10"
+          >
+            Category 1
+          </option>
+          <option
+            value="11"
+          >
+            Category 2
+          </option>
+        </select>
+      </div>
+      <input
+        data-testid="dt-search"
+        placeholder="Search products…"
+        value=""
+      />
+      <button
+        data-testid="dt-sort"
+      >
+        sort
+      </button>
+      <button
+        data-testid="dt-next-page"
+      >
+        next
+      </button>
+      <span
+        data-testid="dt-total"
+      >
+        3
+      </span>
+      <div
+        data-testid="dt-row-0"
+      >
+        <div
+          data-testid="cell-thumbnail_url"
+        >
+          <img
+            alt="Product 1"
+            class="w-12 h-12 object-cover rounded-xl border"
+            src="/assets/img/product/product-1.webp"
+          />
+        </div>
+        <div
+          data-testid="cell-name"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800 text-sm max-w-xs truncate"
+            >
+              Product 1
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              Electronics · Logitech
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-price"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800"
+            >
+              $10.00
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-stock"
+        >
+          <span
+            class="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700"
+          >
+            50
+          </span>
+        </div>
+        <div
+          data-testid="cell-rating"
+        >
+          <div
+            class="flex items-center gap-1 text-yellow-500 text-xs"
+          >
+            <i
+              class="bi bi-star-fill"
+            />
+            <span
+              class="text-gray-700 font-medium"
+            >
+              4.0
+            </span>
+            <span
+              class="text-gray-400"
+            >
+              (5)
+            </span>
+          </div>
+        </div>
+        <div
+          data-testid="cell-is_sale"
+        >
+          <div
+            class="flex gap-1 flex-wrap"
+          />
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
+            title="Edit"
+          >
+            <i
+              class="bi bi-pencil"
+            />
+          </button>
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition border-red-200 text-red-600 hover:bg-red-50"
+            title="Delete"
+          >
+            <i
+              class="bi bi-trash"
+            />
+          </button>
+        </div>
+      </div>
+      <div
+        data-testid="dt-row-1"
+      >
+        <div
+          data-testid="cell-thumbnail_url"
+        >
+          <img
+            alt="Product 2"
+            class="w-12 h-12 object-cover rounded-xl border"
+            src="/assets/img/product/product-1.webp"
+          />
+        </div>
+        <div
+          data-testid="cell-name"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800 text-sm max-w-xs truncate"
+            >
+              Product 2
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              Electronics · Logitech
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-price"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800"
+            >
+              $20.00
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-stock"
+        >
+          <span
+            class="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700"
+          >
+            50
+          </span>
+        </div>
+        <div
+          data-testid="cell-rating"
+        >
+          <div
+            class="flex items-center gap-1 text-yellow-500 text-xs"
+          >
+            <i
+              class="bi bi-star-fill"
+            />
+            <span
+              class="text-gray-700 font-medium"
+            >
+              4.0
+            </span>
+            <span
+              class="text-gray-400"
+            >
+              (5)
+            </span>
+          </div>
+        </div>
+        <div
+          data-testid="cell-is_sale"
+        >
+          <div
+            class="flex gap-1 flex-wrap"
+          />
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
+            title="Edit"
+          >
+            <i
+              class="bi bi-pencil"
+            />
+          </button>
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition border-red-200 text-red-600 hover:bg-red-50"
+            title="Delete"
+          >
+            <i
+              class="bi bi-trash"
+            />
+          </button>
+        </div>
+      </div>
+      <div
+        data-testid="dt-row-2"
+      >
+        <div
+          data-testid="cell-thumbnail_url"
+        >
+          <img
+            alt="Product 3"
+            class="w-12 h-12 object-cover rounded-xl border"
+            src="/assets/img/product/product-1.webp"
+          />
+        </div>
+        <div
+          data-testid="cell-name"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800 text-sm max-w-xs truncate"
+            >
+              Product 3
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              Electronics · Logitech
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-price"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800"
+            >
+              $30.00
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-stock"
+        >
+          <span
+            class="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700"
+          >
+            50
+          </span>
+        </div>
+        <div
+          data-testid="cell-rating"
+        >
+          <div
+            class="flex items-center gap-1 text-yellow-500 text-xs"
+          >
+            <i
+              class="bi bi-star-fill"
+            />
+            <span
+              class="text-gray-700 font-medium"
+            >
+              4.0
+            </span>
+            <span
+              class="text-gray-400"
+            >
+              (5)
+            </span>
+          </div>
+        </div>
+        <div
+          data-testid="cell-is_sale"
+        >
+          <div
+            class="flex gap-1 flex-wrap"
+          />
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
+            title="Edit"
+          >
+            <i
+              class="bi bi-pencil"
+            />
+          </button>
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition border-red-200 text-red-600 hover:bg-red-50"
+            title="Delete"
+          >
+            <i
+              class="bi bi-trash"
+            />
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</DocumentFragment>
+`;

@@ -1,0 +1,248 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AdminBlog > Snapshot > matches stable snapshot of posts tab after data loads 1`] = `
+<DocumentFragment>
+  <div
+    class="space-y-5"
+  >
+    <div
+      class="flex justify-between items-center"
+    >
+      <div>
+        <h1
+          class="text-2xl font-bold text-gray-800"
+        >
+          Blog Management
+        </h1>
+        <p
+          class="text-sm text-gray-500"
+        >
+          Manage posts, categories and comments
+        </p>
+      </div>
+      <button
+        class="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-xl hover:bg-teal-700 transition text-sm font-semibold"
+      >
+        <i
+          class="bi bi-plus-lg"
+        />
+         New Post
+      </button>
+    </div>
+    <div
+      class="border-b border-gray-200"
+    >
+      <nav
+        class="flex gap-4"
+      >
+        <button
+          class="pb-2 px-1 text-sm font-medium capitalize transition border-b-2 border-teal-600 text-teal-700"
+        >
+          posts
+        </button>
+        <button
+          class="pb-2 px-1 text-sm font-medium capitalize transition text-gray-500 hover:text-gray-700"
+        >
+          categories
+        </button>
+        <button
+          class="pb-2 px-1 text-sm font-medium capitalize transition text-gray-500 hover:text-gray-700"
+        >
+          comments
+        </button>
+      </nav>
+    </div>
+    <div
+      data-testid="data-table"
+    >
+      <div
+        data-testid="dt-filters"
+      >
+        <div
+          class="flex gap-2"
+        >
+          <select
+            class="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+          >
+            <option
+              value=""
+            >
+              All status
+            </option>
+            <option
+              value="draft"
+            >
+              Draft
+            </option>
+            <option
+              value="published"
+            >
+              Published
+            </option>
+          </select>
+          <select
+            class="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+          >
+            <option
+              value=""
+            >
+              All categories
+            </option>
+          </select>
+        </div>
+      </div>
+      <input
+        data-testid="dt-search"
+        placeholder="Search posts..."
+        value=""
+      />
+      <div
+        data-testid="dt-row-0"
+      >
+        <div
+          data-testid="cell-cover_image_url"
+        >
+          <img
+            alt="cover"
+            class="w-12 h-12 object-cover rounded-lg border"
+            src="/assets/img/default-blog.jpg"
+          />
+        </div>
+        <div
+          data-testid="cell-title"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800 max-w-xs truncate"
+            >
+              Post 1
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              Cat 1 · 3/15/2024
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-status"
+        >
+          <span
+            class="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700"
+          >
+            Published
+          </span>
+        </div>
+        <div
+          data-testid="cell-views_count"
+        >
+          <span
+            class="text-sm"
+          >
+            10
+          </span>
+        </div>
+        <div
+          data-testid="cell-is_featured"
+        >
+          <i
+            class="bi bi-star-fill text-yellow-500"
+          />
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
+            title="Edit"
+          >
+            <i
+              class="bi bi-pencil"
+            />
+          </button>
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition border-red-200 text-red-600 hover:bg-red-50"
+            title="Delete"
+          >
+            <i
+              class="bi bi-trash"
+            />
+          </button>
+        </div>
+      </div>
+      <div
+        data-testid="dt-row-1"
+      >
+        <div
+          data-testid="cell-cover_image_url"
+        >
+          <img
+            alt="cover"
+            class="w-12 h-12 object-cover rounded-lg border"
+            src="/assets/img/default-blog.jpg"
+          />
+        </div>
+        <div
+          data-testid="cell-title"
+        >
+          <div>
+            <p
+              class="font-semibold text-gray-800 max-w-xs truncate"
+            >
+              Post 2
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              Cat 2 · 3/15/2024
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-status"
+        >
+          <span
+            class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"
+          >
+            Draft
+          </span>
+        </div>
+        <div
+          data-testid="cell-views_count"
+        >
+          <span
+            class="text-sm"
+          >
+            20
+          </span>
+        </div>
+        <div
+          data-testid="cell-is_featured"
+        >
+          —
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
+            title="Edit"
+          >
+            <i
+              class="bi bi-pencil"
+            />
+          </button>
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium border transition border-red-200 text-red-600 hover:bg-red-50"
+            title="Delete"
+          >
+            <i
+              class="bi bi-trash"
+            />
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</DocumentFragment>
+`;

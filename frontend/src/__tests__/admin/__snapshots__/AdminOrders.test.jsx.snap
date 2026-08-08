@@ -1,0 +1,346 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AdminOrders > Snapshot > matches stable snapshot after data loads 1`] = `
+<DocumentFragment>
+  <div
+    class="space-y-5"
+  >
+    <div
+      class="flex justify-between items-center"
+    >
+      <div>
+        <h1
+          class="text-2xl font-bold text-gray-800"
+        >
+          Orders
+        </h1>
+        <p
+          class="text-sm text-gray-500"
+        >
+          3 total orders
+        </p>
+      </div>
+    </div>
+    <div
+      data-testid="data-table"
+    >
+      <div
+        data-testid="dt-filters"
+      >
+        <select
+          class="px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:outline-none"
+        >
+          <option
+            value=""
+          >
+            All Statuses
+          </option>
+          <option
+            value="pending"
+          >
+            Pending
+          </option>
+          <option
+            value="processing"
+          >
+            Processing
+          </option>
+          <option
+            value="shipped"
+          >
+            Shipped
+          </option>
+          <option
+            value="delivered"
+          >
+            Delivered
+          </option>
+          <option
+            value="cancelled"
+          >
+            Cancelled
+          </option>
+        </select>
+      </div>
+      <input
+        data-testid="dt-search"
+        placeholder="Search by order #, customer…"
+        value=""
+      />
+      <button
+        data-testid="dt-sort"
+      >
+        sort
+      </button>
+      <button
+        data-testid="dt-next-page"
+      >
+        next
+      </button>
+      <span
+        data-testid="dt-total"
+      >
+        3
+      </span>
+      <div
+        data-testid="dt-row-0"
+      >
+        <div
+          data-testid="cell-order_number"
+        >
+          <span
+            class="font-semibold text-gray-800 text-sm"
+          >
+            ORD-1001
+          </span>
+        </div>
+        <div
+          data-testid="cell-full_name"
+        >
+          <div>
+            <p
+              class="font-medium text-gray-800 text-sm"
+            >
+              Customer 1
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              cust1@test.com
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-status"
+        >
+          <span
+            class="text-xs font-semibold px-2.5 py-1 rounded-full capitalize bg-gray-100 text-gray-700"
+          >
+            pending
+          </span>
+        </div>
+        <div
+          data-testid="cell-payment_method"
+        >
+          <span
+            class="text-sm capitalize text-gray-600"
+          >
+            credit card
+          </span>
+        </div>
+        <div
+          data-testid="cell-items_count"
+        >
+          <span
+            class="text-sm text-gray-600"
+          >
+            1
+          </span>
+        </div>
+        <div
+          data-testid="cell-total"
+        >
+          <span
+            class="font-semibold text-gray-800"
+          >
+            $50.00
+          </span>
+        </div>
+        <div
+          data-testid="cell-created_at"
+        >
+          <span
+            class="text-sm text-gray-500"
+          >
+            6/1/2024
+          </span>
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition border bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
+            title="View Details"
+          >
+            <i
+              class="bi bi-eye"
+            />
+          </button>
+        </div>
+      </div>
+      <div
+        data-testid="dt-row-1"
+      >
+        <div
+          data-testid="cell-order_number"
+        >
+          <span
+            class="font-semibold text-gray-800 text-sm"
+          >
+            ORD-1002
+          </span>
+        </div>
+        <div
+          data-testid="cell-full_name"
+        >
+          <div>
+            <p
+              class="font-medium text-gray-800 text-sm"
+            >
+              Customer 2
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              cust2@test.com
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-status"
+        >
+          <span
+            class="text-xs font-semibold px-2.5 py-1 rounded-full capitalize bg-gray-100 text-gray-700"
+          >
+            pending
+          </span>
+        </div>
+        <div
+          data-testid="cell-payment_method"
+        >
+          <span
+            class="text-sm capitalize text-gray-600"
+          >
+            credit card
+          </span>
+        </div>
+        <div
+          data-testid="cell-items_count"
+        >
+          <span
+            class="text-sm text-gray-600"
+          >
+            2
+          </span>
+        </div>
+        <div
+          data-testid="cell-total"
+        >
+          <span
+            class="font-semibold text-gray-800"
+          >
+            $100.00
+          </span>
+        </div>
+        <div
+          data-testid="cell-created_at"
+        >
+          <span
+            class="text-sm text-gray-500"
+          >
+            6/1/2024
+          </span>
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition border bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
+            title="View Details"
+          >
+            <i
+              class="bi bi-eye"
+            />
+          </button>
+        </div>
+      </div>
+      <div
+        data-testid="dt-row-2"
+      >
+        <div
+          data-testid="cell-order_number"
+        >
+          <span
+            class="font-semibold text-gray-800 text-sm"
+          >
+            ORD-1003
+          </span>
+        </div>
+        <div
+          data-testid="cell-full_name"
+        >
+          <div>
+            <p
+              class="font-medium text-gray-800 text-sm"
+            >
+              Customer 3
+            </p>
+            <p
+              class="text-xs text-gray-500"
+            >
+              cust3@test.com
+            </p>
+          </div>
+        </div>
+        <div
+          data-testid="cell-status"
+        >
+          <span
+            class="text-xs font-semibold px-2.5 py-1 rounded-full capitalize bg-gray-100 text-gray-700"
+          >
+            pending
+          </span>
+        </div>
+        <div
+          data-testid="cell-payment_method"
+        >
+          <span
+            class="text-sm capitalize text-gray-600"
+          >
+            credit card
+          </span>
+        </div>
+        <div
+          data-testid="cell-items_count"
+        >
+          <span
+            class="text-sm text-gray-600"
+          >
+            3
+          </span>
+        </div>
+        <div
+          data-testid="cell-total"
+        >
+          <span
+            class="font-semibold text-gray-800"
+          >
+            $150.00
+          </span>
+        </div>
+        <div
+          data-testid="cell-created_at"
+        >
+          <span
+            class="text-sm text-gray-500"
+          >
+            6/1/2024
+          </span>
+        </div>
+        <div
+          data-testid="row-actions"
+        >
+          <button
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition border bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
+            title="View Details"
+          >
+            <i
+              class="bi bi-eye"
+            />
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</DocumentFragment>
+`;

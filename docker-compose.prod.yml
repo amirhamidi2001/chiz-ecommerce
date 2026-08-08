@@ -1,0 +1,93 @@
+# ─── docker-compose.prod.yml ──────────────────────────────────────────────────
+# Production stack: Daphne ASGI, Nginx, no source mounts, prod settings.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up --build -d
+#
+# Prerequisites on server:
+#   - .env.prod is populated with real secrets
+#   - TLS termination is handled by a reverse proxy (nginx, Caddy, etc.)
+#     OR SECURE_SSL_REDIRECT=False is set if terminating upstream
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:15
+    container_name: backend_db_prod
+    restart: unless-stopped
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data/
+    env_file:
+      - .env.prod
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME}
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+    # Do NOT expose port 5432 to the host in production
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7
+    container_name: backend_redis_prod
+    restart: unless-stopped
+    # No host port binding — only reachable from other containers
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Django backend — Daphne ASGI (HTTP + WebSocket) ─────────────────────────
+  backend:
+    build:
+      context: ./backend
+      target: production
+    container_name: backend_prod
+    restart: unless-stopped
+    # collectstatic runs inside the Dockerfile production stage (RUN step).
+    # Only migrate at startup — safe for single-instance deployments.
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             daphne -b 0.0.0.0 -p 8000 core.asgi:application"
+    volumes:
+      # Named volumes for static/media — shared with nginx
+      - static_volume_prod:/app/staticfiles
+      - media_volume_prod:/app/media
+      # No source code mount — image is immutable in prod
+    env_file:
+      - .env.prod
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── React / Nginx — pre-built static assets ─────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      # Uses the final nginx stage in frontend/Dockerfile (no "target" needed —
+      # the last FROM in a multi-stage file is the default build target)
+    container_name: frontend_prod
+    restart: unless-stopped
+    volumes:
+      - static_volume_prod:/app/staticfiles:ro   # serve Django static files
+      - media_volume_prod:/app/media:ro           # serve Django media files
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data_prod:
+  static_volume_prod:
+  media_volume_prod:

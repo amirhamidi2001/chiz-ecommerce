@@ -1,0 +1,581 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`] = `
+<DocumentFragment>
+  <div
+    class="space-y-6"
+  >
+    <div
+      class="flex flex-wrap justify-between items-center gap-3"
+    >
+      <div>
+        <h1
+          class="text-2xl font-bold text-gray-800"
+        >
+          Dashboard Overview
+        </h1>
+        <p
+          class="text-sm text-gray-500 mt-0.5"
+        >
+          Friday, June 19, 2026
+        </p>
+      </div>
+      <select
+        class="px-4 py-2 border border-gray-200 rounded-xl bg-white text-sm font-medium focus:outline-none"
+      >
+        <option
+          value="7d"
+        >
+          Last 7 days
+        </option>
+        <option
+          value="30d"
+        >
+          Last 30 days
+        </option>
+        <option
+          value="90d"
+        >
+          Last 90 days
+        </option>
+        <option
+          value="1y"
+        >
+          Last 12 months
+        </option>
+      </select>
+    </div>
+    <div
+      class="grid grid-cols-2 lg:grid-cols-4 gap-4"
+    >
+      <div
+        data-testid="stat-revenue"
+      >
+        <span
+          data-testid="stat-title"
+        >
+          Revenue
+        </span>
+        <span
+          data-testid="stat-value"
+        >
+          $125,000
+        </span>
+        <span
+          data-testid="stat-change"
+        >
+          8.2
+        </span>
+      </div>
+      <div
+        data-testid="stat-orders"
+        role="button"
+      >
+        <span
+          data-testid="stat-title"
+        >
+          Orders
+        </span>
+        <span
+          data-testid="stat-value"
+        >
+          340
+        </span>
+        <span
+          data-testid="stat-change"
+        >
+          -1.5
+        </span>
+      </div>
+      <div
+        data-testid="stat-new-users"
+        role="button"
+      >
+        <span
+          data-testid="stat-title"
+        >
+          New Users
+        </span>
+        <span
+          data-testid="stat-value"
+        >
+          58
+        </span>
+        <span
+          data-testid="stat-change"
+        >
+          12.3
+        </span>
+      </div>
+      <div
+        data-testid="stat-total-products"
+        role="button"
+      >
+        <span
+          data-testid="stat-title"
+        >
+          Total Products
+        </span>
+        <span
+          data-testid="stat-value"
+        >
+          412
+        </span>
+      </div>
+    </div>
+    <div
+      class="grid sm:grid-cols-3 gap-4"
+    >
+      <div
+        class="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition"
+      >
+        <div
+          class="w-10 h-10 rounded-xl text-amber-600 bg-amber-50 flex items-center justify-center flex-shrink-0"
+        >
+          <i
+            class="bi bi-exclamation-triangle text-lg"
+          />
+        </div>
+        <div>
+          <div
+            class="text-xl font-bold text-gray-800"
+          >
+            7
+          </div>
+          <div
+            class="text-xs text-gray-500"
+          >
+            Low Stock
+          </div>
+        </div>
+      </div>
+      <div
+        class="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition"
+      >
+        <div
+          class="w-10 h-10 rounded-xl text-red-600 bg-red-50 flex items-center justify-center flex-shrink-0"
+        >
+          <i
+            class="bi bi-x-circle text-lg"
+          />
+        </div>
+        <div>
+          <div
+            class="text-xl font-bold text-gray-800"
+          >
+            3
+          </div>
+          <div
+            class="text-xs text-gray-500"
+          >
+            Out of Stock
+          </div>
+        </div>
+      </div>
+      <div
+        class="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition"
+      >
+        <div
+          class="w-10 h-10 rounded-xl text-blue-600 bg-blue-50 flex items-center justify-center flex-shrink-0"
+        >
+          <i
+            class="bi bi-clock text-lg"
+          />
+        </div>
+        <div>
+          <div
+            class="text-xl font-bold text-gray-800"
+          >
+            12
+          </div>
+          <div
+            class="text-xs text-gray-500"
+          >
+            Pending Orders
+          </div>
+        </div>
+      </div>
+    </div>
+    <div
+      class="grid lg:grid-cols-3 gap-6"
+    >
+      <div
+        class="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-6 shadow-sm"
+      >
+        <h3
+          class="font-bold text-gray-800 mb-4"
+        >
+          Revenue — Last 14 Days
+        </h3>
+        <div
+          class="flex items-end gap-1 h-32 w-full"
+        >
+          <div
+            class="flex-1 flex flex-col items-center gap-1 group relative"
+          >
+            <div
+              class="w-full bg-teal-200 hover:bg-teal-500 rounded-t transition-all cursor-pointer"
+              style="height: 57.14285714285714%;"
+            />
+            <div
+              class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-10 pointer-events-none"
+            >
+              $4,000
+              <br />
+              <span
+                class="text-gray-300"
+              >
+                06-01
+              </span>
+            </div>
+          </div>
+          <div
+            class="flex-1 flex flex-col items-center gap-1 group relative"
+          >
+            <div
+              class="w-full bg-teal-200 hover:bg-teal-500 rounded-t transition-all cursor-pointer"
+              style="height: 100%;"
+            />
+            <div
+              class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-10 pointer-events-none"
+            >
+              $7,000
+              <br />
+              <span
+                class="text-gray-300"
+              >
+                06-02
+              </span>
+            </div>
+          </div>
+          <div
+            class="flex-1 flex flex-col items-center gap-1 group relative"
+          >
+            <div
+              class="w-full bg-teal-200 hover:bg-teal-500 rounded-t transition-all cursor-pointer"
+              style="height: 71.42857142857143%;"
+            />
+            <div
+              class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-10 pointer-events-none"
+            >
+              $5,000
+              <br />
+              <span
+                class="text-gray-300"
+              >
+                06-03
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm"
+      >
+        <h3
+          class="font-bold text-gray-800 mb-4"
+        >
+          Order Status
+        </h3>
+        <div
+          class="flex items-center gap-6"
+        >
+          <svg
+            class="w-28 h-28 flex-shrink-0"
+            viewBox="0 0 100 100"
+          >
+            <circle
+              cx="50"
+              cy="50"
+              fill="white"
+              r="28"
+            />
+            <path
+              d="M 50 50 L 50 10 A 40 40 0 0 1 60.459197638152794 11.39164358890605 Z"
+              fill="#0d9488"
+            />
+            <path
+              d="M 50 50 L 60.459197638152794 11.39164358890605 A 40 40 0 0 1 75.93598700871607 19.547995503026215 Z"
+              fill="#3b82f6"
+            />
+            <path
+              d="M 50 50 L 75.93598700871607 19.547995503026215 A 40 40 0 0 1 89.67903768427067 55.05707113359384 Z"
+              fill="#f59e0b"
+            />
+            <path
+              d="M 50 50 L 89.67903768427067 55.05707113359384 A 40 40 0 1 1 42.98171354971322 10.62051733069972 Z"
+              fill="#8b5cf6"
+            />
+            <path
+              d="M 50 50 L 42.98171354971322 10.62051733069972 A 40 40 0 0 1 49.99999999999996 10 Z"
+              fill="#ef4444"
+            />
+          </svg>
+          <div
+            class="space-y-1.5"
+          >
+            <div
+              class="flex items-center gap-2 text-xs"
+            >
+              <span
+                class="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                style="background: rgb(13, 148, 136);"
+              />
+              <span
+                class="text-gray-600 capitalize"
+              >
+                pending
+              </span>
+              <span
+                class="font-semibold text-gray-800 ml-auto pl-2"
+              >
+                12
+              </span>
+            </div>
+            <div
+              class="flex items-center gap-2 text-xs"
+            >
+              <span
+                class="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                style="background: rgb(59, 130, 246);"
+              />
+              <span
+                class="text-gray-600 capitalize"
+              >
+                processing
+              </span>
+              <span
+                class="font-semibold text-gray-800 ml-auto pl-2"
+              >
+                20
+              </span>
+            </div>
+            <div
+              class="flex items-center gap-2 text-xs"
+            >
+              <span
+                class="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                style="background: rgb(245, 158, 11);"
+              />
+              <span
+                class="text-gray-600 capitalize"
+              >
+                shipped
+              </span>
+              <span
+                class="font-semibold text-gray-800 ml-auto pl-2"
+              >
+                45
+              </span>
+            </div>
+            <div
+              class="flex items-center gap-2 text-xs"
+            >
+              <span
+                class="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                style="background: rgb(139, 92, 246);"
+              />
+              <span
+                class="text-gray-600 capitalize"
+              >
+                delivered
+              </span>
+              <span
+                class="font-semibold text-gray-800 ml-auto pl-2"
+              >
+                200
+              </span>
+            </div>
+            <div
+              class="flex items-center gap-2 text-xs"
+            >
+              <span
+                class="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                style="background: rgb(239, 68, 68);"
+              />
+              <span
+                class="text-gray-600 capitalize"
+              >
+                cancelled
+              </span>
+              <span
+                class="font-semibold text-gray-800 ml-auto pl-2"
+              >
+                8
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div
+      class="grid lg:grid-cols-2 gap-6"
+    >
+      <div
+        class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"
+      >
+        <div
+          class="flex justify-between items-center px-6 py-4 border-b border-gray-100"
+        >
+          <h3
+            class="font-bold text-gray-800"
+          >
+            Recent Orders
+          </h3>
+          <button
+            class="text-sm text-teal-600 hover:underline"
+          >
+            View All
+          </button>
+        </div>
+        <div
+          class="divide-y divide-gray-50"
+        >
+          <div
+            class="px-6 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 cursor-pointer transition"
+          >
+            <div
+              class="min-w-0"
+            >
+              <p
+                class="font-semibold text-gray-800 text-sm truncate"
+              >
+                ORD-1001
+              </p>
+              <p
+                class="text-xs text-gray-500"
+              >
+                Alice Smith
+              </p>
+            </div>
+            <div
+              class="flex items-center gap-2 flex-shrink-0"
+            >
+              <span
+                class="text-xs font-semibold px-2.5 py-0.5 rounded-full capitalize bg-gray-100 text-gray-700"
+              >
+                pending
+              </span>
+              <span
+                class="font-bold text-sm text-gray-800"
+              >
+                $90
+              </span>
+            </div>
+          </div>
+          <div
+            class="px-6 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 cursor-pointer transition"
+          >
+            <div
+              class="min-w-0"
+            >
+              <p
+                class="font-semibold text-gray-800 text-sm truncate"
+              >
+                ORD-1002
+              </p>
+              <p
+                class="text-xs text-gray-500"
+              >
+                bob@test.com
+              </p>
+            </div>
+            <div
+              class="flex items-center gap-2 flex-shrink-0"
+            >
+              <span
+                class="text-xs font-semibold px-2.5 py-0.5 rounded-full capitalize bg-teal-100 text-teal-700"
+              >
+                delivered
+              </span>
+              <span
+                class="font-bold text-sm text-gray-800"
+              >
+                $240
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"
+      >
+        <div
+          class="flex justify-between items-center px-6 py-4 border-b border-gray-100"
+        >
+          <h3
+            class="font-bold text-gray-800"
+          >
+            Top Products
+          </h3>
+          <button
+            class="text-sm text-teal-600 hover:underline"
+          >
+            View All
+          </button>
+        </div>
+        <div
+          class="divide-y divide-gray-50"
+        >
+          <div
+            class="px-6 py-3 flex items-center gap-3"
+          >
+            <span
+              class="text-xs font-bold text-gray-400 w-5 text-center"
+            >
+              1
+            </span>
+            <div
+              class="flex-1 min-w-0"
+            >
+              <p
+                class="text-sm font-medium text-gray-800 truncate"
+              >
+                Widget A
+              </p>
+              <p
+                class="text-xs text-gray-500"
+              >
+                120 units sold
+              </p>
+            </div>
+            <span
+              class="text-sm font-bold text-teal-700"
+            >
+              $5,400
+            </span>
+          </div>
+          <div
+            class="px-6 py-3 flex items-center gap-3"
+          >
+            <span
+              class="text-xs font-bold text-gray-400 w-5 text-center"
+            >
+              2
+            </span>
+            <div
+              class="flex-1 min-w-0"
+            >
+              <p
+                class="text-sm font-medium text-gray-800 truncate"
+              >
+                Widget B
+              </p>
+              <p
+                class="text-xs text-gray-500"
+              >
+                80 units sold
+              </p>
+            </div>
+            <span
+              class="text-sm font-bold text-teal-700"
+            >
+              $3,200
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</DocumentFragment>
+`;
