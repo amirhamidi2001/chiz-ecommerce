@@ -83,3 +83,17 @@ class PricingService:
             "discount": discount,
             "total": total,
         }
+
+
+def calculate_order_totals(
+    subtotal: Decimal,
+    discount: Decimal = Decimal("0"),
+) -> Dict[str, Decimal]:
+    """
+    Module-level convenience wrapper around
+    `PricingService.calculate_order_totals`, so callers can do
+    `from order.services.pricing import calculate_order_totals` without
+    referencing the class directly. See PricingService.calculate_order_totals
+    for the full behavior/contract.
+    """
+    return PricingService.calculate_order_totals(subtotal, discount)

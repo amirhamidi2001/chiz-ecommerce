@@ -266,6 +266,37 @@ class OrderCreateSerializerTests(TestCase):
         s = self._serialize({"discount": "-10.00"})
         self.assertFalse(s.is_valid())
 
+    def test_discount_larger_than_order_total_returns_400(self):
+        """
+        A discount that would exceed subtotal + shipping_cost + tax (and
+        therefore drive the order total negative) is rejected by the
+        PricingService (Task 1.1.2.1) via calculate_order_totals(), which
+        create() now calls instead of computing totals inline. The
+        PricingError must surface as a normal 400 ValidationError, not a
+        500, and must not create an Order.
+
+        Note: the `discount` field is still present on
+        OrderCreateSerializer as of this task, so this edge case is
+        reachable through the public API. If a later task (e.g. 1.2.1)
+        removes the flat `discount` field in favor of coupon-based
+        discounts, this test — and the PricingError branch in create()
+        that it exercises — should be revisited, since it may become
+        unreachable via this serializer at that point.
+        """
+        # self.product costs $100 × 2 = $200 subtotal (see setUp), so
+        # subtotal + shipping ($9.99) + tax ($20.00) = $229.99. Anything
+        # above that must be rejected.
+        orders_before = Order.objects.count()
+
+        s = self._serialize({"discount": "500.00"})
+        self.assertTrue(s.is_valid(), s.errors)  # field-level validation passes
+
+        with self.assertRaises(serializers.ValidationError) as ctx:
+            s.save()
+        self.assertIn("discount", ctx.exception.detail)
+
+        self.assertEqual(Order.objects.count(), orders_before)
+
     def test_missing_address_fails(self):
         s = self._serialize({"address": ""})
         self.assertFalse(s.is_valid())

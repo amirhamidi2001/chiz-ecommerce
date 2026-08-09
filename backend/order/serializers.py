@@ -5,9 +5,7 @@ from rest_framework import serializers
 from shop.models import Product
 
 from .models import Order, OrderItem
-
-TAX_RATE = Decimal("0.10")  # 10%
-SHIPPING_COST = Decimal("9.99")
+from .services.pricing import PricingError, calculate_order_totals
 
 
 # ─── Read serializers ─────────────────────────────────────────────────────────
@@ -141,9 +139,12 @@ class OrderCreateSerializer(serializers.Serializer):
         cart = validated_data["cart"]
         discount = validated_data.get("discount", Decimal("0"))
 
-        subtotal = Decimal(str(cart.subtotal))
-        tax = (subtotal * TAX_RATE).quantize(Decimal("0.01"))
-        total = (subtotal + SHIPPING_COST + tax - discount).quantize(Decimal("0.01"))
+        try:
+            totals = calculate_order_totals(
+                subtotal=Decimal(str(cart.subtotal)), discount=discount
+            )
+        except (PricingError, ValueError) as e:
+            raise serializers.ValidationError({"discount": str(e)})
 
         with transaction.atomic():
             order = Order.objects.create(
@@ -161,11 +162,11 @@ class OrderCreateSerializer(serializers.Serializer):
                 billing_same_as_shipping=validated_data.get("billing_same", True),
                 payment_method=validated_data["payment_method"],
                 card_last_four=validated_data.get("card_last_four", ""),
-                subtotal=subtotal,
-                shipping_cost=SHIPPING_COST,
-                tax=tax,
-                discount=discount,
-                total=total,
+                subtotal=totals["subtotal"],
+                shipping_cost=totals["shipping_cost"],
+                tax=totals["tax"],
+                discount=totals["discount"],
+                total=totals["total"],
                 notes=validated_data.get("notes", ""),
                 status=Order.Status.PROCESSING,
             )
