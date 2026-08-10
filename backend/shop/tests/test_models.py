@@ -1,4 +1,5 @@
 import pytest
+from django.contrib.auth import get_user_model
 from django.utils.text import slugify
 from shop.models import Brand, Category, Color, Product, ProductColor, Review
 from shop.tests.factories import (
@@ -194,3 +195,51 @@ class TestReviewModel:
         product_id = review.product.id
         review.product.delete()
         assert Review.objects.filter(id=review.id).count() == 0
+
+    # ── user FK (Task 1.3.1.2 — nullable, backward-compatible) ──────────────
+
+    def test_review_can_be_created_with_user_none(self, db):
+        """
+        Backward compatibility: any existing code path that hasn't been
+        updated yet (and all pre-migration historical rows) must still be
+        able to create/hold a Review with no associated user.
+        """
+        review = ReviewFactory(user=None)
+        assert review.user is None
+        assert review.user_id is None
+        # `name` (the denormalized display cache) is unaffected by user
+        # being absent.
+        assert review.name
+
+    def test_review_can_be_created_with_a_real_user(self, db):
+        User = get_user_model()
+        user = User.objects.create_user(
+            email="reviewer@example.com", password="TestPass123!"
+        )
+        review = ReviewFactory(user=user, name="Reviewer Name")
+
+        assert review.user_id == user.id
+        assert review.user == user
+        # name is still stored independently of the linked user (kept as
+        # a denormalized display cache per this task's requirements).
+        assert review.name == "Reviewer Name"
+
+    def test_deleting_user_sets_review_user_to_null_not_cascade(self, db):
+        """
+        on_delete=SET_NULL: deleting the linked User must not delete the
+        Review itself (unlike `product`, which cascades) — the review
+        (and its denormalized `name`) should survive with user=None.
+        """
+        User = get_user_model()
+        user = User.objects.create_user(
+            email="departing-user@example.com", password="TestPass123!"
+        )
+        review = ReviewFactory(user=user, name="Someone")
+        review_id = review.id
+
+        user.delete()
+
+        review.refresh_from_db()
+        assert Review.objects.filter(id=review_id).exists()
+        assert review.user is None
+        assert review.name == "Someone"  # unaffected — still denormalized

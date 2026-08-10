@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
 
@@ -137,6 +138,13 @@ class ProductColor(models.Model):
 class Review(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="reviews"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviews",
     )
     name = models.CharField(max_length=200)
     rating = models.PositiveSmallIntegerField(choices=[(i, i) for i in range(1, 6)])

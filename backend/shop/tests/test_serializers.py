@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.test import RequestFactory
 from shop.serializers import (
     BrandSerializer,
@@ -109,13 +110,40 @@ class TestReviewSerializer:
     def test_contains_expected_fields(self):
         review = ReviewFactory()
         data = ReviewSerializer(review).data
-        for field in ("id", "name", "rating", "headline", "comment", "created_at"):
+        for field in (
+            "id",
+            "user_id",
+            "name",
+            "rating",
+            "headline",
+            "comment",
+            "created_at",
+        ):
             assert field in data
 
     def test_rating_value_in_1_to_5(self):
         review = ReviewFactory(rating=4)
         data = ReviewSerializer(review).data
         assert data["rating"] == 4
+
+    def test_user_id_is_null_when_no_user_attached(self):
+        review = ReviewFactory(user=None)
+        data = ReviewSerializer(review).data
+        assert data["user_id"] is None
+
+    def test_user_id_reflects_attached_user_without_leaking_pii(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            email="reviewer-serializer@example.com", password="TestPass123!"
+        )
+        review = ReviewFactory(user=user)
+        data = ReviewSerializer(review).data
+
+        assert data["user_id"] == user.id
+        # Only the id is exposed — no nested user object (and therefore
+        # no email or other PII) in the public review output.
+        assert "user" not in data
+        assert "email" not in data
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
