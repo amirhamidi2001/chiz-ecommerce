@@ -262,40 +262,23 @@ class OrderCreateSerializerTests(TestCase):
         s = self._serialize({"payment_method": "paypal", "card_last_four": ""})
         self.assertTrue(s.is_valid(), s.errors)
 
-    def test_negative_discount_fails(self):
+    def test_discount_field_removed_client_input_is_ignored(self):
+        """
+        Security fix (this task): `discount` is no longer a declared field
+        on OrderCreateSerializer at all — a client can no longer control
+        the discount applied at checkout by sending an arbitrary
+        `discount` value in the POST body. DRF silently ignores unknown
+        input keys, so submitting `discount` here must not raise a
+        validation error (it's simply not read), and full lock-in
+        coverage (asserting the resulting Order really does get
+        discount=0 regardless of what a malicious client sends) lives in
+        the dedicated security-regression test added alongside this fix.
+        """
         s = self._serialize({"discount": "-10.00"})
-        self.assertFalse(s.is_valid())
+        self.assertTrue(s.is_valid(), s.errors)
 
-    def test_discount_larger_than_order_total_returns_400(self):
-        """
-        A discount that would exceed subtotal + shipping_cost + tax (and
-        therefore drive the order total negative) is rejected by the
-        PricingService (Task 1.1.2.1) via calculate_order_totals(), which
-        create() now calls instead of computing totals inline. The
-        PricingError must surface as a normal 400 ValidationError, not a
-        500, and must not create an Order.
-
-        Note: the `discount` field is still present on
-        OrderCreateSerializer as of this task, so this edge case is
-        reachable through the public API. If a later task (e.g. 1.2.1)
-        removes the flat `discount` field in favor of coupon-based
-        discounts, this test — and the PricingError branch in create()
-        that it exercises — should be revisited, since it may become
-        unreachable via this serializer at that point.
-        """
-        # self.product costs $100 × 2 = $200 subtotal (see setUp), so
-        # subtotal + shipping ($9.99) + tax ($20.00) = $229.99. Anything
-        # above that must be rejected.
-        orders_before = Order.objects.count()
-
-        s = self._serialize({"discount": "500.00"})
-        self.assertTrue(s.is_valid(), s.errors)  # field-level validation passes
-
-        with self.assertRaises(serializers.ValidationError) as ctx:
-            s.save()
-        self.assertIn("discount", ctx.exception.detail)
-
-        self.assertEqual(Order.objects.count(), orders_before)
+        s2 = self._serialize({"discount": "999999.00"})
+        self.assertTrue(s2.is_valid(), s2.errors)
 
     def test_missing_address_fails(self):
         s = self._serialize({"address": ""})
@@ -337,13 +320,17 @@ class OrderCreateSerializerTests(TestCase):
         self.assertEqual(order.shipping_cost, SHIPPING_COST)
 
     def test_order_total_formula(self):
+        # discount is no longer a real input (see this task's security
+        # fix) — sending one is simply ignored, and the formula always
+        # uses discount=0.
         s = self._serialize({"discount": "10.00"})
         s.is_valid()
         order = s.save()
-        expected = (
-            order.subtotal + SHIPPING_COST + order.tax - Decimal("10.00")
-        ).quantize(Decimal("0.01"))
+        expected = (order.subtotal + SHIPPING_COST + order.tax).quantize(
+            Decimal("0.01")
+        )
         self.assertEqual(order.total, expected)
+        self.assertEqual(order.discount, Decimal("0.00"))
 
     def test_order_total_with_zero_discount(self):
         s = self._serialize({"discount": "0.00"})
@@ -761,16 +748,21 @@ class OrderListCreateAPITests(APITestCase):
         res2 = self._post_order()
         self.assertNotEqual(res1.data["order_number"], res2.data["order_number"])
 
-    def test_post_discount_applied_to_total(self):
+    def test_post_discount_in_payload_is_ignored_not_applied_to_total(self):
+        """
+        Security fix (this task): a client sending `discount` in the
+        checkout POST payload must have no effect — the field is not
+        part of OrderCreateSerializer's declared inputs anymore, so it's
+        silently ignored (unknown-field passthrough), and the resulting
+        order's discount is always $0.
+        """
         payload = {**VALID_PAYLOAD, "discount": "5.00"}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(Decimal(res.data["discount"]), Decimal("5.00"))
+        self.assertEqual(Decimal(res.data["discount"]), Decimal("0.00"))
         order = Order.objects.get(user=self.user)
         subtotal = order.subtotal
-        expected = (subtotal + SHIPPING_COST + order.tax - Decimal("5.00")).quantize(
-            Decimal("0.01")
-        )
+        expected = (subtotal + SHIPPING_COST + order.tax).quantize(Decimal("0.01"))
         self.assertEqual(order.total, expected)
 
     def test_post_paypal_payment_method(self):

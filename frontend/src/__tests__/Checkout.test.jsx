@@ -374,25 +374,10 @@ describe('Checkout', () => {
       expect(checkbox).not.toBeChecked();
     });
 
-    it('applies a valid promo code (SAVE20) and shows the discount', async () => {
-      const user = userEvent.setup();
-      renderCheckout();
-
-      await user.type(screen.getByPlaceholderText(/promo code/i), 'SAVE20');
-      await user.click(screen.getByRole('button', { name: /apply/i }));
-
-      expect(await screen.findByText(/-\$20\.00/)).toBeInTheDocument();
-    });
-
-    it('shows an error for an invalid promo code', async () => {
-      const user = userEvent.setup();
-      renderCheckout();
-
-      await user.type(screen.getByPlaceholderText(/promo code/i), 'BADCODE');
-      await user.click(screen.getByRole('button', { name: /apply/i }));
-
-      expect(await screen.findByText(/invalid promo code/i)).toBeInTheDocument();
-    });
+    // Promo/coupon UI was removed as part of the discount security fix
+    // (Epic 9 will introduce a real, server-validated coupon system and
+    // its own tests at that point) — see backend/order/serializers.py
+    // and this component's Epic 9 TODO comment.
   });
 
   // ── Submission success ─────────────────────────────────────────────────────

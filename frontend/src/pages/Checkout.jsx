@@ -73,18 +73,17 @@ const Checkout = () => {
 
   const [paymentMethod, setPaymentMethod] = useState('credit_card');
   const [card, setCard] = useState({ number: '', expiry: '', cvv: '', name: '' });
-  const [promoCode, setPromoCode] = useState('');
-  const [discount, setDiscount] = useState(0);
-  const [couponApplied, setCouponApplied] = useState(false);
 
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
 
   // ── Derived totals ─────────────────────────────────────────────────────────
+  // NOTE: there is no coupon/promo system yet (tracked as Epic 9). Discount
+  // is always $0 and is not client-controlled — the server hardcodes it too.
   const subtotal = Number(cart?.subtotal ?? 0);
   const tax = subtotal * TAX_RATE;
-  const total = subtotal + SHIPPING_COST + tax - discount;
+  const total = subtotal + SHIPPING_COST + tax;
   const items = cart?.items ?? [];
 
   // ── Input handlers ──────────────────────────────────────────────────────────
@@ -110,16 +109,6 @@ const Checkout = () => {
     let v = e.target.value.replace(/\D/g, '');
     if (v.length >= 3) v = v.slice(0, 2) + '/' + v.slice(2, 4);
     setCard((prev) => ({ ...prev, expiry: v }));
-  };
-
-  const applyPromo = () => {
-    if (couponApplied) return;
-    if (promoCode.toUpperCase() === 'SAVE20') {
-      setDiscount(20);
-      setCouponApplied(true);
-    } else {
-      setErrors((prev) => ({ ...prev, promo: 'Invalid promo code.' }));
-    }
   };
 
   // ── Validation ──────────────────────────────────────────────────────────────
@@ -181,7 +170,6 @@ const Checkout = () => {
         billing_same: form.billingSame,
         payment_method: paymentMethod,
         card_last_four: paymentMethod === 'credit_card' ? card.number.slice(-4) : '',
-        discount: discount.toFixed(2),
         notes: form.notes,
       };
 
@@ -572,29 +560,10 @@ const Checkout = () => {
                   </div>
                 )}
 
-                {/* Promo Code */}
-                <div className="mb-6">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={promoCode}
-                      onChange={(e) => { setPromoCode(e.target.value); setErrors((p) => ({ ...p, promo: '' })); }}
-                      placeholder="Promo code"
-                      disabled={couponApplied}
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500 disabled:bg-gray-100"
-                    />
-                    <button
-                      type="button"
-                      onClick={applyPromo}
-                      disabled={couponApplied}
-                      className="border border-teal-600 text-teal-600 px-4 py-2 rounded-lg text-sm hover:bg-teal-50 transition disabled:opacity-50"
-                    >
-                      {couponApplied ? <i className="bi bi-check-circle me-1"></i> : null}
-                      {couponApplied ? 'Applied' : 'Apply'}
-                    </button>
-                  </div>
-                  {errors.promo && <p className="text-red-500 text-xs mt-1">{errors.promo}</p>}
-                </div>
+                {/* Promo code / coupons are not implemented yet (Epic 9) —
+                    intentionally removed rather than left as non-functional
+                    UI. Do not re-add a promo input here without a real,
+                    server-validated coupon system behind it. */}
 
                 {/* Totals */}
                 <div className="space-y-2 text-sm border-t pt-4">
@@ -610,14 +579,6 @@ const Checkout = () => {
                     <span className="text-gray-600">Tax (10%)</span>
                     <span>${tax.toFixed(2)}</span>
                   </div>
-                  {discount > 0 && (
-                    <div className="flex justify-between text-teal-600">
-                      <span className="flex items-center gap-1">
-                        <i className="bi bi-tag-fill text-xs"></i> Discount
-                      </span>
-                      <span>-${discount.toFixed(2)}</span>
-                    </div>
-                  )}
                   <div className="flex justify-between text-base font-bold pt-3 border-t mt-2">
                     <span>Total</span>
                     <span className="text-teal-700">${total.toFixed(2)}</span>

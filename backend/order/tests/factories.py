@@ -73,6 +73,7 @@ VALID_PAYLOAD = {
     "billing_same": True,
     "payment_method": "credit_card",
     "card_last_four": "4242",
-    "discount": "0.00",
     "notes": "",
+    # NOTE: no "discount" key here on purpose — OrderCreateSerializer no
+    # longer accepts client-supplied discount at all (security fix).
 }

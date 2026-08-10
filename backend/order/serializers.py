@@ -114,9 +114,6 @@ class OrderCreateSerializer(serializers.Serializer):
 
     # Optional
     notes = serializers.CharField(allow_blank=True, default="")
-    discount = serializers.DecimalField(
-        max_digits=10, decimal_places=2, min_value=Decimal("0"), default=Decimal("0")
-    )
 
     def validate_card_last_four(self, value):
         if value and not value.isdigit():
@@ -137,11 +134,17 @@ class OrderCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         request = self.context["request"]
         cart = validated_data["cart"]
-        discount = validated_data.get("discount", Decimal("0"))
 
+        # SECURITY: discount is intentionally NOT read from client input.
+        # There is no coupon/promo system yet (tracked separately as
+        # Epic 9), so discount is hardcoded to zero here rather than
+        # trusted from the checkout payload — previously a client could
+        # submit an arbitrary `discount` value directly in the POST body
+        # and have it applied at checkout with no server-side validation.
+        # TODO: Epic 9 — replace with server-validated coupon discount
         try:
             totals = calculate_order_totals(
-                subtotal=Decimal(str(cart.subtotal)), discount=discount
+                subtotal=Decimal(str(cart.subtotal)), discount=Decimal("0")
             )
         except (PricingError, ValueError) as e:
             raise serializers.ValidationError({"discount": str(e)})
