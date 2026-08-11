@@ -52,10 +52,20 @@ class ProductColorSerializer(serializers.ModelSerializer):
 # ─── Review — read (used inside product detail & review list responses) ───────
 class ReviewSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(read_only=True)
+    is_verified_purchase = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Review
-        fields = ("id", "user_id", "name", "rating", "headline", "comment", "created_at")
+        fields = (
+            "id",
+            "user_id",
+            "name",
+            "rating",
+            "headline",
+            "comment",
+            "is_verified_purchase",
+            "created_at",
+        )
 
 
 # ─── Review — write (validates and accepts new review submissions) ────────────

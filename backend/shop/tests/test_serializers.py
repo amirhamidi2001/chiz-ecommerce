@@ -117,6 +117,7 @@ class TestReviewSerializer:
             "rating",
             "headline",
             "comment",
+            "is_verified_purchase",
             "created_at",
         ):
             assert field in data
@@ -125,6 +126,25 @@ class TestReviewSerializer:
         review = ReviewFactory(rating=4)
         data = ReviewSerializer(review).data
         assert data["rating"] == 4
+
+    def test_is_verified_purchase_defaults_to_false(self):
+        """
+        Task 1.3.1.2: this task only adds and exposes the field — no
+        logic computes/sets it yet (that's Task 1.3.1.5), so a freshly
+        created Review with no explicit value must default to False.
+        """
+        review = ReviewFactory()
+        assert review.is_verified_purchase is False
+
+        data = ReviewSerializer(review).data
+        assert data["is_verified_purchase"] is False
+
+    def test_is_verified_purchase_reflects_true_when_explicitly_set(self):
+        # Belt-and-suspenders: confirm the serializer actually reads the
+        # field's real value rather than hardcoding False.
+        review = ReviewFactory(is_verified_purchase=True)
+        data = ReviewSerializer(review).data
+        assert data["is_verified_purchase"] is True
 
     def test_user_id_is_null_when_no_user_attached(self):
         review = ReviewFactory(user=None)

@@ -146,6 +146,7 @@ class Review(models.Model):
         blank=True,
         related_name="reviews",
     )
+    is_verified_purchase = models.BooleanField(default=False)
     name = models.CharField(max_length=200)
     rating = models.PositiveSmallIntegerField(choices=[(i, i) for i in range(1, 6)])
     headline = models.CharField(max_length=300, blank=True)

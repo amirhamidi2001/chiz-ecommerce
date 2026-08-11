@@ -243,3 +243,15 @@ class TestReviewModel:
         assert Review.objects.filter(id=review_id).exists()
         assert review.user is None
         assert review.name == "Someone"  # unaffected — still denormalized
+
+    # ── is_verified_purchase (Task 1.3.1.2 — field only, no logic yet) ──────
+
+    def test_is_verified_purchase_defaults_to_false(self, db):
+        review = ReviewFactory()
+        assert review.is_verified_purchase is False
+
+    def test_is_verified_purchase_can_be_set_true(self, db):
+        # No computation logic exists yet (Task 1.3.1.5) — just confirming
+        # the field itself is a normal, settable boolean.
+        review = ReviewFactory(is_verified_purchase=True)
+        assert review.is_verified_purchase is True
