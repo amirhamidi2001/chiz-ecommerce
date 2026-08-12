@@ -72,19 +72,61 @@ class ReviewSerializer(serializers.ModelSerializer):
 class ReviewCreateSerializer(serializers.ModelSerializer):
     """
     Write-only serializer for POSTing a new review.
-    The `product` field is injected in the view via perform_create / save(product=…)
-    and is therefore excluded from the input fields.
+
+    `product` and `user` are both injected server-side in the view
+    (`perform_create` / `save(product=…, user=…)`) and are therefore
+    excluded from the client-writable input fields. `name` is likewise
+    NOT accepted from the client — it's derived from the authenticated
+    user's profile in `create()` below, so a reviewer can't submit
+    reviews under an arbitrary display name.
     """
 
     class Meta:
         model = Review
-        fields = ("name", "rating", "headline", "comment")
+        fields = ("rating", "headline", "comment")
 
-    def validate_name(self, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Name cannot be blank.")
-        return value
+    def validate(self, attrs):
+        """
+        Enforce one-review-per-user-per-product at the application layer,
+        ahead of the DB-level unique_together constraint (Task 1.3.1.4),
+        so a duplicate attempt surfaces as a clean 400 with a friendly
+        message instead of an IntegrityError-driven 500.
+
+        `product` is provided by the view via get_serializer_context();
+        `request.user` is the authenticated user (permission_classes on
+        the view already requires authentication before we ever get
+        here, but the checks below are defensive rather than assumed).
+        """
+        request = self.context.get("request")
+        product = self.context.get("product")
+        user = getattr(request, "user", None)
+
+        if (
+            product is not None
+            and user is not None
+            and getattr(user, "is_authenticated", False)
+            and Review.objects.filter(product=product, user=user).exists()
+        ):
+            raise serializers.ValidationError(
+                {"detail": "You have already reviewed this product."}
+            )
+
+        return attrs
+
+    def create(self, validated_data):
+        user = validated_data.get("user")
+        display_name = ""
+        if user is not None:
+            profile = getattr(user, "profile", None)
+            if profile is not None and (profile.first_name or profile.last_name):
+                display_name = profile.get_fullname()
+        if not display_name:
+            # Newly-registered users may not have filled out their
+            # profile's first/last name yet — fall back to their email
+            # rather than a placeholder like "new user".
+            display_name = user.email if user is not None else ""
+        validated_data["name"] = display_name
+        return super().create(validated_data)
 
     def validate_rating(self, value: int) -> int:
         if not (1 <= value <= 5):

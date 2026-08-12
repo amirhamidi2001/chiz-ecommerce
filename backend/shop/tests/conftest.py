@@ -9,6 +9,7 @@ from shop.tests.factories import (
     ProductFactory,
     ProductImageFactory,
     ReviewFactory,
+    UserFactory,
 )
 
 # ─── HTTP clients ────────────────────────────────────────────────────────────
@@ -18,6 +19,19 @@ from shop.tests.factories import (
 def api_client():
     """Unauthenticated DRF APIClient."""
     return APIClient()
+
+
+@pytest.fixture
+def user(db):
+    return UserFactory()
+
+
+@pytest.fixture
+def auth_client(user):
+    """DRF APIClient authenticated as `user` (fixture above)."""
+    client = APIClient()
+    client.force_authenticate(user=user)
+    return client
 
 
 @pytest.fixture

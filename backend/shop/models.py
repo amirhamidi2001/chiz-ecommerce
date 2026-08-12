@@ -155,6 +155,21 @@ class Review(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        unique_together = ("product", "user")
+        # NOTE on `user=None` rows: this project's DB backend is
+        # PostgreSQL (see core/settings/base.py), where a UNIQUE
+        # constraint/index treats NULL as distinct from every other NULL
+        # (standard SQL semantics — NULL is never considered equal to
+        # NULL, including for uniqueness checks). That means this
+        # constraint does NOT collapse multiple historical reviews with
+        # user=None on the same product into a conflict; only rows with
+        # the same *non-null* (product, user) pair are rejected. This is
+        # exactly the desired behavior — pre-auth anonymous reviews
+        # (Task 1.3.1.1) are left alone, and only authenticated users are
+        # limited to one review per product. If this project ever moves
+        # to a DB backend with different NULL-handling in unique
+        # constraints (e.g. some older MySQL configurations), this
+        # assumption should be re-verified.
 
     def __str__(self):
         return f"{self.name} — {self.product.name} ({self.rating}★)"

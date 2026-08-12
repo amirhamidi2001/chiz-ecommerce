@@ -189,8 +189,10 @@ export const getRelatedProducts = (slug) =>
 
 /**
  * POST /products/<slug>/reviews/
- * Body: { name, rating, headline?, comment }
- * Returns the newly created review: { id, name, rating, headline, comment, created_at }
+ * Requires authentication — reviews are tied to the logged-in user's
+ * account. Body: { rating, headline?, comment } (no `name`: the display
+ * name is derived server-side from the authenticated user's profile).
+ * Returns the newly created review: { id, user_id, name, rating, headline, comment, is_verified_purchase, created_at }
  *
  * The backend also recalculates and persists product.rating / product.reviews_count
  * after every successful submission.

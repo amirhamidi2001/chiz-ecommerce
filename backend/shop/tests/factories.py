@@ -1,4 +1,5 @@
 import factory
+from django.contrib.auth import get_user_model
 from django.utils.text import slugify
 from factory.django import DjangoModelFactory
 from shop.models import (
@@ -10,6 +11,17 @@ from shop.models import (
     ProductImage,
     Review,
 )
+
+User = get_user_model()
+
+
+class UserFactory(DjangoModelFactory):
+    class Meta:
+        model = User
+        skip_postgeneration_save = True
+
+    email = factory.Sequence(lambda n: f"shopuser{n}@example.com")
+    password = factory.PostGenerationMethodCall("set_password", "TestPass123!")
 
 
 class CategoryFactory(DjangoModelFactory):

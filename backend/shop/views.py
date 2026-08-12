@@ -2,7 +2,7 @@ from django.db.models import Avg, Count
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, generics, status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .filters import ProductFilter
@@ -122,11 +122,15 @@ class ProductReviewCreateView(generics.CreateAPIView):
     `reviews_count` fields are recalculated from the full review set so
     that all aggregated values stay consistent without a separate cron job.
 
-    Permissions: AllowAny — the Review model uses a free-text `name` field
-    rather than a FK to User, so no authentication is required.
+    Permissions: IsAuthenticated — reviews are now tied to a real `user`
+    FK (Task 1.3.1.1) rather than a free-text `name` field, so anonymous
+    submission is no longer allowed. The reviewer's display name is
+    derived server-side from their profile rather than accepted as
+    client input, and the review's `user` is always the requesting
+    account — never client-controlled.
     """
 
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     serializer_class = ReviewCreateSerializer
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -152,10 +156,21 @@ class ProductReviewCreateView(generics.CreateAPIView):
 
     # ── DRF hooks ─────────────────────────────────────────────────────────────
 
+    def get_serializer_context(self):
+        """
+        Make the target product available to the serializer at validation
+        time (not just at save() time via perform_create) so
+        ReviewCreateSerializer.validate() can check for an existing
+        review by this user on this product before attempting to save.
+        """
+        context = super().get_serializer_context()
+        context["product"] = self._get_product()
+        return context
+
     def perform_create(self, serializer) -> None:
-        """Attach the product FK before saving, then update aggregate fields."""
+        """Attach the product FK and authenticated user, then update aggregate fields."""
         product = self._get_product()
-        serializer.save(product=product)
+        serializer.save(product=product, user=self.request.user)
         self._refresh_product_stats(product)
 
     def create(self, request, *args, **kwargs) -> Response:

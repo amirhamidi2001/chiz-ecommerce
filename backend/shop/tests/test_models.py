@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.utils.text import slugify
 from shop.models import Brand, Category, Color, Product, ProductColor, Review
 from shop.tests.factories import (
@@ -255,3 +256,60 @@ class TestReviewModel:
         # the field itself is a normal, settable boolean.
         review = ReviewFactory(is_verified_purchase=True)
         assert review.is_verified_purchase is True
+
+    # ── unique_together (product, user) — Task 1.3.1.4 ──────────────────────
+
+    def test_duplicate_product_user_review_raises_integrity_error(self, db):
+        """
+        DB-level enforcement: the unique_together constraint itself,
+        independent of the serializer-layer check (which is covered
+        separately in shop/tests/test_views.py). This is the last line
+        of defense against duplicate reviews if the application layer is
+        ever bypassed (e.g. a management command, a future internal
+        endpoint, a bug in the serializer check).
+        """
+        User = get_user_model()
+        user = User.objects.create_user(
+            email="dupe-checker@example.com", password="TestPass123!"
+        )
+        product = ProductFactory()
+        ReviewFactory(product=product, user=user)
+
+        # Wrapped in its own atomic() block: on Postgres, an IntegrityError
+        # aborts the enclosing transaction until a ROLLBACK — nesting this
+        # in its own savepoint keeps the rest of the test (and pytest-django's
+        # transaction-per-test teardown) usable afterward.
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                ReviewFactory(product=product, user=user)
+
+    def test_multiple_null_user_reviews_on_same_product_do_not_conflict(self, db):
+        """
+        Confirms the documented NULL-handling caveat in Review.Meta: on
+        this project's PostgreSQL backend, a UNIQUE constraint treats
+        NULL as distinct from every other NULL, so multiple historical
+        `user=None` reviews on the same product remain valid and do NOT
+        trip the (product, user) uniqueness constraint.
+        """
+        product = ProductFactory()
+        review_one = ReviewFactory(product=product, user=None, name="Anon One")
+        review_two = ReviewFactory(product=product, user=None, name="Anon Two")
+
+        assert review_one.pk is not None
+        assert review_two.pk is not None
+        assert (
+            Review.objects.filter(product=product, user__isnull=True).count() == 2
+        )
+
+    def test_same_user_can_review_different_products(self, db):
+        User = get_user_model()
+        user = User.objects.create_user(
+            email="multi-product-reviewer@example.com", password="TestPass123!"
+        )
+        product_a = ProductFactory()
+        product_b = ProductFactory()
+
+        ReviewFactory(product=product_a, user=user)
+        ReviewFactory(product=product_b, user=user)
+
+        assert Review.objects.filter(user=user).count() == 2

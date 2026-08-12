@@ -1,6 +1,8 @@
 import pytest
 from django.urls import reverse
 from rest_framework import status
+from rest_framework.test import APIClient
+from shop.models import Review
 from shop.tests.factories import (
     BrandFactory,
     CategoryFactory,
@@ -9,6 +11,7 @@ from shop.tests.factories import (
     ProductFactory,
     ProductImageFactory,
     ReviewFactory,
+    UserFactory,
 )
 
 
@@ -349,3 +352,231 @@ class TestRelatedProductsView:
         ProductFactory.create_batch(5, category=category, brand=brand)
         res = api_client.get(url("product-related", slug=product.slug))
         assert isinstance(res.data, list)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /api/products/<slug>/reviews/   —   Task 1.3.1.3 security fix
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Reviews used to be postable by anyone (AllowAny) under any free-text
+# `name`. They now require authentication, and the review's `user` +
+# display `name` are always derived server-side from the authenticated
+# account — never trusted from client input.
+@pytest.mark.django_db
+class TestProductReviewCreateView:
+
+    VALID_PAYLOAD = {
+        "rating": 5,
+        "headline": "Great product",
+        "comment": "Exactly what I needed, works perfectly.",
+    }
+
+    def test_unauthenticated_post_returns_401(self, api_client, product):
+        res = api_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
+        assert product.reviews.count() == 0
+
+    def test_authenticated_post_succeeds_and_sets_user(
+        self, auth_client, user, product
+    ):
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+
+        review = product.reviews.get()
+        assert review.user_id == user.id
+        assert review.rating == 5
+        assert review.comment == self.VALID_PAYLOAD["comment"]
+
+    def test_authenticated_post_ignores_client_submitted_name(
+        self, auth_client, user, product
+    ):
+        """
+        Security regression guard (same "don't trust client input" pattern
+        as Task 1.2.1.2's discount fix): even if a client forges a
+        `name` value in the payload — e.g. impersonating someone else, or
+        injecting something malicious — the server must completely ignore
+        it. The stored `name` always comes from the authenticated user's
+        own profile, never from the request body.
+        """
+        user.profile.first_name = "Real"
+        user.profile.last_name = "Reviewer"
+        user.profile.save()
+
+        forged_payload = {**self.VALID_PAYLOAD, "name": "Totally Fake Person"}
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            forged_payload,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+
+        review = product.reviews.get()
+        assert review.user_id == user.id
+        assert review.name == "Real Reviewer"
+        assert review.name != "Totally Fake Person"
+        assert res.data["name"] == "Real Reviewer"
+
+    def test_review_name_uses_profile_full_name(self, auth_client, user, product):
+        user.profile.first_name = "Ada"
+        user.profile.last_name = "Lovelace"
+        user.profile.save()
+
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+        assert product.reviews.get().name == "Ada Lovelace"
+
+    def test_review_name_falls_back_to_email_when_profile_has_no_name(
+        self, auth_client, user, product
+    ):
+        # UserFactory-created users have a blank profile (first/last name
+        # both "") until they fill it in — must not surface the internal
+        # "new user" placeholder as a public review author name.
+        assert user.profile.first_name == ""
+        assert user.profile.last_name == ""
+
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+
+        review = product.reviews.get()
+        assert review.name == user.email
+        assert review.name != "new user"
+
+    def test_response_includes_user_id_not_full_user_object(
+        self, auth_client, user, product
+    ):
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.data["user_id"] == user.id
+        assert "user" not in res.data
+        assert "email" not in res.data
+
+    def test_product_stats_still_update_after_authenticated_review(
+        self, auth_client, product
+    ):
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+        product.refresh_from_db()
+        assert product.reviews_count == 1
+        assert product.rating == 5.0
+
+    # ── one review per user per product (Task 1.3.1.4) ──────────────────────
+
+    def test_first_review_for_product_succeeds(self, auth_client, product):
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+        assert product.reviews.count() == 1
+
+    def test_second_review_same_product_same_user_returns_400(
+        self, auth_client, user, product
+    ):
+        first = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert first.status_code == status.HTTP_201_CREATED
+
+        second = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            {**self.VALID_PAYLOAD, "comment": "A different comment entirely."},
+            format="json",
+        )
+
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        # DRF wraps validate()-level dict errors as lists of ErrorDetail
+        assert str(second.data["detail"][0]) == "You have already reviewed this product."
+        # Still exactly one review — the duplicate attempt created nothing.
+        assert product.reviews.filter(user=user).count() == 1
+        assert Review.objects.filter(product=product, user=user).count() == 1
+
+    def test_same_user_can_review_a_different_product(self, auth_client, user):
+        product_a = ProductFactory()
+        product_b = ProductFactory()
+
+        res_a = auth_client.post(
+            url("product-review-create", slug=product_a.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        res_b = auth_client.post(
+            url("product-review-create", slug=product_b.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+
+        assert res_a.status_code == status.HTTP_201_CREATED
+        assert res_b.status_code == status.HTTP_201_CREATED
+        assert Review.objects.filter(user=user).count() == 2
+
+    def test_two_different_users_can_review_the_same_product(self, product):
+        user_a = UserFactory()
+        user_b = UserFactory()
+        client_a = APIClient()
+        client_a.force_authenticate(user=user_a)
+        client_b = APIClient()
+        client_b.force_authenticate(user=user_b)
+
+        res_a = client_a.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        res_b = client_b.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+
+        assert res_a.status_code == status.HTTP_201_CREATED
+        assert res_b.status_code == status.HTTP_201_CREATED
+        assert product.reviews.count() == 2
+        assert set(product.reviews.values_list("user_id", flat=True)) == {
+            user_a.id,
+            user_b.id,
+        }
+
+    def test_duplicate_review_raises_clean_400_not_500_integrity_error(
+        self, auth_client, user, product
+    ):
+        """
+        The application-layer check in ReviewCreateSerializer.validate()
+        must catch the duplicate before Django ever attempts the INSERT,
+        so a race-free duplicate attempt gets a clean 400 rather than an
+        unhandled IntegrityError bubbling up as a 500.
+        """
+        ReviewFactory(product=product, user=user)
+
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "detail" in res.data

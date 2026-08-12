@@ -1,7 +1,7 @@
 // src/pages/ProductDetails.jsx
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { getProductDetails, getRelatedProducts, createReview, parseErrors } from '../services/api';
+import { getProductDetails, getRelatedProducts, createReview, parseErrors, isAuthenticated } from '../services/api';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 
@@ -127,7 +127,7 @@ const StarPicker = ({ value, onChange, error }) => (
  *   productSlug  {string}    – slug of the product being reviewed
  *   onSuccess    {function}  – called with the new review object on success
  */
-const FORM_INITIAL = { name: '', rating: 0, headline: '', comment: '' };
+const FORM_INITIAL = { rating: 0, headline: '', comment: '' };
 
 const AddReviewForm = ({ productSlug, onSuccess }) => {
   const [form, setForm] = useState(FORM_INITIAL);
@@ -155,7 +155,6 @@ const AddReviewForm = ({ productSlug, onSuccess }) => {
   // ── client-side validation ─────────────────────────────────────────────────
   const validate = () => {
     const errs = {};
-    if (!form.name.trim()) errs.name = 'Your name is required.';
     if (!form.rating) errs.rating = 'Please select a star rating.';
     if (!form.comment.trim()) errs.comment = 'A review comment is required.';
     return errs;
@@ -176,7 +175,6 @@ const AddReviewForm = ({ productSlug, onSuccess }) => {
 
     try {
       const { data: newReview } = await createReview(productSlug, {
-        name: form.name.trim(),
         rating: form.rating,
         headline: form.headline.trim(),
         comment: form.comment.trim(),
@@ -192,6 +190,31 @@ const AddReviewForm = ({ productSlug, onSuccess }) => {
       setSubmitting(false);
     }
   };
+
+  // ── logged-out state ───────────────────────────────────────────────────────
+  // Reviews now require an authenticated account (they're tied to a real
+  // user, not a free-text name) — show an inline prompt instead of a form
+  // that would 401 on submit. Full auth-gating UX (e.g. redirecting back to
+  // this exact product page after login) is tracked as its own follow-up
+  // task; this is the minimal fix so logged-out visitors get a clear,
+  // immediate explanation instead of a confusing failed submission.
+  if (!isAuthenticated()) {
+    return (
+      <div className="bg-gray-50 border border-gray-100 rounded-2xl p-6 md:p-8 mb-10 text-center">
+        <i className="bi bi-pencil-square text-teal-600 text-2xl mb-2 block" />
+        <h4 className="font-bold text-gray-800 mb-1">Want to leave a review?</h4>
+        <p className="text-sm text-gray-500 mb-4">
+          Please log in to your account to write a review.
+        </p>
+        <Link
+          to="/login"
+          className="inline-block bg-teal-600 text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-teal-700 active:bg-teal-800 transition text-sm"
+        >
+          Log In
+        </Link>
+      </div>
+    );
+  }
 
   // ── success state ──────────────────────────────────────────────────────────
   if (submitted) {
@@ -223,29 +246,6 @@ const AddReviewForm = ({ productSlug, onSuccess }) => {
       </h3>
 
       <form onSubmit={handleSubmit} noValidate className="space-y-5">
-        {/* Name */}
-        <div>
-          <label htmlFor="review-name" className="block text-sm font-medium text-gray-700 mb-1">
-            Your Name <span className="text-red-500">*</span>
-          </label>
-          <input
-            id="review-name"
-            type="text"
-            name="name"
-            value={form.name}
-            onChange={handleChange}
-            placeholder="e.g. Jane Smith"
-            autoComplete="name"
-            className={`w-full border rounded-lg px-4 py-2.5 text-sm outline-none transition focus:ring-2 focus:ring-teal-400 focus:border-teal-400 ${fieldErrors.name
-              ? 'border-red-400 bg-red-50'
-              : 'border-gray-300 bg-white hover:border-gray-400'
-              }`}
-          />
-          {fieldErrors.name && (
-            <p className="text-red-500 text-xs mt-1">{fieldErrors.name}</p>
-          )}
-        </div>
-
         {/* Star Rating */}
         <StarPicker
           value={form.rating}
