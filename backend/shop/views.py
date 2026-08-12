@@ -1,6 +1,7 @@
 from django.db.models import Avg, Count
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
+from order.models import Order, OrderItem
 from rest_framework import filters, generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -154,6 +155,21 @@ class ProductReviewCreateView(generics.CreateAPIView):
         product.reviews_count = stats["total"] or 0
         product.save(update_fields=["rating", "reviews_count"])
 
+    def _is_verified_purchase(self, user, product: Product) -> bool:
+        """
+        True iff `user` has a DELIVERED order containing `product`.
+
+        Deliberately requires DELIVERED specifically (not merely placed,
+        pending, or processing) — a "verified purchase" badge should mean
+        the customer genuinely received the item, not just that they
+        checked out.
+        """
+        return OrderItem.objects.filter(
+            order__user=user,
+            order__status=Order.Status.DELIVERED,
+            product=product,
+        ).exists()
+
     # ── DRF hooks ─────────────────────────────────────────────────────────────
 
     def get_serializer_context(self):
@@ -168,9 +184,16 @@ class ProductReviewCreateView(generics.CreateAPIView):
         return context
 
     def perform_create(self, serializer) -> None:
-        """Attach the product FK and authenticated user, then update aggregate fields."""
+        """Attach the product FK, authenticated user, and verified-purchase
+        status, then update aggregate fields."""
         product = self._get_product()
-        serializer.save(product=product, user=self.request.user)
+        serializer.save(
+            product=product,
+            user=self.request.user,
+            is_verified_purchase=self._is_verified_purchase(
+                self.request.user, product
+            ),
+        )
         self._refresh_product_stats(product)
 
     def create(self, request, *args, **kwargs) -> Response:

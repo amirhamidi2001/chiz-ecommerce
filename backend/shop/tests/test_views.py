@@ -1,5 +1,6 @@
 import pytest
 from django.urls import reverse
+from order.models import Order, OrderItem
 from rest_framework import status
 from rest_framework.test import APIClient
 from shop.models import Review
@@ -18,6 +19,42 @@ from shop.tests.factories import (
 # ─── helpers ────────────────────────────────────────────────────────────────
 def url(name, **kwargs):
     return reverse(name, kwargs=kwargs)
+
+
+def make_order_with_item(
+    user, product, order_status=Order.Status.DELIVERED, quantity=1
+):
+    """
+    Create a minimal, valid Order + OrderItem for *user* containing
+    *product*, at the given order status. Used to exercise
+    ProductReviewCreateView._is_verified_purchase() without going through
+    the full checkout flow (that's order app's own test surface).
+    """
+    order = Order.objects.create(
+        user=user,
+        status=order_status,
+        first_name="Test",
+        last_name="Buyer",
+        email=user.email,
+        phone="555-0100",
+        shipping_address="1 Test St",
+        shipping_city="Testville",
+        shipping_state="TS",
+        shipping_zip="00000",
+        shipping_country="US",
+        subtotal=product.price * quantity,
+        tax=0,
+        total=product.price * quantity,
+    )
+    OrderItem.objects.create(
+        order=order,
+        product=product,
+        product_name=product.name,
+        product_slug=product.slug,
+        unit_price=product.price,
+        quantity=quantity,
+    )
+    return order
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -580,3 +617,76 @@ class TestProductReviewCreateView:
         )
         assert res.status_code == status.HTTP_400_BAD_REQUEST
         assert "detail" in res.data
+
+    # ── is_verified_purchase computation (Task 1.3.1.5) ──────────────────────
+
+    def test_delivered_order_for_this_product_marks_review_verified(
+        self, auth_client, user, product
+    ):
+        make_order_with_item(user, product, order_status=Order.Status.DELIVERED)
+
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+
+        review = product.reviews.get()
+        assert review.is_verified_purchase is True
+        assert res.data["is_verified_purchase"] is True
+
+    @pytest.mark.parametrize(
+        "not_yet_delivered_status",
+        [Order.Status.PENDING, Order.Status.PROCESSING, Order.Status.SHIPPED],
+    )
+    def test_undelivered_order_does_not_mark_review_verified(
+        self, auth_client, user, product, not_yet_delivered_status
+    ):
+        make_order_with_item(
+            user, product, order_status=not_yet_delivered_status
+        )
+
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+
+        review = product.reviews.get()
+        assert review.is_verified_purchase is False
+
+    def test_no_order_history_leaves_review_unverified(self, auth_client, product):
+        # user (from the `user` fixture, via auth_client) has no orders at all
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+        review = product.reviews.get()
+        assert review.is_verified_purchase is False
+
+    def test_delivered_order_for_a_different_product_does_not_verify_this_review(
+        self, auth_client, user, product
+    ):
+        """
+        Proves the check is scoped to THIS product, not "has any
+        delivered order ever" — a delivered purchase of some other item
+        must not verify a review left on an unrelated product.
+        """
+        other_product = ProductFactory()
+        make_order_with_item(
+            user, other_product, order_status=Order.Status.DELIVERED
+        )
+
+        res = auth_client.post(
+            url("product-review-create", slug=product.slug),
+            self.VALID_PAYLOAD,
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+
+        review = product.reviews.get()
+        assert review.is_verified_purchase is False
