@@ -548,7 +548,9 @@ class TestProductReviewCreateView:
 
         assert second.status_code == status.HTTP_400_BAD_REQUEST
         # DRF wraps validate()-level dict errors as lists of ErrorDetail
-        assert str(second.data["detail"][0]) == "You have already reviewed this product."
+        assert (
+            str(second.data["detail"][0]) == "You have already reviewed this product."
+        )
         # Still exactly one review — the duplicate attempt created nothing.
         assert product.reviews.filter(user=user).count() == 1
         assert Review.objects.filter(product=product, user=user).count() == 1
@@ -643,9 +645,7 @@ class TestProductReviewCreateView:
     def test_undelivered_order_does_not_mark_review_verified(
         self, auth_client, user, product, not_yet_delivered_status
     ):
-        make_order_with_item(
-            user, product, order_status=not_yet_delivered_status
-        )
+        make_order_with_item(user, product, order_status=not_yet_delivered_status)
 
         res = auth_client.post(
             url("product-review-create", slug=product.slug),
@@ -677,9 +677,7 @@ class TestProductReviewCreateView:
         must not verify a review left on an unrelated product.
         """
         other_product = ProductFactory()
-        make_order_with_item(
-            user, other_product, order_status=Order.Status.DELIVERED
-        )
+        make_order_with_item(user, other_product, order_status=Order.Status.DELIVERED)
 
         res = auth_client.post(
             url("product-review-create", slug=product.slug),

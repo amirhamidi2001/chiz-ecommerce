@@ -1,6 +1,7 @@
 import pytest
 from accounts.serializers import (
     ChangePasswordSerializer,
+    CurrentUserSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     ProfileSerializer,
@@ -312,3 +313,23 @@ class TestPasswordResetConfirmSerializer:
         )
         assert not s.is_valid()
         assert "confirm_password" in s.errors
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CurrentUserSerializer
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestCurrentUserSerializer:
+
+    def test_phone_number_is_present_and_read_only(self, user):
+        user.phone_number = "+15559876543"
+        user.save()
+
+        data = CurrentUserSerializer(user).data
+        assert data["phone_number"] == "+15559876543"
+        assert "phone_number" in CurrentUserSerializer.Meta.read_only_fields
+
+    def test_phone_number_is_null_when_not_set(self, user):
+        assert user.phone_number is None
+        data = CurrentUserSerializer(user).data
+        assert data["phone_number"] is None

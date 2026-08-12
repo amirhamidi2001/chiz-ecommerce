@@ -34,6 +34,37 @@ class TestUserModel:
         with pytest.raises(IntegrityError):
             User.objects.create_user(email=user.email, password="Other1!")
 
+    # ── phone_number (Task 2.1.1.1) ──────────────────────────────────────────
+
+    def test_two_users_can_both_have_phone_number_none(self):
+        """
+        Nullable + unique must not conflict on NULLs: existing
+        email/password users have no phone number yet, so multiple users
+        with phone_number=None must be perfectly valid.
+        """
+        u1 = User.objects.create_user(
+            email="nophone1@example.com", password="Pass1!", phone_number=None
+        )
+        u2 = User.objects.create_user(
+            email="nophone2@example.com", password="Pass1!", phone_number=None
+        )
+        assert u1.phone_number is None
+        assert u2.phone_number is None
+        assert User.objects.filter(phone_number__isnull=True).count() >= 2
+
+    def test_duplicate_phone_number_raises_integrity_error(self):
+        User.objects.create_user(
+            email="phoneowner@example.com",
+            password="Pass1!",
+            phone_number="+15551234567",
+        )
+        with pytest.raises(IntegrityError):
+            User.objects.create_user(
+                email="phonestealer@example.com",
+                password="Pass1!",
+                phone_number="+15551234567",
+            )
+
     def test_str_returns_email(self, user):
         assert str(user) == user.email
 

@@ -7,7 +7,6 @@ from shop.models import Product
 from .models import Order, OrderItem
 from .services.pricing import PricingError, calculate_order_totals
 
-
 # ─── Read serializers ─────────────────────────────────────────────────────────
 
 

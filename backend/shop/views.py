@@ -190,9 +190,7 @@ class ProductReviewCreateView(generics.CreateAPIView):
         serializer.save(
             product=product,
             user=self.request.user,
-            is_verified_purchase=self._is_verified_purchase(
-                self.request.user, product
-            ),
+            is_verified_purchase=self._is_verified_purchase(self.request.user, product),
         )
         self._refresh_product_stats(product)
 

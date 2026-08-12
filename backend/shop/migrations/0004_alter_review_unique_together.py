@@ -7,13 +7,13 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('shop', '0003_review_is_verified_purchase'),
+        ("shop", "0003_review_is_verified_purchase"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AlterUniqueTogether(
-            name='review',
-            unique_together={('product', 'user')},
+            name="review",
+            unique_together={("product", "user")},
         ),
     ]

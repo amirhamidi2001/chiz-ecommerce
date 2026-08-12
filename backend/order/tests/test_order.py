@@ -436,7 +436,9 @@ class OrderCreateSerializerTests(TestCase):
                 raise RuntimeError("simulated mid-loop failure")
             return real_create(*args, **kwargs)
 
-        with patch("order.serializers.OrderItem.objects.create", side_effect=flaky_create):
+        with patch(
+            "order.serializers.OrderItem.objects.create", side_effect=flaky_create
+        ):
             with self.assertRaises(RuntimeError):
                 s.save()
 
@@ -535,9 +537,7 @@ class OrderCreateSerializerTests(TestCase):
             name="Scarce Item", slug="scarce-item", price="40.00", stock=1
         )
         Cart.objects.filter(user=self.user).delete()
-        make_cart_with_items(
-            self.user, [{"product": low_stock_product, "quantity": 3}]
-        )
+        make_cart_with_items(self.user, [{"product": low_stock_product, "quantity": 3}])
 
         orders_before = Order.objects.count()
         items_before = OrderItem.objects.count()

@@ -6,13 +6,13 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('shop', '0002_review_user'),
+        ("shop", "0002_review_user"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='review',
-            name='is_verified_purchase',
+            model_name="review",
+            name="is_verified_purchase",
             field=models.BooleanField(default=False),
         ),
     ]

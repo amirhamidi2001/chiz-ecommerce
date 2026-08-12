@@ -109,6 +109,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "email",
+            "phone_number",
             "type",
             "is_verified",
             "is_active",

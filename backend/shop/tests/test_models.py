@@ -297,9 +297,7 @@ class TestReviewModel:
 
         assert review_one.pk is not None
         assert review_two.pk is not None
-        assert (
-            Review.objects.filter(product=product, user__isnull=True).count() == 2
-        )
+        assert Review.objects.filter(product=product, user__isnull=True).count() == 2
 
     def test_same_user_can_review_different_products(self, db):
         User = get_user_model()
