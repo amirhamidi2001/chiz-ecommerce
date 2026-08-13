@@ -1,6 +1,8 @@
 import pytest
 from accounts.models import Profile, UserType
+from accounts.validators import normalize_iranian_phone
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 
 User = get_user_model()
@@ -56,14 +58,92 @@ class TestUserModel:
         User.objects.create_user(
             email="phoneowner@example.com",
             password="Pass1!",
-            phone_number="+15551234567",
+            phone_number="09123456789",
         )
         with pytest.raises(IntegrityError):
             User.objects.create_user(
                 email="phonestealer@example.com",
                 password="Pass1!",
-                phone_number="+15551234567",
+                phone_number="09123456789",
             )
+
+    # ── Iranian phone validation + normalization (Task 2.1.1.2) ─────────────
+
+    def test_normalize_iranian_phone_accepts_all_three_formats_equally(self):
+        canonical = "09123456789"
+        assert normalize_iranian_phone("+989123456789") == canonical
+        assert normalize_iranian_phone("00989123456789") == canonical
+        assert normalize_iranian_phone("09123456789") == canonical
+
+    @pytest.mark.parametrize(
+        "invalid_phone",
+        [
+            "12345",  # too short / not a phone at all
+            "+15551234567",  # US number
+            "02112345678",  # Iranian landline (area code, not mobile)
+            "0812345678",  # starts with 08, not 09
+            "091234567890",  # one digit too many
+        ],
+    )
+    def test_full_clean_rejects_invalid_phone_formats(self, invalid_phone):
+        """
+        Tests the validator attached via `validators=[iranian_phone_regex]`
+        on the model field — this is only enforced when full_clean() is
+        explicitly called (Django does not run field validators on a
+        plain .save()).
+        """
+        user = User(email="cleancheck@example.com", phone_number=invalid_phone)
+        user.set_password("Pass1!")
+        with pytest.raises(ValidationError) as exc_info:
+            user.full_clean()
+        assert "phone_number" in exc_info.value.message_dict
+
+    @pytest.mark.parametrize(
+        "invalid_phone",
+        [
+            "12345",
+            "+15551234567",
+            "02112345678",
+        ],
+    )
+    def test_save_rejects_invalid_phone_formats(self, invalid_phone):
+        """
+        Tests the REAL enforcement point for the actual API path: plain
+        .save() (which is what DRF serializers call, not full_clean())
+        goes through User.save()'s normalization step, which raises
+        ValueError for anything normalize_iranian_phone() can't parse —
+        so invalid data never reaches the database via this path either,
+        without relying on full_clean() ever being called.
+        """
+        with pytest.raises(ValueError):
+            User.objects.create_user(
+                email=f"savecheck-{invalid_phone}@example.com",
+                password="Pass1!",
+                phone_number=invalid_phone,
+            )
+
+    @pytest.mark.parametrize(
+        "input_format",
+        ["+989123456789", "00989123456789", "09123456789"],
+    )
+    def test_valid_phone_in_any_format_persists_as_same_canonical_value(
+        self, input_format
+    ):
+        user = User.objects.create_user(
+            email=f"canon-{input_format}@example.com",
+            password="Pass1!",
+            phone_number=input_format,
+        )
+        user.refresh_from_db()
+        assert user.phone_number == "09123456789"
+
+    def test_phone_number_none_is_left_alone_by_save(self):
+        # save()'s normalization only runs `if self.phone_number:` — must
+        # not choke on the common case of no phone number at all.
+        user = User.objects.create_user(
+            email="stillnophone@example.com", password="Pass1!"
+        )
+        assert user.phone_number is None
 
     def test_str_returns_email(self, user):
         assert str(user) == user.email

@@ -322,11 +322,11 @@ class TestPasswordResetConfirmSerializer:
 class TestCurrentUserSerializer:
 
     def test_phone_number_is_present_and_read_only(self, user):
-        user.phone_number = "+15559876543"
+        user.phone_number = "+989123456789"
         user.save()
 
         data = CurrentUserSerializer(user).data
-        assert data["phone_number"] == "+15559876543"
+        assert data["phone_number"] == "09123456789"
         assert "phone_number" in CurrentUserSerializer.Meta.read_only_fields
 
     def test_phone_number_is_null_when_not_set(self, user):

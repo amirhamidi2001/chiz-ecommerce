@@ -8,6 +8,8 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
+from .validators import iranian_phone_regex, normalize_iranian_phone
+
 
 class UserType(models.IntegerChoices):
     CUSTOMER = 1, _("customer")
@@ -44,7 +46,12 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(_("email address"), unique=True)
     phone_number = models.CharField(
-        max_length=15, unique=True, null=True, blank=True, db_index=True
+        max_length=15,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        validators=[iranian_phone_regex],
     )
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
@@ -58,6 +65,17 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = []
 
     objects = UserManager()
+
+    def save(self, *args, **kwargs):
+        # Normalize before persisting so a single canonical format
+        # ("09XXXXXXXXX") is always what's stored, regardless of which
+        # of the three accepted input formats the caller supplied. This
+        # runs on every plain .save() call (including the path DRF
+        # serializers use), unlike validators=[...] above which are
+        # only enforced when full_clean() is explicitly called.
+        if self.phone_number:
+            self.phone_number = normalize_iranian_phone(self.phone_number)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.email
