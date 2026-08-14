@@ -89,9 +89,7 @@ class TestBackfillUserPhoneFromProfile:
         user.refresh_from_db()
         assert user.phone_number is None
 
-    def test_duplicate_profile_phone_across_two_users_only_sets_one(
-        self, create_user
-    ):
+    def test_duplicate_profile_phone_across_two_users_only_sets_one(self, create_user):
         """
         Two Profiles with the same (dirty legacy) phone number string:
         the migration must not crash on the unique-constraint conflict,
@@ -115,9 +113,7 @@ class TestBackfillUserPhoneFromProfile:
         # Exactly one got the number, the other stayed None.
         assert results == {"09121112222", None}
 
-    def test_migration_does_not_overwrite_existing_user_phone_number(
-        self, create_user
-    ):
+    def test_migration_does_not_overwrite_existing_user_phone_number(self, create_user):
         """
         Defensive: if a User somehow already has a phone_number set
         (e.g. re-running the migration, or set via some other path),

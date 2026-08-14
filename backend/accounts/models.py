@@ -114,3 +114,38 @@ class Profile(models.Model):
 def create_profile(sender, instance, created, **kwargs):
     if created:
         Profile.objects.create(user=instance)
+
+
+class OTPCode(models.Model):
+    """
+    A one-time-code request record for phone-based login/registration/
+    password reset. Schema only in this task — code generation, hashing,
+    and verification logic land in Tasks 2.1.2.2 and 2.1.2.3.
+
+    Deliberately NOT a FK to User: an OTP request can happen before any
+    User exists yet (first-time registration via phone), so this model
+    must be able to stand alone.
+    """
+
+    class Purpose(models.TextChoices):
+        LOGIN = "login", "Login"
+        REGISTER = "register", "Register"
+        RESET = "reset", "Password Reset"
+
+    phone_number = models.CharField(max_length=15, db_index=True)
+    purpose = models.CharField(max_length=20, choices=Purpose.choices)
+    # NEVER store the raw 6-digit code — only a hash of it (Task 2.1.2.2).
+    code_hash = models.CharField(max_length=128)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["phone_number", "purpose", "is_used"]),
+        ]
+
+    def __str__(self):
+        status = "used" if self.is_used else "active"
+        return f"OTP for {self.phone_number} ({self.purpose}) - {status}"

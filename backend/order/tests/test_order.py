@@ -489,7 +489,6 @@ class OrderCreateSerializerTests(TestCase):
         UPDATE isn't part of the compiled SQL the same way.
         """
         from django.db import connection
-
         from shop.models import Product
 
         if connection.vendor == "sqlite":

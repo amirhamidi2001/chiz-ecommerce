@@ -1,9 +1,10 @@
 import pytest
-from accounts.models import Profile, UserType
+from accounts.models import OTPCode, Profile, UserType
 from accounts.validators import normalize_iranian_phone
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -230,3 +231,61 @@ class TestProfileModel:
         profile_pk = user.profile.pk
         user.delete()
         assert not Profile.objects.filter(pk=profile_pk).exists()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OTPCode
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestOTPCodeModel:
+
+    def test_can_be_created_with_all_required_fields(self):
+        otp = OTPCode.objects.create(
+            phone_number="09123456789",
+            purpose=OTPCode.Purpose.LOGIN,
+            code_hash="a" * 64,  # placeholder hash — real hashing is Task 2.1.2.2
+            expires_at=timezone.now() + timezone.timedelta(minutes=5),
+        )
+        assert otp.pk is not None
+        assert otp.phone_number == "09123456789"
+        assert otp.purpose == "login"
+        assert otp.attempts == 0
+        assert otp.is_used is False
+        assert otp.created_at is not None
+
+    def test_does_not_require_a_user(self):
+        # OTP requests can happen before any User exists (first-time
+        # phone registration) — this must not be a FK to User.
+        otp = OTPCode.objects.create(
+            phone_number="09121234567",
+            purpose=OTPCode.Purpose.REGISTER,
+            code_hash="b" * 64,
+            expires_at=timezone.now() + timezone.timedelta(minutes=5),
+        )
+        assert not hasattr(otp, "user")
+        assert OTPCode.objects.filter(pk=otp.pk).exists()
+
+    def test_str_representation_active(self):
+        otp = OTPCode.objects.create(
+            phone_number="09129876543",
+            purpose=OTPCode.Purpose.RESET,
+            code_hash="c" * 64,
+            expires_at=timezone.now() + timezone.timedelta(minutes=5),
+            is_used=False,
+        )
+        assert str(otp) == "OTP for 09129876543 (reset) - active"
+
+    def test_str_representation_used(self):
+        otp = OTPCode.objects.create(
+            phone_number="09129876543",
+            purpose=OTPCode.Purpose.LOGIN,
+            code_hash="d" * 64,
+            expires_at=timezone.now() + timezone.timedelta(minutes=5),
+            is_used=True,
+        )
+        assert str(otp) == "OTP for 09129876543 (login) - used"
+
+    def test_purpose_choices(self):
+        assert OTPCode.Purpose.LOGIN == "login"
+        assert OTPCode.Purpose.REGISTER == "register"
+        assert OTPCode.Purpose.RESET == "reset"

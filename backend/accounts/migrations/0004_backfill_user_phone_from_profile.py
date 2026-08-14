@@ -96,7 +96,7 @@ def backfill_user_phone_from_profile(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts', '0003_alter_user_phone_number'),
+        ("accounts", "0003_alter_user_phone_number"),
     ]
 
     operations = [

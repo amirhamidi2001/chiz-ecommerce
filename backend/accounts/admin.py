@@ -4,7 +4,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
-from .models import Profile, User
+from .models import OTPCode, Profile, User
 
 
 @admin.register(User)
@@ -93,3 +93,48 @@ class ProfileAdmin(admin.ModelAdmin):
     list_filter = ("order_updates", "promotions", "newsletter")
     readonly_fields = ("created_date", "updated_date")
     raw_id_fields = ("user",)
+
+
+@admin.register(OTPCode)
+class OTPCodeAdmin(admin.ModelAdmin):
+    """
+    Read-only in the admin: staff can view OTP request volume/history for
+    support and abuse investigation, but must never see `code_hash` — a
+    hash of the one-time code — even as a read-only value. It's excluded
+    from both the list and detail views entirely, and no add/change/
+    delete is permitted through this interface (view-only audit trail).
+    """
+
+    list_display = (
+        "phone_number",
+        "purpose",
+        "is_used",
+        "attempts",
+        "expires_at",
+        "created_at",
+    )
+    list_filter = ("purpose", "is_used")
+    search_fields = ("phone_number",)
+    ordering = ("-created_at",)
+
+    # code_hash is deliberately never included here — not in list_display,
+    # not in readonly_fields, and explicitly excluded so it can't leak
+    # into the auto-generated detail view either.
+    exclude = ("code_hash",)
+    readonly_fields = (
+        "phone_number",
+        "purpose",
+        "expires_at",
+        "attempts",
+        "is_used",
+        "created_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
