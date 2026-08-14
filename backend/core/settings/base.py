@@ -179,3 +179,10 @@ CHANNEL_LAYERS = {
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 # Override in environment-specific files as needed.
 CORS_ALLOW_CREDENTIALS = True
+
+
+# ─── OTP (phone-based login/registration) ──────────────────────────────────────
+OTP_CODE_TTL_SECONDS = config("OTP_CODE_TTL_SECONDS", default=120, cast=int)
+OTP_RESEND_COOLDOWN_SECONDS = config(
+    "OTP_RESEND_COOLDOWN_SECONDS", default=60, cast=int
+)
