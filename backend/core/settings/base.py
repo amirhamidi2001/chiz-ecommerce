@@ -197,3 +197,13 @@ OTP_RESEND_COOLDOWN_SECONDS = config(
 OTP_MAX_VERIFICATION_ATTEMPTS = config(
     "OTP_MAX_VERIFICATION_ATTEMPTS", default=5, cast=int
 )
+
+
+# ─── SMS provider (Feature 2.2.1) ───────────────────────────────────────────────
+# Dotted import path to the SMSProvider implementation currently in use.
+# Swappable via settings/env with zero code changes — see
+# accounts/sms/base.py:get_sms_provider(). Defaults to the console/dev
+# backend (Task 2.2.1.2 implements accounts.sms.console.ConsoleSMSProvider).
+SMS_PROVIDER_CLASS = config(
+    "SMS_PROVIDER_CLASS", default="accounts.sms.console.ConsoleSMSProvider"
+)
