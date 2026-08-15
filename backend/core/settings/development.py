@@ -33,6 +33,11 @@ CORS_ALLOWED_ORIGINS = [
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 
+# ─── SMS — print/log to console instead of sending (dev/CI only) ──────────────
+# See accounts/sms/console.py — must never be used in production.
+SMS_PROVIDER_CLASS = "accounts.sms.console.ConsoleSMSProvider"
+
+
 # ─── Frontend URL (used in email templates etc.) ──────────────────────────────
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 
