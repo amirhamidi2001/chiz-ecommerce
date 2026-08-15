@@ -139,6 +139,14 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "shop.pagination.StandardResultsPagination",
     "PAGE_SIZE": 12,
+    "DEFAULT_THROTTLE_RATES": {
+        # 3 OTP requests per phone number per 10 minutes — hard,
+        # DRF-level cap independent of the OTP service's own ~60s
+        # per-(phone, purpose) resend cooldown (Task 2.1.2.2), to stop
+        # SMS-bombing abuse (many purposes, or simply waiting out the
+        # service cooldown repeatedly). See accounts/throttles.py.
+        "otp_request": "3/10min",
+    },
 }
 
 
