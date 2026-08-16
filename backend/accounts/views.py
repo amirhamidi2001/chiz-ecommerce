@@ -12,11 +12,14 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from .serializers import (
     ChangePasswordSerializer,
     CurrentUserSerializer,
+    OTPRequestSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     ProfileSerializer,
     RegisterSerializer,
 )
+from .services.otp import OTPCooldownError, SMSDeliveryError, generate_otp
+from .throttles import PhoneOTPRequestThrottle
 from .tokens import password_reset_token
 
 User = get_user_model()
@@ -230,5 +233,61 @@ class PasswordResetConfirmView(APIView):
         serializer.save()
         return Response(
             {"detail": "Password has been reset successfully."},
+            status=status.HTTP_200_OK,
+        )
+
+
+# ─── OTP request ────────────────────────────────────────────────────────────────
+
+
+class OTPRequestView(APIView):
+    """
+    POST /api/auth/otp/request/
+    Body: { phone_number }
+
+    Requests a one-time code be sent to `phone_number`. This single
+    endpoint is used for BOTH login and registration — always requesting
+    with purpose="login" here regardless of whether the phone belongs to
+    an existing account. The login-vs-register split happens at
+    verify-time instead (Task 2.3.1.2), not here: at request-time we
+    don't yet know whether this is a new or returning user, and
+    responding differently based on that (e.g. "no account found for
+    this number" vs "code sent") would itself be a user-enumeration
+    vector — the exact same reasoning PasswordResetRequestView above
+    already follows for email.
+
+    Always returns a generic 200 response with no indication of whether
+    the phone number is registered — never the code itself, never a
+    phone-number confirmation, never an "already registered" hint.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [PhoneOTPRequestThrottle]
+
+    def post(self, request):
+        serializer = OTPRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        phone_number = serializer.validated_data["phone_number"]
+
+        try:
+            generate_otp(phone_number, purpose="login")
+        except OTPCooldownError:
+            return Response(
+                {"detail": "Please wait before requesting another code."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        except SMSDeliveryError:
+            # generate_otp() already logged this at ERROR level for ops
+            # visibility (Task 2.2.1.3). The OTPCode row still exists —
+            # deliberately mask the delivery failure from the client and
+            # respond exactly as if it succeeded, for the same
+            # user-enumeration reasoning as the rest of this view: a
+            # different response here could let an attacker infer things
+            # about the phone number (e.g. "this number's carrier always
+            # fails" vs "succeeds").
+            pass
+
+        return Response(
+            {"detail": "Verification code sent."},
             status=status.HTTP_200_OK,
         )

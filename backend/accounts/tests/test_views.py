@@ -1,7 +1,11 @@
+from unittest.mock import patch
+
 import pytest
+from accounts.models import OTPCode
 from accounts.tokens import password_reset_token
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.cache import cache
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
@@ -15,6 +19,7 @@ PROFILE_URL = "/api/auth/profile/"
 CHANGE_PW_URL = "/api/auth/change-password/"
 PW_RESET_URL = "/api/auth/password-reset/"
 PW_RESET_CONF_URL = "/api/auth/password-reset/confirm/"
+OTP_REQUEST_URL = "/api/auth/otp/request/"
 
 
 def make_reset_link(user):
@@ -468,3 +473,168 @@ class TestPasswordResetConfirmView:
         )
         assert res.status_code == status.HTTP_400_BAD_REQUEST
         assert "confirm_password" in res.data
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# OTP Request
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestOTPRequestView:
+
+    VALID_PHONE = "09123456789"
+
+    @pytest.fixture(autouse=True)
+    def clear_throttle_cache(self):
+        """
+        PhoneOTPRequestThrottle (Task 2.1.2.4) stores request history in
+        Django's cache, which persists across tests in the same process
+        (LocMemCache) — clear it before and after every test in this
+        class so throttle/cooldown state never leaks between tests.
+        """
+        cache.clear()
+        yield
+        cache.clear()
+
+    def test_valid_phone_number_returns_200_and_creates_one_otp_row(
+        self, api_client
+    ):
+        res = api_client.post(
+            OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
+        )
+
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data == {"detail": "Verification code sent."}
+
+        qs = OTPCode.objects.filter(phone_number=self.VALID_PHONE, purpose="login")
+        assert qs.count() == 1
+
+    def test_response_never_reveals_the_code_or_phone_confirmation(
+        self, api_client
+    ):
+        """
+        Deliberately vague response — no code, no phone-number echo, no
+        hint about whether the number is already registered (same
+        user-enumeration reasoning as PasswordResetRequestView).
+        """
+        res = api_client.post(
+            OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
+        )
+        assert set(res.data.keys()) == {"detail"}
+        assert self.VALID_PHONE not in res.data["detail"]
+
+    @pytest.mark.parametrize(
+        "invalid_phone",
+        [
+            "12345",
+            "+15551234567",  # US number
+            "02112345678",  # Iranian landline, not mobile
+            "0812345678",  # wrong prefix (08, not 09)
+        ],
+    )
+    def test_invalid_phone_format_returns_400_with_field_error(
+        self, api_client, invalid_phone
+    ):
+        res = api_client.post(
+            OTP_REQUEST_URL, {"phone_number": invalid_phone}, format="json"
+        )
+
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "phone_number" in res.data
+        assert OTPCode.objects.filter(phone_number=invalid_phone).count() == 0
+
+    def test_missing_phone_number_returns_400(self, api_client):
+        res = api_client.post(OTP_REQUEST_URL, {}, format="json")
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "phone_number" in res.data
+
+    def test_international_format_is_accepted_and_normalized(self, api_client):
+        res = api_client.post(
+            OTP_REQUEST_URL, {"phone_number": "+989123456789"}, format="json"
+        )
+        assert res.status_code == status.HTTP_200_OK
+        # Stored under the normalized local-format number, not the raw
+        # international-format input.
+        assert OTPCode.objects.filter(
+            phone_number="09123456789", purpose="login"
+        ).exists()
+
+    def test_second_immediate_request_same_phone_returns_429_cooldown(
+        self, api_client
+    ):
+        first = api_client.post(
+            OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
+        )
+        assert first.status_code == status.HTTP_200_OK
+
+        second = api_client.post(
+            OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
+        )
+
+        assert second.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+        assert "wait" in second.data["detail"].lower()
+
+        # Cooldown rejection must not create a second row.
+        assert (
+            OTPCode.objects.filter(
+                phone_number=self.VALID_PHONE, purpose="login"
+            ).count()
+            == 1
+        )
+
+    def test_fourth_request_within_throttle_window_returns_429_from_throttle(
+        self, api_client
+    ):
+        """
+        Isolates the DRF-level PhoneOTPRequestThrottle (Task 2.1.2.4,
+        3 requests / 10 min) from the OTP service's own ~60s resend
+        cooldown (Task 2.1.2.2) — which would otherwise block the 2nd
+        request already, before the throttle ever gets a chance to be
+        the thing that blocks the 4th. generate_otp() is patched to
+        bypass the cooldown check entirely (always "succeeding") so
+        every one of the first 3 requests reaches 200, and the 4th is
+        blocked purely by the throttle layer.
+        """
+        phone = "09121230099"
+
+        with patch("accounts.views.generate_otp") as mock_generate_otp:
+            mock_generate_otp.return_value = "123456"
+
+            for _ in range(3):
+                res = api_client.post(
+                    OTP_REQUEST_URL, {"phone_number": phone}, format="json"
+                )
+                assert res.status_code == status.HTTP_200_OK
+
+            fourth = api_client.post(
+                OTP_REQUEST_URL, {"phone_number": phone}, format="json"
+            )
+
+        assert fourth.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+        # DRF's own throttle message ("Request was throttled...") is
+        # distinct from the service-cooldown message asserted in
+        # test_second_immediate_request_same_phone_returns_429_cooldown
+        # above — confirms this 429 came from the throttle layer, not
+        # the service-level cooldown (which was bypassed via the mock).
+        assert "throttled" in str(fourth.data["detail"]).lower()
+
+    def test_sms_delivery_failure_is_masked_and_still_returns_200(self, api_client):
+        """
+        Task 2.2.1.3's SMSDeliveryError must be swallowed by this view —
+        the client still gets the same generic success response even
+        when the SMS provider itself failed, per the user-enumeration
+        reasoning documented on OTPRequestView. The OTPCode row still
+        exists regardless (created before the send attempt).
+        """
+        from accounts.services.otp import SMSDeliveryError
+
+        with patch("accounts.views.generate_otp") as mock_generate_otp:
+            mock_generate_otp.side_effect = SMSDeliveryError("gateway down")
+
+            res = api_client.post(
+                OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
+            )
+
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data == {"detail": "Verification code sent."}

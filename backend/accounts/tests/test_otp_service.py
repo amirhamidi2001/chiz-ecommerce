@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 from accounts.models import OTPCode
@@ -8,6 +9,7 @@ from accounts.services.otp import (
     OTPIncorrectCodeError,
     OTPMaxAttemptsExceededError,
     OTPNotFoundError,
+    SMSDeliveryError,
     generate_otp,
     verify_otp,
 )
@@ -73,7 +75,8 @@ class TestGenerateOTP:
 
         assert OTPCode.objects.filter(phone_number=phone, purpose="login").count() == 1
         assert (
-            OTPCode.objects.filter(phone_number=phone, purpose="register").count() == 1
+            OTPCode.objects.filter(phone_number=phone, purpose="register").count()
+            == 1
         )
 
     def test_cooldown_does_not_block_a_different_phone_number(self):
@@ -108,6 +111,111 @@ class TestGenerateOTP:
         phones = [f"0912345{i:04d}" for i in range(5)]
         codes = {generate_otp(phone, "login") for phone in phones}
         assert len(codes) > 1
+
+
+@pytest.mark.django_db
+class TestGenerateOTPSMSDispatch:
+    """
+    Task 2.2.1.3: generate_otp() is now responsible for actually
+    dispatching the SMS via the configured SMSProvider, not just
+    creating the OTPCode row. These tests mock get_sms_provider()
+    directly (rather than relying on the real ConsoleSMSProvider) so
+    they can assert exactly what was sent and control success/failure
+    deterministically.
+    """
+
+    def test_generate_otp_calls_sms_provider_send_exactly_once(self):
+        phone = "09121230100"
+        with patch("accounts.services.otp.get_sms_provider") as mock_get_provider:
+            mock_provider = MagicMock()
+            mock_provider.send.return_value = True
+            mock_get_provider.return_value = mock_provider
+
+            code = generate_otp(phone, "login")
+
+        mock_provider.send.assert_called_once()
+        call_args = mock_provider.send.call_args
+        sent_phone, sent_message = call_args[0]
+        assert sent_phone == phone
+        assert code in sent_message
+
+    def test_send_false_still_creates_otp_row_but_raises_sms_delivery_error(self):
+        phone = "09121230101"
+        with patch("accounts.services.otp.get_sms_provider") as mock_get_provider:
+            mock_provider = MagicMock()
+            mock_provider.send.return_value = False
+            mock_get_provider.return_value = mock_provider
+
+            with pytest.raises(SMSDeliveryError):
+                generate_otp(phone, "login")
+
+        # The OTPCode row must still exist — the code itself is still
+        # valid even though delivery failed; it is NOT rolled back.
+        qs = OTPCode.objects.filter(phone_number=phone, purpose="login")
+        assert qs.count() == 1
+        assert qs.get().is_used is False
+
+    def test_send_raising_an_exception_also_raises_sms_delivery_error(self):
+        """
+        A future real provider (e.g. Kavenegar) might raise instead of
+        returning False on failure (network error, etc.) — both must be
+        normalized to the same SMSDeliveryError so callers only need to
+        handle one exception type.
+        """
+        phone = "09121230102"
+        with patch("accounts.services.otp.get_sms_provider") as mock_get_provider:
+            mock_provider = MagicMock()
+            mock_provider.send.side_effect = ConnectionError("gateway unreachable")
+            mock_get_provider.return_value = mock_provider
+
+            with pytest.raises(SMSDeliveryError):
+                generate_otp(phone, "login")
+
+        qs = OTPCode.objects.filter(phone_number=phone, purpose="login")
+        assert qs.count() == 1
+
+    def test_delivery_failure_logs_at_error_level_for_ops_visibility(self, caplog):
+        import logging
+
+        phone = "09121230103"
+        with patch("accounts.services.otp.get_sms_provider") as mock_get_provider:
+            mock_provider = MagicMock()
+            mock_provider.send.return_value = False
+            mock_get_provider.return_value = mock_provider
+
+            with caplog.at_level(logging.ERROR, logger="accounts.otp"):
+                with pytest.raises(SMSDeliveryError):
+                    generate_otp(phone, "login")
+
+        error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(error_records) == 1
+        assert phone in error_records[0].getMessage()
+
+    def test_cooldown_error_takes_priority_and_sms_is_never_sent(self):
+        """
+        If the cooldown check itself blocks the request, get_sms_provider()
+        must never even be consulted — no SMS attempt for a rejected
+        resend.
+        """
+        phone = "09121230104"
+        generate_otp(phone, "login")  # first call succeeds via real console provider
+
+        with patch("accounts.services.otp.get_sms_provider") as mock_get_provider:
+            with pytest.raises(OTPCooldownError):
+                generate_otp(phone, "login")
+            mock_get_provider.assert_not_called()
+
+    def test_console_provider_default_still_returns_the_code_unmocked(self):
+        """
+        Sanity check that the real (unmocked) default path — the
+        ConsoleSMSProvider from Task 2.2.1.2 — still works end-to-end
+        after this change: generate_otp() succeeds, returns the code,
+        and doesn't raise, since ConsoleSMSProvider.send() always
+        returns True.
+        """
+        code = generate_otp("09121230105", "login")
+        assert isinstance(code, str)
+        assert len(code) == 6
 
 
 @pytest.mark.django_db

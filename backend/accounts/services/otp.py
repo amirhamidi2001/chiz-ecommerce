@@ -3,19 +3,23 @@ OTP generation and verification service.
 
 Handles generating a new 6-digit one-time code, hashing it before
 storage (the raw code is never persisted), creating the OTPCode row
-with a configurable TTL, and verifying a user-submitted code against
-it. The harder, per-view abuse throttle (Task 2.1.2.4) lives
-elsewhere — this module enforces per-code invariants (expiry, max
-attempts, single-use) regardless of which view or throttle class
-eventually wraps it.
+with a configurable TTL, dispatching it via the configured
+SMSProvider, and verifying a user-submitted code against it. The
+harder, per-view abuse throttle (Task 2.1.2.4) lives elsewhere — this
+module enforces per-code invariants (expiry, max attempts, single-use)
+regardless of which view or throttle class eventually wraps it.
 """
 
+import logging
 import secrets
 
 from accounts.models import OTPCode
+from accounts.sms.base import get_sms_provider
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.utils import timezone
+
+logger = logging.getLogger("accounts.otp")
 
 
 class OTPServiceError(Exception):
@@ -32,6 +36,24 @@ class OTPCooldownError(OTPServiceError):
     double-submission (e.g. a double-tapped "Send code" button) turning
     into two SMS sends. It is intentionally independent of, and not a
     replacement for, the per-view rate limiting added in Task 2.1.2.4.
+    """
+
+
+class SMSDeliveryError(OTPServiceError):
+    """
+    Raised by generate_otp() when the OTPCode row was created
+    successfully but the configured SMSProvider failed to deliver it
+    (send() returned False, or raised an exception itself).
+
+    IMPORTANT: this is a delivery-failure signal, not a generation
+    failure — the OTPCode row still exists and is fully valid; it is
+    NOT rolled back. The calling view (Task 2.3.1.1) should generally
+    still return a generic success response to the client even when
+    this is raised, to avoid confirming/denying whether a given phone
+    number is real or reachable to a potential attacker — but should
+    log/alert on it for ops visibility, since it means a real user is
+    silently not receiving their code. generate_otp() itself already
+    logs this at ERROR level before raising.
     """
 
 
@@ -89,17 +111,27 @@ def _generate_numeric_code(length: int = 6) -> str:
 
 def generate_otp(phone_number: str, purpose: str) -> str:
     """
-    Generate and persist a new OTP for `phone_number` and `purpose`.
+    Generate, persist, and send a new OTP for `phone_number` and
+    `purpose`.
 
-    Returns the RAW (unhashed) 6-digit code so the caller can send it
-    via SMS. This is the only place the raw code exists outside of the
-    SMS payload itself — only a hash of it (via Django's own password
-    hasher stack, `make_password`) is ever written to the database.
+    Returns the RAW (unhashed) 6-digit code. This is primarily useful
+    for tests/logging at the call site — the code has already been sent
+    via the configured SMSProvider by the time this returns, so callers
+    do NOT need to (and should not) send it themselves. Only a hash of
+    the code (via Django's own password hasher stack, `make_password`)
+    is ever written to the database.
 
     Raises:
         OTPCooldownError: if a recent, unused, still-valid OTPCode
             already exists for this exact (phone_number, purpose) pair,
-            created within the last OTP_RESEND_COOLDOWN_SECONDS.
+            created within the last OTP_RESEND_COOLDOWN_SECONDS. No
+            OTPCode row is created and no SMS is sent in this case.
+        SMSDeliveryError: if the OTPCode row was created successfully
+            but the configured SMSProvider failed to deliver it (either
+            send() returned False, or it raised). The OTPCode row is
+            NOT rolled back in this case — see SMSDeliveryError's
+            docstring for how callers should handle this distinctly
+            from a generation failure.
     """
     now = timezone.now()
     cooldown_cutoff = now - timezone.timedelta(
@@ -129,6 +161,32 @@ def generate_otp(phone_number: str, purpose: str) -> str:
         expires_at=now + timezone.timedelta(seconds=settings.OTP_CODE_TTL_SECONDS),
     )
 
+    # TODO: Epic 14 — localize this message to Persian.
+    message = f"Your verification code is: {raw_code}"
+
+    try:
+        sent = get_sms_provider().send(phone_number, message)
+    except Exception as exc:
+        logger.error(
+            "OTP SMS delivery raised an exception for %s (purpose=%s): %s",
+            phone_number,
+            purpose,
+            exc,
+        )
+        raise SMSDeliveryError(
+            f"Failed to send OTP SMS to {phone_number!r}: {exc}"
+        ) from exc
+
+    if not sent:
+        logger.error(
+            "OTP SMS provider reported failure sending to %s (purpose=%s).",
+            phone_number,
+            purpose,
+        )
+        raise SMSDeliveryError(
+            f"SMS provider reported failure sending OTP to {phone_number!r}."
+        )
+
     return raw_code
 
 
@@ -154,9 +212,7 @@ def verify_otp(phone_number: str, purpose: str, submitted_code: str) -> bool:
     submitted code happens to be correct.
     """
     otp = (
-        OTPCode.objects.filter(
-            phone_number=phone_number, purpose=purpose, is_used=False
-        )
+        OTPCode.objects.filter(phone_number=phone_number, purpose=purpose, is_used=False)
         .order_by("-created_at")
         .first()
     )

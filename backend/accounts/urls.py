@@ -5,6 +5,7 @@ from .views import (
     ChangePasswordView,
     CurrentUserView,
     LoginView,
+    OTPRequestView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
     ProfileView,
@@ -28,4 +29,5 @@ urlpatterns = [
         PasswordResetConfirmView.as_view(),
         name="password-reset-confirm",
     ),
+    path("otp/request/", OTPRequestView.as_view(), name="otp-request"),
 ]

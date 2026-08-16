@@ -8,6 +8,7 @@ from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
 
 from .tokens import password_reset_token
+from .validators import iranian_phone_regex, normalize_iranian_phone
 
 User = get_user_model()
 
@@ -229,3 +230,35 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         user.set_password(self.validated_data["new_password"])
         user.save(update_fields=["password"])
         return user
+
+
+# ─── OTP request ────────────────────────────────────────────────────────────────
+
+
+class OTPRequestSerializer(serializers.Serializer):
+    """
+    Body: { phone_number }
+
+    Used for both login and registration — a single endpoint on purpose
+    (see OTPRequestView's docstring for why the split happens at
+    verify-time, not here).
+    """
+
+    phone_number = serializers.CharField()
+
+    def validate_phone_number(self, value):
+        # iranian_phone_regex is a plain django.core.validators.RegexValidator;
+        # calling it directly raises django's ValidationError, so it's
+        # translated into DRF's ValidationError here rather than relying
+        # on the `validators=[...]` field kwarg — that path only
+        # validates and can't also transform the value the way
+        # validate_<field>() can, and normalization (below) needs to
+        # happen right here so the normalized form ends up in
+        # validated_data.
+        try:
+            iranian_phone_regex(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                exc.messages[0] if exc.messages else str(exc)
+            )
+        return normalize_iranian_phone(value)
