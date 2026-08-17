@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 
 from .tokens import password_reset_token
 from .validators import iranian_phone_regex, normalize_iranian_phone
@@ -17,6 +18,24 @@ User = get_user_model()
 
 
 class RegisterSerializer(serializers.ModelSerializer):
+    # Explicitly required=True: since User.email is now nullable at the
+    # model level (Task 2.3.1.2, to support phone-only OTP accounts),
+    # DRF's ModelSerializer would otherwise auto-infer email as
+    # optional here too (blank=True/null=True on the model normally
+    # maps to required=False) — that's correct for the OTP serializers,
+    # but wrong for registration, which must always require an email.
+    #
+    # UniqueValidator is also now explicit: declaring `email` here
+    # (rather than letting ModelSerializer auto-generate it) means DRF
+    # no longer auto-attaches the model's unique=True constraint as a
+    # validator, so a duplicate email would otherwise only be caught by
+    # a raw DB IntegrityError (500) instead of a clean 400 — this
+    # restores the original pre-Task-2.3.1.2 behavior of catching it at
+    # validation time.
+    email = serializers.EmailField(
+        required=True,
+        validators=[UniqueValidator(queryset=User.objects.all())],
+    )
     password = serializers.CharField(write_only=True, required=True)
     first_name = serializers.CharField(required=True, write_only=True)
     last_name = serializers.CharField(required=True, write_only=True)
@@ -235,6 +254,25 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 # ─── OTP request ────────────────────────────────────────────────────────────────
 
 
+def _validate_and_normalize_iranian_phone(value):
+    """
+    Shared by OTPRequestSerializer and OTPVerifySerializer.
+
+    iranian_phone_regex is a plain django.core.validators.RegexValidator;
+    calling it directly raises django's ValidationError, so it's
+    translated into DRF's ValidationError here rather than relying on
+    the `validators=[...]` field kwarg — that path only validates and
+    can't also transform the value the way validate_<field>() can, and
+    normalization (below) needs to happen right here so the normalized
+    form ends up in validated_data.
+    """
+    try:
+        iranian_phone_regex(value)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError(exc.messages[0] if exc.messages else str(exc))
+    return normalize_iranian_phone(value)
+
+
 class OTPRequestSerializer(serializers.Serializer):
     """
     Body: { phone_number }
@@ -247,18 +285,20 @@ class OTPRequestSerializer(serializers.Serializer):
     phone_number = serializers.CharField()
 
     def validate_phone_number(self, value):
-        # iranian_phone_regex is a plain django.core.validators.RegexValidator;
-        # calling it directly raises django's ValidationError, so it's
-        # translated into DRF's ValidationError here rather than relying
-        # on the `validators=[...]` field kwarg — that path only
-        # validates and can't also transform the value the way
-        # validate_<field>() can, and normalization (below) needs to
-        # happen right here so the normalized form ends up in
-        # validated_data.
-        try:
-            iranian_phone_regex(value)
-        except DjangoValidationError as exc:
-            raise serializers.ValidationError(
-                exc.messages[0] if exc.messages else str(exc)
-            )
-        return normalize_iranian_phone(value)
+        return _validate_and_normalize_iranian_phone(value)
+
+
+class OTPVerifySerializer(serializers.Serializer):
+    """
+    Body: { phone_number, code }
+
+    Used to verify a previously-requested OTP (OTPRequestSerializer /
+    OTPRequestView) and complete login-or-registration in one step —
+    see OTPVerifyView.
+    """
+
+    phone_number = serializers.CharField()
+    code = serializers.CharField(max_length=6, min_length=6)
+
+    def validate_phone_number(self, value):
+        return _validate_and_normalize_iranian_phone(value)

@@ -18,10 +18,34 @@ class UserType(models.IntegerChoices):
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, password=None, **extra_fields):
-        if not email:
-            raise ValueError(_("The Email must be set"))
-        email = self.normalize_email(email).lower()
+    def create_user(self, email=None, password=None, **extra_fields):
+        # email is optional here specifically to support phone-only OTP
+        # accounts (Task 2.3.1.2): a customer who registers purely via
+        # phone/OTP has no email at all. USERNAME_FIELD stays "email"
+        # (unchanged — email remains the identifier for the existing
+        # email+password flow and for Django admin), but that only
+        # matters for accounts that actually need to type an email
+        # somewhere to log in (staff/admin). A phone-only *customer*
+        # account never needs to authenticate via the admin login form,
+        # so a null email is fine for them; email must remain unique at
+        # the DB level (see the `unique=True, null=True` field below —
+        # same nullable+unique pattern already used for phone_number in
+        # Task 2.1.1.1: Postgres treats each NULL as distinct, so
+        # multiple email-less accounts don't collide with each other).
+        #
+        # Guard against the one combination that WOULD be broken by a
+        # null email: a staff/superuser account can't log into Django
+        # admin without a value in its USERNAME_FIELD.
+        if not email and (
+            extra_fields.get("is_staff") or extra_fields.get("is_superuser")
+        ):
+            raise ValueError(_("Staff/superuser accounts must have an email."))
+
+        if email:
+            email = self.normalize_email(email).lower()
+        else:
+            email = None
+
         user = self.model(email=email, **extra_fields)
         if password:
             user.set_password(password)
@@ -44,7 +68,12 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
-    email = models.EmailField(_("email address"), unique=True)
+    # Nullable + unique: mirrors the exact same pattern already used for
+    # phone_number (Task 2.1.1.1) to support phone-only OTP accounts
+    # (Task 2.3.1.2) that have no email at all. USERNAME_FIELD stays
+    # "email" — see UserManager.create_user() above for the staff/admin
+    # implications of this being nullable.
+    email = models.EmailField(_("email address"), unique=True, null=True, blank=True)
     phone_number = models.CharField(
         max_length=15,
         unique=True,
@@ -78,7 +107,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return self.email
+        return self.email or self.phone_number or f"User #{self.pk}"
 
 
 class Profile(models.Model):
@@ -107,7 +136,10 @@ class Profile(models.Model):
         return _("new user")
 
     def __str__(self):
-        return f"{self.get_fullname()} - {self.user.email}"
+        identifier = (
+            self.user.email or self.user.phone_number or f"user #{self.user_id}"
+        )
+        return f"{self.get_fullname()} - {identifier}"
 
 
 @receiver(post_save, sender=User)

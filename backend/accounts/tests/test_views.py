@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 from accounts.models import OTPCode
+from accounts.services.otp import generate_otp
 from accounts.tokens import password_reset_token
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -20,6 +21,7 @@ CHANGE_PW_URL = "/api/auth/change-password/"
 PW_RESET_URL = "/api/auth/password-reset/"
 PW_RESET_CONF_URL = "/api/auth/password-reset/confirm/"
 OTP_REQUEST_URL = "/api/auth/otp/request/"
+OTP_VERIFY_URL = "/api/auth/otp/verify/"
 
 
 def make_reset_link(user):
@@ -497,9 +499,7 @@ class TestOTPRequestView:
         yield
         cache.clear()
 
-    def test_valid_phone_number_returns_200_and_creates_one_otp_row(
-        self, api_client
-    ):
+    def test_valid_phone_number_returns_200_and_creates_one_otp_row(self, api_client):
         res = api_client.post(
             OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
         )
@@ -510,9 +510,7 @@ class TestOTPRequestView:
         qs = OTPCode.objects.filter(phone_number=self.VALID_PHONE, purpose="login")
         assert qs.count() == 1
 
-    def test_response_never_reveals_the_code_or_phone_confirmation(
-        self, api_client
-    ):
+    def test_response_never_reveals_the_code_or_phone_confirmation(self, api_client):
         """
         Deliberately vague response — no code, no phone-number echo, no
         hint about whether the number is already registered (same
@@ -560,9 +558,7 @@ class TestOTPRequestView:
             phone_number="09123456789", purpose="login"
         ).exists()
 
-    def test_second_immediate_request_same_phone_returns_429_cooldown(
-        self, api_client
-    ):
+    def test_second_immediate_request_same_phone_returns_429_cooldown(self, api_client):
         first = api_client.post(
             OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
         )
@@ -638,3 +634,224 @@ class TestOTPRequestView:
 
         assert res.status_code == status.HTTP_200_OK
         assert res.data == {"detail": "Verification code sent."}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# OTP Verify
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestOTPVerifyView:
+
+    VALID_PHONE = "09123456789"
+
+    @pytest.fixture(autouse=True)
+    def clear_throttle_cache(self):
+        cache.clear()
+        yield
+        cache.clear()
+
+    def test_valid_code_new_phone_creates_user_and_returns_201(self, api_client):
+        """
+        Acceptance criterion 1: verifying a valid code for a brand-new
+        phone number creates exactly one new User with that
+        phone_number, is_verified=True, and returns 201 (this view's
+        chosen status code for "a new account was created" — matching
+        RegisterView's 201) with access/refresh tokens and
+        is_new_user: true.
+        """
+        code = generate_otp(self.VALID_PHONE, "login")
+
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": code},
+            format="json",
+        )
+
+        assert res.status_code == status.HTTP_201_CREATED
+        assert res.data["is_new_user"] is True
+        assert "access" in res.data
+        assert "refresh" in res.data
+
+        users = User.objects.filter(phone_number=self.VALID_PHONE)
+        assert users.count() == 1
+        new_user = users.get()
+        assert new_user.is_verified is True
+        assert new_user.email is None
+
+    def test_valid_code_existing_phone_logs_into_same_user_returns_200(
+        self, api_client
+    ):
+        """
+        Acceptance criterion 2: verifying a valid code for a phone
+        number that already has a User logs into that SAME existing
+        user (no duplicate created) and returns 200 (this view's chosen
+        status code for "logged into an existing account" — matching
+        LoginView's 200) with is_new_user: false.
+        """
+        existing_user = User.objects.create_user(
+            email=None, phone_number=self.VALID_PHONE, is_verified=False
+        )
+        code = generate_otp(self.VALID_PHONE, "login")
+
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": code},
+            format="json",
+        )
+
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["is_new_user"] is False
+        assert "access" in res.data
+        assert "refresh" in res.data
+
+        users = User.objects.filter(phone_number=self.VALID_PHONE)
+        assert users.count() == 1
+        assert users.get().pk == existing_user.pk
+
+    def test_existing_unverified_user_becomes_verified_on_successful_login(
+        self, api_client
+    ):
+        existing_user = User.objects.create_user(
+            email=None, phone_number=self.VALID_PHONE, is_verified=False
+        )
+        code = generate_otp(self.VALID_PHONE, "login")
+
+        api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": code},
+            format="json",
+        )
+
+        existing_user.refresh_from_db()
+        assert existing_user.is_verified is True
+
+    def test_new_user_profile_is_created_without_crashing(self, api_client):
+        """
+        Profile.first_name/last_name are blank=False, but that's only
+        enforced via full_clean()/ModelForms, not the auto-created
+        Profile's bare .save() from the post_save signal — confirm the
+        whole request succeeds and leaves an (empty-name) Profile behind
+        rather than crashing.
+        """
+        code = generate_otp(self.VALID_PHONE, "login")
+
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": code},
+            format="json",
+        )
+
+        assert res.status_code == status.HTTP_201_CREATED
+        new_user = User.objects.get(phone_number=self.VALID_PHONE)
+        assert new_user.profile is not None
+        assert new_user.profile.first_name == ""
+        assert new_user.profile.last_name == ""
+
+    def test_no_pending_code_returns_400_with_specific_message(self, api_client):
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": "123456"},
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "code" in res.data
+        assert "new one" in res.data["code"].lower()
+
+    def test_wrong_code_returns_400_with_specific_message(self, api_client):
+        real_code = generate_otp(self.VALID_PHONE, "login")
+        wrong_code = "000000" if real_code != "000000" else "111111"
+
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": wrong_code},
+            format="json",
+        )
+
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert res.data["code"] == "Incorrect code."
+        # No user/tokens created for a failed attempt.
+        assert not User.objects.filter(phone_number=self.VALID_PHONE).exists()
+
+    def test_expired_code_returns_400_with_specific_message(self, api_client):
+        from datetime import timedelta
+
+        from django.contrib.auth.hashers import make_password
+        from django.utils import timezone
+
+        OTPCode.objects.create(
+            phone_number=self.VALID_PHONE,
+            purpose="login",
+            code_hash=make_password("123456"),
+            expires_at=timezone.now() - timedelta(seconds=10),
+        )
+
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": "123456"},
+            format="json",
+        )
+
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "expired" in res.data["code"].lower()
+
+    def test_max_attempts_exceeded_returns_400_with_specific_message(self, api_client):
+        from django.contrib.auth.hashers import make_password
+        from django.utils import timezone
+
+        OTPCode.objects.create(
+            phone_number=self.VALID_PHONE,
+            purpose="login",
+            code_hash=make_password("654321"),
+            expires_at=timezone.now() + timezone.timedelta(minutes=5),
+            attempts=5,
+        )
+
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": "654321"},  # correct code
+            format="json",
+        )
+
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "too many" in res.data["code"].lower()
+        # No account created despite the code being technically correct —
+        # the max-attempts cap is checked before the code comparison.
+        assert not User.objects.filter(phone_number=self.VALID_PHONE).exists()
+
+    def test_invalid_phone_format_returns_400(self, api_client):
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": "12345", "code": "123456"},
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "phone_number" in res.data
+
+    @pytest.mark.parametrize("bad_code", ["12345", "1234567", "abcdef", ""])
+    def test_malformed_code_length_returns_400(self, api_client, bad_code):
+        res = api_client.post(
+            OTP_VERIFY_URL,
+            {"phone_number": self.VALID_PHONE, "code": bad_code},
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "code" in res.data
+
+    def test_different_users_get_different_tokens(self, api_client):
+        phone_a = "09121111111"
+        phone_b = "09122222222"
+        code_a = generate_otp(phone_a, "login")
+        code_b = generate_otp(phone_b, "login")
+
+        res_a = api_client.post(
+            OTP_VERIFY_URL, {"phone_number": phone_a, "code": code_a}, format="json"
+        )
+        res_b = api_client.post(
+            OTP_VERIFY_URL, {"phone_number": phone_b, "code": code_b}, format="json"
+        )
+
+        assert res_a.data["access"] != res_b.data["access"]
+        assert User.objects.filter(phone_number=phone_a).count() == 1
+        assert User.objects.filter(phone_number=phone_b).count() == 1

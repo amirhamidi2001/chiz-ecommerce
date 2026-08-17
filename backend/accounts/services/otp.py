@@ -212,7 +212,9 @@ def verify_otp(phone_number: str, purpose: str, submitted_code: str) -> bool:
     submitted code happens to be correct.
     """
     otp = (
-        OTPCode.objects.filter(phone_number=phone_number, purpose=purpose, is_used=False)
+        OTPCode.objects.filter(
+            phone_number=phone_number, purpose=purpose, is_used=False
+        )
         .order_by("-created_at")
         .first()
     )

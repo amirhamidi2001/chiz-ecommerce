@@ -7,18 +7,29 @@ from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .serializers import (
     ChangePasswordSerializer,
     CurrentUserSerializer,
     OTPRequestSerializer,
+    OTPVerifySerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     ProfileSerializer,
     RegisterSerializer,
 )
-from .services.otp import OTPCooldownError, SMSDeliveryError, generate_otp
+from .services.otp import (
+    OTPCooldownError,
+    OTPExpiredError,
+    OTPIncorrectCodeError,
+    OTPMaxAttemptsExceededError,
+    OTPNotFoundError,
+    SMSDeliveryError,
+    generate_otp,
+    verify_otp,
+)
 from .throttles import PhoneOTPRequestThrottle
 from .tokens import password_reset_token
 
@@ -89,8 +100,6 @@ class RegisterView(APIView):
         user = serializer.save()
 
         _send_welcome_email(user)
-
-        from rest_framework_simplejwt.tokens import RefreshToken
 
         refresh = RefreshToken.for_user(user)
         return Response(
@@ -290,4 +299,109 @@ class OTPRequestView(APIView):
         return Response(
             {"detail": "Verification code sent."},
             status=status.HTTP_200_OK,
+        )
+
+
+# ─── OTP verify ─────────────────────────────────────────────────────────────────
+
+
+class OTPVerifyView(APIView):
+    """
+    POST /api/auth/otp/verify/
+    Body: { phone_number, code }
+    Returns: { access, refresh, is_new_user }
+
+    Verifies a previously-requested OTP (OTPRequestView) and completes
+    login-or-registration in a single step: if a User with this
+    phone_number already exists, logs them in; otherwise creates a new
+    account on the spot and logs into that. This "OTP verification IS
+    registration" pattern (no separate signup step) is the convention
+    Iranian consumer apps overwhelmingly use, and mirrors how
+    RegisterView already issues JWTs immediately on success.
+
+    Unlike OTPRequestView, this endpoint's error messages ARE allowed to
+    be specific per-failure-mode (expired/max-attempts/wrong-code/not-
+    found) — the user-enumeration concern from the request endpoint
+    doesn't apply here, since submitting a code at all already proves
+    the caller received an SMS sent to this phone number (i.e. they
+    already control it).
+
+    Status code: 201 when a brand-new account was created (matching
+    RegisterView's 201 for account creation), 200 when logging into an
+    existing account (matching LoginView's 200) — chosen per-request
+    based on which actually happened, rather than a single fixed code
+    for both outcomes, since REST convention ties 201 specifically to
+    "a new resource was created."
+
+    NOTE: a phone-only account created here has NO first_name/last_name
+    yet (Profile.first_name/last_name are blank=False at the form/
+    validation level, but that's only enforced via full_clean(), not
+    plain .save() — the auto-created Profile from the post_save signal
+    saves fine with empty strings). The frontend (Task 2.3.2) is
+    expected to use the `is_new_user` flag below to show a "complete
+    your profile" prompt so these get filled in.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = OTPVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        phone_number = serializer.validated_data["phone_number"]
+        code = serializer.validated_data["code"]
+
+        try:
+            verify_otp(phone_number, purpose="login", submitted_code=code)
+        except OTPNotFoundError:
+            return Response(
+                {
+                    "code": "No pending verification code found for this number. "
+                    "Please request a new one."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except OTPExpiredError:
+            return Response(
+                {"code": "This code has expired. Please request a new one."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except OTPMaxAttemptsExceededError:
+            return Response(
+                {"code": "Too many incorrect attempts. Please request a new code."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except OTPIncorrectCodeError:
+            return Response(
+                {"code": "Incorrect code."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = User.objects.filter(phone_number=phone_number).first()
+        is_new_user = user is None
+
+        if is_new_user:
+            # email=None: this is the phone-only OTP account path —
+            # UserManager.create_user() was updated (Task 2.3.1.2) to
+            # make email optional specifically to support this. See
+            # accounts/models.py for the full reasoning.
+            user = User.objects.create_user(
+                email=None,
+                phone_number=phone_number,
+                is_verified=True,
+            )
+        elif not user.is_verified:
+            # Phone verification via OTP is itself a form of identity
+            # verification — mark any existing-but-unverified account
+            # verified now, same as a fresh OTP account.
+            user.is_verified = True
+            user.save(update_fields=["is_verified"])
+
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "is_new_user": is_new_user,
+            },
+            status=status.HTTP_201_CREATED if is_new_user else status.HTTP_200_OK,
         )

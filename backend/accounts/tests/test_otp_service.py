@@ -75,8 +75,7 @@ class TestGenerateOTP:
 
         assert OTPCode.objects.filter(phone_number=phone, purpose="login").count() == 1
         assert (
-            OTPCode.objects.filter(phone_number=phone, purpose="register").count()
-            == 1
+            OTPCode.objects.filter(phone_number=phone, purpose="register").count() == 1
         )
 
     def test_cooldown_does_not_block_a_different_phone_number(self):

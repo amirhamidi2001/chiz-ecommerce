@@ -29,13 +29,47 @@ class TestUserModel:
         assert user.is_verified is False
         assert user.type == UserType.CUSTOMER
 
-    def test_create_user_requires_email(self):
-        with pytest.raises(ValueError, match="Email must be set"):
-            User.objects.create_user(email="", password="Pass1!")
+    def test_create_user_without_email_succeeds_for_regular_users(self):
+        """
+        Task 2.3.1.2: email is no longer required at the manager level —
+        this is what makes phone-only OTP accounts possible. A regular
+        (non-staff) user can be created with email=None.
+        """
+        user = User.objects.create_user(
+            email=None, password="Pass1!", phone_number="09121230200"
+        )
+        assert user.email is None
+        assert user.pk is not None
+
+    def test_create_user_without_email_raises_for_staff(self):
+        """
+        The one combination that's still blocked: a staff/superuser
+        account MUST have an email, since Django admin login requires
+        typing a value into USERNAME_FIELD ("email").
+        """
+        with pytest.raises(
+            ValueError, match="Staff/superuser accounts must have an email"
+        ):
+            User.objects.create_user(email=None, password="Pass1!", is_staff=True)
 
     def test_email_field_is_unique(self, user):
         with pytest.raises(IntegrityError):
             User.objects.create_user(email=user.email, password="Other1!")
+
+    def test_two_users_can_both_have_email_none(self):
+        """
+        Same nullable+unique pattern as phone_number (Task 2.1.1.1):
+        multiple phone-only accounts with email=None must not conflict
+        with each other.
+        """
+        u1 = User.objects.create_user(
+            email=None, password="Pass1!", phone_number="09121230201"
+        )
+        u2 = User.objects.create_user(
+            email=None, password="Pass1!", phone_number="09121230202"
+        )
+        assert u1.email is None
+        assert u2.email is None
 
     # ── phone_number (Task 2.1.1.1) ──────────────────────────────────────────
 
