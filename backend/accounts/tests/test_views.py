@@ -16,6 +16,7 @@ User = get_user_model()
 REGISTER_URL = "/api/auth/register/"
 LOGIN_URL = "/api/auth/login/"
 TOKEN_REFRESH_URL = "/api/auth/token/refresh/"
+CURRENT_USER_URL = "/api/auth/user/"
 PROFILE_URL = "/api/auth/profile/"
 CHANGE_PW_URL = "/api/auth/change-password/"
 PW_RESET_URL = "/api/auth/password-reset/"
@@ -855,3 +856,36 @@ class TestOTPVerifyView:
         assert res_a.data["access"] != res_b.data["access"]
         assert User.objects.filter(phone_number=phone_a).count() == 1
         assert User.objects.filter(phone_number=phone_b).count() == 1
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Current User — OTP-created profile gap (Task 2.3.1.3)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestCurrentUserViewOTPProfileGap:
+
+    def test_get_current_user_for_fresh_otp_user_returns_200_with_blank_names(
+        self, api_client
+    ):
+        """
+        Confirms GET /api/auth/user/ — which the frontend calls right
+        after storing tokens from OTPVerifyView — correctly reflects an
+        OTP-created user's empty first_name/last_name as plain empty
+        strings rather than erroring, so the frontend can detect
+        "profile incomplete" by checking if those fields are falsy.
+        """
+        otp_user = User.objects.create_user(
+            email=None, phone_number="09121230302", is_verified=True
+        )
+        api_client.force_authenticate(user=otp_user)
+
+        res = api_client.get(CURRENT_USER_URL)
+
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["first_name"] == ""
+        assert res.data["last_name"] == ""
+        assert res.data["phone_number"] == "09121230302"
+        assert res.data["email"] is None
+        assert res.data["is_verified"] is True

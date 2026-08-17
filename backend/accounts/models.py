@@ -112,8 +112,19 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
-    first_name = models.CharField(max_length=255, blank=False)
-    last_name = models.CharField(max_length=255, blank=False)
+    # blank=True (not blank=False): an OTP-created user (Task 2.3.1.2) has
+    # no name data at all yet, so the auto-created Profile from the
+    # create_profile signal below must be allowed to hold empty strings
+    # here without full_clean() raising later (e.g. an admin form).
+    # This is a Django-level validation-only relaxation — blank=False
+    # never enforced a DB NOT-NULL-with-content constraint (it's not
+    # checked by plain .save(), only by full_clean()/ModelForms), so
+    # this needs no destructive data migration; existing rows are
+    # already compatible. The frontend (Task 2.3.2) is expected to
+    # prompt new OTP users to fill these in — see OTPVerifyView's
+    # is_new_user response flag.
+    first_name = models.CharField(max_length=255, blank=True)
+    last_name = models.CharField(max_length=255, blank=True)
     phone_number = models.CharField(
         max_length=12,
         blank=True,

@@ -230,6 +230,47 @@ class TestProfileModel:
     def test_profile_has_correct_user_link(self, user):
         assert user.profile.user == user
 
+    # ── OTP-created users (Task 2.3.1.3) ─────────────────────────────────────
+
+    def test_otp_created_user_gets_profile_via_signal_with_blank_names(self):
+        """
+        Verifies the existing create_profile signal correctly handles a
+        User created via the OTP path (UserManager.create_user() with no
+        email — Task 2.3.1.2), not just the email/password RegisterView
+        path. create_user() ultimately calls user.save(), which is what
+        the post_save signal is registered against, so this should work
+        automatically — this test is the trace-through confirmation.
+        """
+        otp_user = User.objects.create_user(
+            email=None, phone_number="09121230300", is_verified=True
+        )
+
+        assert Profile.objects.filter(user=otp_user).exists()
+        profile = otp_user.profile
+        assert profile.first_name == ""
+        assert profile.last_name == ""
+
+    def test_otp_created_profile_full_clean_does_not_raise(self):
+        """
+        Confirms the blank=True relaxation actually fixes the gap: before
+        this task's migration, first_name/last_name were blank=False,
+        so full_clean() on an OTP-created (nameless) Profile would have
+        raised ValidationError — e.g. if the admin panel or any future
+        form called profile.full_clean().
+        """
+        otp_user = User.objects.create_user(
+            email=None, phone_number="09121230301", is_verified=True
+        )
+
+        # Must not raise.
+        otp_user.profile.full_clean()
+
+    def test_profile_first_name_last_name_are_blank_true(self):
+        first_name_field = Profile._meta.get_field("first_name")
+        last_name_field = Profile._meta.get_field("last_name")
+        assert first_name_field.blank is True
+        assert last_name_field.blank is True
+
     def test_get_fullname_with_both_names(self, user):
         user.profile.first_name = "John"
         user.profile.last_name = "Doe"
