@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { setTokens, parseErrors } from '../services/api';
+import { setTokens, parseErrors, authAPI } from '../services/api';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+
+// Basic UX-nicety check matching the backend's local Iranian mobile
+// format (09XXXXXXXXX, 11 digits). This is NOT a security boundary —
+// it only catches obvious typos before hitting the API; the backend
+// remains the source of truth for validation.
+const IRANIAN_PHONE_REGEX = /^09\d{9}$/;
 
 // ─── Reusable micro-components ─────────────────────────────────────────────
 const FieldError = ({ msg }) =>
@@ -134,7 +140,57 @@ const Login = () => {
   };
 
   const handleGoogleLogin = () => alert('Google login demo. Implement OAuth in a real app.');
-  const pageTitle = activeForm === 'login' ? 'Login' : 'Register';
+
+  // ── Phone / OTP login ───────────────────────────────────────────────────
+  // `step` covers just this task's scope: 'phone' (enter number) ->
+  // 'code' (a placeholder confirming we transitioned — the real
+  // code-entry UI is built in Task 2.3.2.2). A local state toggle is
+  // sufficient for a 2-step flow; no routing needed.
+  const [phoneStep, setPhoneStep] = useState('phone');
+  const [phone, setPhone] = useState('');
+  const [phoneErrors, setPhoneErrors] = useState({});
+  const [phoneLoading, setPhoneLoading] = useState(false);
+
+  const handlePhoneSubmit = async (e) => {
+    e.preventDefault();
+    setPhoneErrors({});
+
+    if (!IRANIAN_PHONE_REGEX.test(phone)) {
+      setPhoneErrors({
+        phone_number: 'Enter a valid mobile number (e.g. 09123456789).',
+      });
+      return;
+    }
+
+    setPhoneLoading(true);
+    try {
+      await authAPI.requestOtp(phone);
+      setPhoneStep('code');
+    } catch (err) {
+      const errors = parseErrors(err);
+      if (err.response?.status === 429) {
+        // Covers both the service-level resend cooldown and the
+        // DRF-level throttle — both return { detail: "..." } on a 429.
+        setPhoneErrors({
+          non_field_errors:
+            errors.detail || 'Please wait before requesting another code.',
+        });
+      } else {
+        // 400: field-level validation error from OTPRequestSerializer,
+        // e.g. { phone_number: "Enter a valid Iranian mobile number..." }
+        setPhoneErrors({
+          phone_number: errors.phone_number,
+          non_field_errors: !errors.phone_number
+            ? errors.detail || errors.non_field_errors || 'Something went wrong. Please try again.'
+            : undefined,
+        });
+      }
+    } finally {
+      setPhoneLoading(false);
+    }
+  };
+
+  const pageTitle = activeForm === 'register' ? 'Register' : 'Login';
 
   return (
     <>
@@ -231,6 +287,14 @@ const Login = () => {
                     <button type="button" onClick={handleGoogleLogin}
                       className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition flex items-center justify-center gap-2">
                       <i className="bi bi-google" /> Continue with Google
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setActiveForm('phone'); setPhoneStep('phone'); setPhoneErrors({}); }}
+                      className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition flex items-center justify-center gap-2 mt-3"
+                    >
+                      <i className="bi bi-phone" /> Continue with Phone
                     </button>
 
                     <div className="text-center mt-6 text-sm">
@@ -372,6 +436,84 @@ const Login = () => {
                       </button>
                     </div>
                   </form>
+                </div>
+              )}
+
+              {/* ════════════ PHONE / OTP LOGIN ════════════ */}
+              {activeForm === 'phone' && (
+                <div className="p-6 md:p-8">
+                  {phoneStep === 'phone' && (
+                    <>
+                      <div className="text-center mb-6">
+                        <h3 className="text-2xl font-bold text-gray-800">Continue with Phone</h3>
+                        <p className="text-gray-500 text-sm mt-1">
+                          We'll text you a verification code
+                        </p>
+                      </div>
+
+                      <AlertBanner msg={phoneErrors.non_field_errors} />
+
+                      <form onSubmit={handlePhoneSubmit} noValidate>
+                        <div className="relative mb-4">
+                          <i className="bi bi-phone absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value.trim())}
+                            className={`w-full border rounded-lg pl-10 pr-3 py-3 focus:outline-none focus:border-teal-500 transition ${phoneErrors.phone_number ? 'border-red-400' : 'border-gray-300'}`}
+                            placeholder="09123456789"
+                            autoComplete="tel"
+                            required
+                          />
+                          <FieldError msg={phoneErrors.phone_number} />
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={phoneLoading}
+                          className="w-full bg-teal-600 text-white py-3 rounded-lg font-semibold hover:bg-teal-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {phoneLoading
+                            ? <><Spinner /> Sending code…</>
+                            : <>Send Code <i className="bi bi-arrow-right" /></>}
+                        </button>
+
+                        <div className="text-center mt-6 text-sm">
+                          <button type="button" onClick={() => setActiveForm('login')}
+                            className="text-teal-600 font-medium hover:underline">
+                            <i className="bi bi-arrow-left me-1" /> Back to email login
+                          </button>
+                        </div>
+                      </form>
+                    </>
+                  )}
+
+                  {phoneStep === 'code' && (
+                    <>
+                      <div className="text-center mb-6">
+                        <i className="bi bi-check-circle text-teal-600 text-4xl mb-3 block" />
+                        <h3 className="text-2xl font-bold text-gray-800">Check Your Phone</h3>
+                        <p className="text-gray-500 text-sm mt-1">
+                          We sent a verification code to <span className="font-medium text-gray-700">{phone}</span>
+                        </p>
+                      </div>
+
+                      {/* Code-entry form is built in Task 2.3.2.2 — this
+                          screen only confirms the request→transition
+                          worked for this task's scope. */}
+
+                      <div className="text-center text-sm">
+                        <button
+                          type="button"
+                          onClick={() => { setPhoneStep('phone'); setPhoneErrors({}); }}
+                          className="text-teal-600 font-medium hover:underline"
+                        >
+                          <i className="bi bi-arrow-left me-1" /> Use a different number
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 

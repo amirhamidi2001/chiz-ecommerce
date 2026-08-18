@@ -167,6 +167,13 @@ export const authAPI = {
     api.post('/auth/reset-password/', data),
 
   /**
+   * POST /auth/otp/request/
+   * Body: { phone_number }
+   */
+  requestOtp: (phone_number) =>
+    api.post('/auth/otp/request/', { phone_number }),
+
+  /**
    * POST /auth/confirm-email/
    * Body: { token }
    */
