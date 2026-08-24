@@ -1,5 +1,6 @@
 import factory
 import pytest
+from accounts.models import UserType
 from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 from factory.django import DjangoModelFactory
@@ -46,18 +47,18 @@ class UserFactory(DjangoModelFactory):
     password = factory.PostGenerationMethodCall("set_password", "Str0ngPass!")
     is_active = True
     is_verified = True
-    type = 1  # CUSTOMER
+    type = UserType.CUSTOMER
 
 
 class AdminUserFactory(UserFactory):
     is_staff = True
-    type = 2  # ADMIN
+    type = UserType.ADMIN
 
 
 class SuperUserFactory(UserFactory):
     is_staff = True
     is_superuser = True
-    type = 3  # SUPERUSER
+    type = UserType.SUPERUSER
 
 
 class ChatRoomFactory(DjangoModelFactory):

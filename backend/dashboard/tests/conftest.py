@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import pytest
+from accounts.models import UserType
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -30,7 +31,7 @@ def _bearer(user: User) -> APIClient:
 @pytest.fixture
 def make_user(db):
     """
-    Factory: make_user(email=…, password=…, type=1, **extra) → User
+    Factory: make_user(email=…, password=…, user_type=UserType.CUSTOMER, **extra) → User
     Profile is assumed to be created via a post_save signal.
     """
     _counter = [0]
@@ -38,7 +39,7 @@ def make_user(db):
     def _make(
         email: str | None = None,
         password: str = "testPass123!",
-        user_type: int = 1,
+        user_type: int = UserType.CUSTOMER,
         is_verified: bool = True,
         **extra,
     ) -> User:
@@ -56,17 +57,17 @@ def make_user(db):
 
 @pytest.fixture
 def customer(make_user):
-    return make_user(email="customer@example.com", user_type=1)
+    return make_user(email="customer@example.com", user_type=UserType.CUSTOMER)
 
 
 @pytest.fixture
 def admin_user(make_user):
-    return make_user(email="admin@example.com", user_type=2)
+    return make_user(email="admin@example.com", user_type=UserType.ADMIN)
 
 
 @pytest.fixture
 def superuser_user(make_user):
-    return make_user(email="superuser@example.com", user_type=3)
+    return make_user(email="superuser@example.com", user_type=UserType.SUPERUSER)
 
 
 # ── Authenticated clients ─────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from accounts.models import UserType
 from django.contrib.auth import get_user_model
 from django.db.models import Avg, Count, DecimalField, F, Sum
 from django.db.models.functions import Coalesce, TruncDate, TruncMonth
@@ -168,7 +169,9 @@ def get_user_stats() -> dict:
         "active": User.objects.filter(is_active=True).count(),
         "verified": User.objects.filter(is_verified=True).count(),
         "new_this_month": User.objects.filter(created_date__gte=month_start).count(),
-        "admins": User.objects.filter(type__in=[2, 3]).count(),
+        "admins": User.objects.filter(
+            type__in=[UserType.ADMIN, UserType.SUPERUSER]
+        ).count(),
     }
 
 

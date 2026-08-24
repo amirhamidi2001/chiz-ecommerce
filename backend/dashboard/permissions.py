@@ -1,9 +1,10 @@
+from accounts.models import UserType
 from rest_framework.permissions import BasePermission
 
 
 class IsAdminOrSuperuser(BasePermission):
     """
-    Grants access only to users whose `type` is ADMIN (2) or SUPERUSER (3).
+    Grants access only to users whose `type` is ADMIN or SUPERUSER.
     Works with the custom UserType defined in accounts.models.
     """
 
@@ -13,7 +14,7 @@ class IsAdminOrSuperuser(BasePermission):
         return bool(
             request.user
             and request.user.is_authenticated
-            and request.user.type in (2, 3)  # UserType.ADMIN, UserType.SUPERUSER
+            and request.user.type in (UserType.ADMIN, UserType.SUPERUSER)
         )
 
 
@@ -27,6 +28,6 @@ class IsOwnerOrAdmin(BasePermission):
     def has_object_permission(self, request, view, obj):
         if not request.user or not request.user.is_authenticated:
             return False
-        if request.user.type in (2, 3):
+        if request.user.type in (UserType.ADMIN, UserType.SUPERUSER):
             return True
         return getattr(obj, "user", None) == request.user

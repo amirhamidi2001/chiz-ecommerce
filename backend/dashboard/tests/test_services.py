@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import pytest
+from accounts.models import UserType
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,9 +131,9 @@ class TestGetUserStats:
     def test_admins_counts_only_type_2_and_3(self, make_user):
         from dashboard.services import get_user_stats
 
-        make_user(email="admin1@example.com", user_type=2)
-        make_user(email="super1@example.com", user_type=3)
-        make_user(email="cust1@example.com", user_type=1)
+        make_user(email="admin1@example.com", user_type=UserType.ADMIN)
+        make_user(email="super1@example.com", user_type=UserType.SUPERUSER)
+        make_user(email="cust1@example.com", user_type=UserType.CUSTOMER)
         stats = get_user_stats()
         # At least the 2 we created
         assert stats["admins"] >= 2
