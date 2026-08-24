@@ -9,6 +9,7 @@ vi.mock("../services/api", () => ({
     login: vi.fn(),
     getUser: vi.fn(),
     logout: vi.fn(),
+    verifyOtp: vi.fn(),
   },
   setTokens: vi.fn(),
   clearTokens: vi.fn(),
@@ -37,7 +38,7 @@ Object.defineProperty(window, "localStorage", {
 // ─── Consumer component ──────────────────────────────────────────────────────
 // Renders every value from the context so tests can assert via the DOM.
 const AuthConsumer = () => {
-  const { user, loading, isAuthenticated, isAdmin, login, logout, hydrateUser, updateUser } =
+  const { user, loading, isAuthenticated, isAdmin, login, loginWithOtp, logout, hydrateUser, updateUser } =
     useAuth();
 
   return (
@@ -48,6 +49,9 @@ const AuthConsumer = () => {
       <span data-testid="user">{user ? JSON.stringify(user) : "null"}</span>
       <button onClick={() => login({ email: "a@b.com", password: "pw" }).catch(() => { })}>
         login
+      </button>
+      <button onClick={() => loginWithOtp("09123456789", "123456").catch(() => { })}>
+        loginWithOtp
       </button>
       <button onClick={() => logout()}>logout</button>
       <button onClick={() => hydrateUser()}>hydrate</button>
@@ -313,6 +317,184 @@ describe("login()", () => {
 
     expect(caughtError).toBeDefined();
     expect(caughtError.message).toBe("Invalid credentials");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 3b. loginWithOtp() — Feature 2.3.2 (mirrors login() above)
+// ════════════════════════════════════════════════════════════════════════════
+describe("loginWithOtp()", () => {
+  const phoneNumber = "09123456789";
+  const code = "123456";
+  const tokens = { access: "otp-acc-token", refresh: "otp-ref-token" };
+  const profile = { id: 42, phone_number: phoneNumber, email: null, type: 1 };
+
+  beforeEach(() => {
+    // No token on mount → skip rehydration
+    localStorageMock.getItem.mockReturnValue(null);
+    authAPI.verifyOtp.mockResolvedValue({
+      data: { access: tokens.access, refresh: tokens.refresh, is_new_user: true },
+    });
+    authAPI.getUser.mockResolvedValue({ data: profile });
+  });
+
+  it("calls authAPI.verifyOtp with the provided phone number and code", async () => {
+    await renderAuth();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "loginWithOtp" }).click();
+    });
+
+    expect(authAPI.verifyOtp).toHaveBeenCalledWith(phoneNumber, code);
+  });
+
+  it("calls setTokens with access and refresh from the verify response", async () => {
+    await renderAuth();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "loginWithOtp" }).click();
+    });
+
+    expect(setTokens).toHaveBeenCalledWith({
+      access: tokens.access,
+      refresh: tokens.refresh,
+    });
+  });
+
+  it("calls authAPI.getUser after storing tokens", async () => {
+    await renderAuth();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "loginWithOtp" }).click();
+    });
+
+    // setTokens must be called first, then getUser
+    const setTokensOrder = setTokens.mock.invocationCallOrder[0];
+    const getUserOrder = authAPI.getUser.mock.invocationCallOrder[0];
+    expect(setTokensOrder).toBeLessThan(getUserOrder);
+  });
+
+  it("updates user state with the profile returned by getUser", async () => {
+    await renderAuth();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "loginWithOtp" }).click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("user").textContent).toBe(JSON.stringify(profile));
+    });
+    expect(screen.getByTestId("isAuthenticated").textContent).toBe("true");
+  });
+
+  it("returns { profile, isNewUser } with isNewUser mirroring the verify response's is_new_user", async () => {
+    authAPI.verifyOtp.mockResolvedValueOnce({
+      data: { access: tokens.access, refresh: tokens.refresh, is_new_user: true },
+    });
+
+    let returned;
+    const LoginWithOtpCapture = () => {
+      const { loginWithOtp } = useAuth();
+      return (
+        <button
+          onClick={async () => {
+            returned = await loginWithOtp(phoneNumber, code);
+          }}
+        >
+          capture-loginWithOtp
+        </button>
+      );
+    };
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <LoginWithOtpCapture />
+        </AuthProvider>
+      );
+    });
+
+    await act(async () => {
+      screen.getByRole("button", { name: "capture-loginWithOtp" }).click();
+    });
+
+    expect(returned).toEqual({ profile, isNewUser: true });
+  });
+
+  it("returns isNewUser: false for a returning user", async () => {
+    authAPI.verifyOtp.mockResolvedValueOnce({
+      data: { access: tokens.access, refresh: tokens.refresh, is_new_user: false },
+    });
+
+    let returned;
+    const LoginWithOtpCapture = () => {
+      const { loginWithOtp } = useAuth();
+      return (
+        <button
+          onClick={async () => {
+            returned = await loginWithOtp(phoneNumber, code);
+          }}
+        >
+          capture-loginWithOtp-returning
+        </button>
+      );
+    };
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <LoginWithOtpCapture />
+        </AuthProvider>
+      );
+    });
+
+    await act(async () => {
+      screen.getByRole("button", { name: "capture-loginWithOtp-returning" }).click();
+    });
+
+    expect(returned.isNewUser).toBe(false);
+  });
+
+  it("propagates errors thrown by authAPI.verifyOtp (e.g. wrong/expired code)", async () => {
+    authAPI.verifyOtp.mockRejectedValueOnce({
+      response: { status: 400, data: { code: "Incorrect code." } },
+    });
+    await renderAuth();
+
+    let caughtError;
+    const ErrorCapture = () => {
+      const { loginWithOtp } = useAuth();
+      return (
+        <button
+          onClick={async () => {
+            try {
+              await loginWithOtp(phoneNumber, code);
+            } catch (e) {
+              caughtError = e;
+            }
+          }}
+        >
+          err-loginWithOtp
+        </button>
+      );
+    };
+
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <ErrorCapture />
+        </AuthProvider>
+      );
+    });
+
+    await act(async () => {
+      screen.getByRole("button", { name: "err-loginWithOtp" }).click();
+    });
+
+    expect(caughtError).toBeDefined();
+    expect(caughtError.response.data.code).toBe("Incorrect code.");
+    // No tokens/user state should have been touched on failure.
+    expect(setTokens).not.toHaveBeenCalled();
   });
 });
 

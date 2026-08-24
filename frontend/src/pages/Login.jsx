@@ -47,6 +47,173 @@ const PwToggle = ({ show, onToggle }) => (
   </button>
 );
 
+// Must match backend/core/settings/base.py's OTP_RESEND_COOLDOWN_SECONDS
+// default (Task 2.1.2.2, currently 60s) — kept in sync manually since
+// the frontend has no way to read Django settings directly. If that
+// default ever changes, update this value too so the countdown here
+// doesn't mislead the user into thinking they can resend before the
+// backend will actually accept a new request.
+const OTP_RESEND_COOLDOWN_SECONDS = 60;
+
+const formatCountdown = (totalSeconds) => {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
+// Code-entry step (Task 2.3.2.2). Deliberately self-contained: it never
+// touches AuthContext/localStorage itself. The actual verify submission
+// is delegated to `onSubmitCode` (a promise-returning function the
+// parent supplies) rather than calling authAPI.verifyOtp() directly here
+// — the parent wires that to AuthContext's loginWithOtp() (Task 2.3.2.3),
+// which is what actually calls authAPI.verifyOtp(), stores tokens, and
+// hydrates the user in one step. Calling authAPI.verifyOtp() from BOTH
+// this component and loginWithOtp() would submit the (single-use) code
+// twice — the second attempt would always fail since OTPVerifyView marks
+// a code used after its first successful check — so there must be
+// exactly one call site, and this component keeps that call site in the
+// parent rather than duplicating it here.
+const OTPCodeStep = ({ phoneNumber, onSubmitCode, onVerified, onBack }) => {
+  const [code, setCode] = useState('');
+  const [codeError, setCodeError] = useState('');
+  const [verifying, setVerifying] = useState(false);
+
+  const [secondsLeft, setSecondsLeft] = useState(OTP_RESEND_COOLDOWN_SECONDS);
+  const [resending, setResending] = useState(false);
+  const [resendError, setResendError] = useState('');
+  const [resendSuccess, setResendSuccess] = useState(false);
+
+  // Ticks the countdown down every second, starting as soon as this
+  // step mounts, until it reaches 0.
+  useEffect(() => {
+    if (secondsLeft <= 0) return undefined;
+    const id = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [secondsLeft]);
+
+  const handleVerify = async (e) => {
+    e.preventDefault();
+    setCodeError('');
+
+    if (!/^\d{6}$/.test(code)) {
+      setCodeError('Enter the 6-digit code.');
+      return;
+    }
+
+    setVerifying(true);
+    try {
+      const result = await onSubmitCode(code);
+      onVerified(result);
+    } catch (err) {
+      const errors = parseErrors(err);
+      // OTPVerifyView returns { code: "<specific message>" } for every
+      // failure mode — not-found, expired, max-attempts, or wrong code
+      // (Task 2.3.1.2) — and the message text itself already tells the
+      // user what to do next (e.g. "...please request a new one."), so
+      // surfacing it verbatim is enough; no need for a separate generic
+      // fallback per failure type.
+      setCodeError(
+        errors.code || errors.detail || errors.non_field_errors ||
+        'Verification failed. Please try again.'
+      );
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (secondsLeft > 0 || resending) return;
+    setResending(true);
+    setResendError('');
+    setResendSuccess(false);
+    try {
+      await authAPI.requestOtp(phoneNumber);
+      setSecondsLeft(OTP_RESEND_COOLDOWN_SECONDS);
+      setCode('');
+      setCodeError('');
+      setResendSuccess(true);
+    } catch (err) {
+      const errors = parseErrors(err);
+      setResendError(
+        err.response?.status === 429
+          ? errors.detail || 'Please wait before requesting another code.'
+          : errors.detail || errors.non_field_errors || 'Could not resend code. Please try again.'
+      );
+    } finally {
+      setResending(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="text-center mb-6">
+        <i className="bi bi-shield-check text-teal-600 text-4xl mb-3 block" />
+        <h3 className="text-2xl font-bold text-gray-800">Enter Verification Code</h3>
+        <p className="text-gray-500 text-sm mt-1">
+          We sent a 6-digit code to <span className="font-medium text-gray-700">{phoneNumber}</span>
+        </p>
+      </div>
+
+      <AlertBanner msg={resendError} />
+      <AlertBanner msg={resendSuccess ? 'A new code has been sent.' : ''} type="success" />
+
+      <form onSubmit={handleVerify} noValidate>
+        <div className="relative mb-4">
+          <i className="bi bi-shield-lock absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            onChange={(e) => {
+              setCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+              if (codeError) setCodeError('');
+            }}
+            className={`w-full border rounded-lg pl-10 pr-3 py-3 text-center text-lg tracking-[0.5em] focus:outline-none focus:border-teal-500 transition ${codeError ? 'border-red-400' : 'border-gray-300'}`}
+            placeholder="••••••"
+            required
+          />
+          <FieldError msg={codeError} />
+        </div>
+
+        <button
+          type="submit"
+          disabled={verifying}
+          className="w-full bg-teal-600 text-white py-3 rounded-lg font-semibold hover:bg-teal-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {verifying
+            ? <><Spinner /> Verifying…</>
+            : <>Verify <i className="bi bi-arrow-right" /></>}
+        </button>
+
+        <div className="text-center mt-6 text-sm">
+          {secondsLeft > 0 ? (
+            <span className="text-gray-500">
+              Resend code in {formatCountdown(secondsLeft)}
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resending}
+              className="text-teal-600 font-medium hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {resending ? 'Resending…' : 'Resend code'}
+            </button>
+          )}
+        </div>
+
+        <div className="text-center mt-3 text-sm">
+          <button type="button" onClick={onBack} className="text-gray-500 hover:underline">
+            <i className="bi bi-arrow-left me-1" /> Use a different number
+          </button>
+        </div>
+      </form>
+    </>
+  );
+};
+
 // ──────────────────────────────────────────────────────────────────────────
 
 const Login = () => {
@@ -57,7 +224,7 @@ const Login = () => {
   // ── FIX: pull login + hydrateUser from AuthContext ──────────────────────
   // login()       → POST /auth/login/ + GET /auth/user/ + setUser()
   // hydrateUser() → GET /auth/user/ + setUser()  (used after register)
-  const { login, hydrateUser } = useAuth();
+  const { login, loginWithOtp, hydrateUser } = useAuth();
 
   useEffect(() => {
     setActiveForm(searchParams.get('mode') === 'register' ? 'register' : 'login');
@@ -490,29 +657,17 @@ const Login = () => {
                   )}
 
                   {phoneStep === 'code' && (
-                    <>
-                      <div className="text-center mb-6">
-                        <i className="bi bi-check-circle text-teal-600 text-4xl mb-3 block" />
-                        <h3 className="text-2xl font-bold text-gray-800">Check Your Phone</h3>
-                        <p className="text-gray-500 text-sm mt-1">
-                          We sent a verification code to <span className="font-medium text-gray-700">{phone}</span>
-                        </p>
-                      </div>
-
-                      {/* Code-entry form is built in Task 2.3.2.2 — this
-                          screen only confirms the request→transition
-                          worked for this task's scope. */}
-
-                      <div className="text-center text-sm">
-                        <button
-                          type="button"
-                          onClick={() => { setPhoneStep('phone'); setPhoneErrors({}); }}
-                          className="text-teal-600 font-medium hover:underline"
-                        >
-                          <i className="bi bi-arrow-left me-1" /> Use a different number
-                        </button>
-                      </div>
-                    </>
+                    <OTPCodeStep
+                      phoneNumber={phone}
+                      onBack={() => { setPhoneStep('phone'); setPhoneErrors({}); }}
+                      onSubmitCode={(code) => loginWithOtp(phone, code)}
+                      onVerified={({ isNewUser }) => {
+                        // New phone-only accounts have no first/last name
+                        // yet (Task 2.3.1.3) — nudge them straight to the
+                        // profile settings tab to fill it in.
+                        navigate(isNewUser ? '/account?tab=settings' : '/account');
+                      }}
+                    />
                   )}
                 </div>
               )}

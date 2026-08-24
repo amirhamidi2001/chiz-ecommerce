@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 
 import Login from '../pages/Login';
-import api, { setTokens, parseErrors } from '../services/api';
+import api, { setTokens, parseErrors, authAPI } from '../services/api';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────
 
@@ -14,6 +14,7 @@ const mockNavigate = vi.fn();
 // Add mock functions for the auth methods
 const mockLogin = vi.fn();
 const mockHydrateUser = vi.fn();
+const mockLoginWithOtp = vi.fn();
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -28,6 +29,7 @@ vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
     login: mockLogin,
     hydrateUser: mockHydrateUser,
+    loginWithOtp: mockLoginWithOtp,
   }),
 }));
 
@@ -36,6 +38,10 @@ vi.mock('../services/api', () => ({
   setTokens: vi.fn(),
   parseErrors: vi.fn(),
   isAuthenticated: vi.fn(() => false),
+  authAPI: {
+    requestOtp: vi.fn(),
+    verifyOtp: vi.fn(),
+  },
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -270,4 +276,173 @@ describe('Login page — register form', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/account');
     });
   });
+});
+
+// ─── Phone / OTP login (Tasks 2.3.2.1–2.3.2.3) ─────────────────────────────
+
+const goToPhoneStep = async (user) => {
+  await user.click(screen.getByRole('button', { name: /continue with phone/i }));
+};
+
+describe('Login page — phone/OTP: phone-entry step', () => {
+  it('valid phone calls authAPI.requestOtp with the normalized number and transitions to the code step on 200', async () => {
+    const user = userEvent.setup();
+    authAPI.requestOtp.mockResolvedValueOnce({ data: { detail: 'Verification code sent.' } });
+    renderLogin();
+
+    await goToPhoneStep(user);
+    await user.type(screen.getByPlaceholderText('09123456789'), '09123456789');
+    await user.click(screen.getByRole('button', { name: /send code/i }));
+
+    await waitFor(() => {
+      expect(authAPI.requestOtp).toHaveBeenCalledWith('09123456789');
+    });
+    expect(await screen.findByText(/enter verification code/i)).toBeInTheDocument();
+  });
+
+  it('invalid phone shows a validation error and does NOT call the API', async () => {
+    const user = userEvent.setup();
+    renderLogin();
+
+    await goToPhoneStep(user);
+    await user.type(screen.getByPlaceholderText('09123456789'), '12345');
+    await user.click(screen.getByRole('button', { name: /send code/i }));
+
+    expect(await screen.findByText(/enter a valid mobile number/i)).toBeInTheDocument();
+    expect(authAPI.requestOtp).not.toHaveBeenCalled();
+  });
+
+  it('a 429 response shows the cooldown/throttle error message', async () => {
+    const user = userEvent.setup();
+    authAPI.requestOtp.mockRejectedValueOnce({
+      response: { status: 429, data: { detail: 'Please wait before requesting another code.' } },
+    });
+    parseErrors.mockReturnValue({ detail: 'Please wait before requesting another code.' });
+    renderLogin();
+
+    await goToPhoneStep(user);
+    await user.type(screen.getByPlaceholderText('09123456789'), '09123456789');
+    await user.click(screen.getByRole('button', { name: /send code/i }));
+
+    expect(
+      await screen.findByText('Please wait before requesting another code.'),
+    ).toBeInTheDocument();
+    // Must not have advanced to the code step on failure.
+    expect(screen.queryByText(/enter verification code/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('Login page — phone/OTP: code-entry step', () => {
+  const goToCodeStep = async (user, phone = '09123456789') => {
+    authAPI.requestOtp.mockResolvedValueOnce({ data: { detail: 'Verification code sent.' } });
+    await goToPhoneStep(user);
+    await user.type(screen.getByPlaceholderText('09123456789'), phone);
+    await user.click(screen.getByRole('button', { name: /send code/i }));
+    await screen.findByText(/enter verification code/i);
+  };
+
+  it('submitting a correct code calls loginWithOtp and navigates using is_new_user from the response', async () => {
+    const user = userEvent.setup();
+    mockLoginWithOtp.mockResolvedValueOnce({
+      profile: { id: 1, phone_number: '09123456789' },
+      isNewUser: true,
+    });
+    renderLogin();
+    await goToCodeStep(user);
+
+    await user.type(screen.getByPlaceholderText('••••••'), '123456');
+    await user.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    await waitFor(() => {
+      expect(mockLoginWithOtp).toHaveBeenCalledWith('09123456789', '123456');
+    });
+    // New user (is_new_user: true) is nudged toward completing their
+    // profile (empty first/last name on OTP-created accounts — Task
+    // 2.3.1.3) rather than the plain account overview.
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/account?tab=settings');
+    });
+  });
+
+  it('a returning user (is_new_user: false) navigates to the plain account page', async () => {
+    const user = userEvent.setup();
+    mockLoginWithOtp.mockResolvedValueOnce({
+      profile: { id: 2, phone_number: '09121234567' },
+      isNewUser: false,
+    });
+    renderLogin();
+    await goToCodeStep(user, '09121234567');
+
+    await user.type(screen.getByPlaceholderText('••••••'), '654321');
+    await user.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/account');
+    });
+  });
+
+  it('a wrong code (400 with the backend\'s specific error shape) displays the exact inline message', async () => {
+    const user = userEvent.setup();
+    mockLoginWithOtp.mockRejectedValueOnce({
+      response: { status: 400, data: { code: 'Incorrect code.' } },
+    });
+    parseErrors.mockReturnValue({ code: 'Incorrect code.' });
+    renderLogin();
+    await goToCodeStep(user);
+
+    await user.type(screen.getByPlaceholderText('••••••'), '000000');
+    await user.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    expect(await screen.findByText('Incorrect code.')).toBeInTheDocument();
+    // Must not have navigated away on failure.
+    expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringMatching(/^\/account/));
+  });
+
+  it('an expired code shows the backend\'s specific expired message', async () => {
+    const user = userEvent.setup();
+    mockLoginWithOtp.mockRejectedValueOnce({
+      response: { status: 400, data: { code: 'This code has expired. Please request a new one.' } },
+    });
+    parseErrors.mockReturnValue({ code: 'This code has expired. Please request a new one.' });
+    renderLogin();
+    await goToCodeStep(user);
+
+    await user.type(screen.getByPlaceholderText('••••••'), '123456');
+    await user.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    expect(
+      await screen.findByText('This code has expired. Please request a new one.'),
+    ).toBeInTheDocument();
+  });
+
+  it('resend is disabled immediately on mount and becomes enabled after the cooldown elapses', async () => {
+    // shouldAdvanceTime: true lets vitest's fake timers also progress
+    // automatically alongside manual advancement, so userEvent's
+    // internal delays and RTL's waitFor/findBy polling (both of which
+    // rely on setTimeout under the hood) don't hang waiting on a clock
+    // that never otherwise moves — proven necessary for this exact
+    // chained-setTimeout-via-effect countdown pattern during Task
+    // 2.3.2.2's own manual verification.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderLogin();
+    await goToCodeStep(user);
+
+    // Immediately after mount: countdown showing, no clickable resend button.
+    expect(screen.getByText(/resend code in 1:00/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^resend code$/i })).not.toBeInTheDocument();
+
+    // Advance in 1-second increments, well past the full 60s cooldown
+    // (Task 2.1.2.2's OTP_RESEND_COOLDOWN_SECONDS default, matched on
+    // the frontend), so each tick's setState -> re-render -> effect
+    // re-schedule fully settles before the next.
+    for (let i = 0; i < 200; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+
+    expect(await screen.findByRole('button', { name: /^resend code$/i })).toBeEnabled();
+
+    vi.useRealTimers();
+  }, 30000);
 });

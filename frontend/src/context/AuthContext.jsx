@@ -44,6 +44,24 @@ export const AuthProvider = ({ children }) => {
     return profile;
   }, []);
 
+  // ── loginWithOtp ───────────────────────────────────────────────────────
+  // Completes the phone/OTP flow (Feature 2.3.2): the phone-entry and
+  // code-entry components (Tasks 2.3.2.1/2.3.2.2) call authAPI.requestOtp()
+  // / authAPI.verifyOtp() themselves — this method is only the final
+  // hand-off once verification has already succeeded server-side. Mirrors
+  // login()'s exact shape (fetch tokens → store → hydrate user → return
+  // profile) for consistency, and additionally surfaces `isNewUser` from
+  // the verify response so the caller can redirect a brand-new user to a
+  // "complete your profile" step (empty first_name/last_name on
+  // OTP-created accounts — see Task 2.3.1.3).
+  const loginWithOtp = useCallback(async (phoneNumber, code) => {
+    const { data } = await authAPI.verifyOtp(phoneNumber, code);
+    setTokens({ access: data.access, refresh: data.refresh });
+    const { data: profile } = await authAPI.getUser();
+    setUser(profile);
+    return { profile, isNewUser: data.is_new_user };
+  }, []);
+
   // ── hydrateUser ─────────────────────────────────────────────────────────
   // Call this after *any* flow that sets tokens externally (e.g. register)
   // without going through login().  It fetches GET /auth/user/ and writes the
@@ -85,11 +103,12 @@ export const AuthProvider = ({ children }) => {
       isAuthenticated: !!user,
       isAdmin: user?.type === 2 || user?.type === 3,
       login,
+      loginWithOtp,
       logout,
       hydrateUser,
       updateUser,
     }),
-    [user, loading, login, logout, hydrateUser, updateUser],
+    [user, loading, login, loginWithOtp, logout, hydrateUser, updateUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

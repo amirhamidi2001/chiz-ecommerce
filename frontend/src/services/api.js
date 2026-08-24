@@ -174,6 +174,14 @@ export const authAPI = {
     api.post('/auth/otp/request/', { phone_number }),
 
   /**
+   * POST /auth/otp/verify/
+   * Body: { phone_number, code }
+   * Returns: { access, refresh, is_new_user }
+   */
+  verifyOtp: (phone_number, code) =>
+    api.post('/auth/otp/verify/', { phone_number, code }),
+
+  /**
    * POST /auth/confirm-email/
    * Body: { token }
    */
