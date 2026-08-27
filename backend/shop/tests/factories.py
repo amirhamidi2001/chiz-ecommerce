@@ -9,6 +9,7 @@ from shop.models import (
     Product,
     ProductColor,
     ProductImage,
+    ProductVariant,
     Review,
 )
 
@@ -102,6 +103,20 @@ class ProductColorFactory(DjangoModelFactory):
 
     product = factory.SubFactory(ProductFactory)
     color = factory.SubFactory(ColorFactory)
+
+
+class ProductVariantFactory(DjangoModelFactory):
+    class Meta:
+        model = ProductVariant
+
+    product = factory.SubFactory(ProductFactory)
+    sku = factory.Sequence(lambda n: f"SKU-{n:06d}")
+    barcode = ""
+    color = factory.SubFactory(ColorFactory)
+    price = factory.Faker("pydecimal", left_digits=3, right_digits=2, positive=True)
+    original_price = None
+    stock = factory.Faker("pyint", min_value=0, max_value=200)
+    is_active = True
 
 
 class ReviewFactory(DjangoModelFactory):

@@ -135,6 +135,35 @@ class ProductColor(models.Model):
         return f"{self.product.name} — {self.color.name}"
 
 
+class ProductVariant(models.Model):
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="variants"
+    )
+    sku = models.CharField(max_length=64, unique=True, blank=True)
+    barcode = models.CharField(max_length=20, blank=True)
+    color = models.ForeignKey(
+        Color,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="variants",
+    )
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    original_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    stock = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.product.name} — {self.sku or 'unsaved'}"
+
+
 class Review(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="reviews"

@@ -2,13 +2,22 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.utils.text import slugify
-from shop.models import Brand, Category, Color, Product, ProductColor, Review
+from shop.models import (
+    Brand,
+    Category,
+    Color,
+    Product,
+    ProductColor,
+    ProductVariant,
+    Review,
+)
 from shop.tests.factories import (
     BrandFactory,
     CategoryFactory,
     ColorFactory,
     ProductColorFactory,
     ProductFactory,
+    ProductVariantFactory,
     ReviewFactory,
 )
 
@@ -164,6 +173,71 @@ class TestProductColorModel:
         pc = ProductColorFactory()
         with pytest.raises(Exception):
             ProductColorFactory(product=pc.product, color=pc.color)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ProductVariant
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestProductVariantModel:
+
+    def test_variant_can_be_created_linked_to_existing_product(self, db):
+        product = ProductFactory(name="Matte Foundation")
+        variant = ProductVariantFactory(
+            product=product, sku="FOUND-SHADE-30", price=25, stock=15
+        )
+
+        assert variant.pk is not None
+        assert variant.product_id == product.id
+        assert variant.sku == "FOUND-SHADE-30"
+        assert variant.price == 25
+        assert variant.stock == 15
+
+    def test_str_representation_includes_product_name_and_sku(self, db):
+        product = ProductFactory(name="Hydrating Serum")
+        variant = ProductVariantFactory(product=product, sku="SERUM-50ML")
+        assert str(variant) == "Hydrating Serum — SERUM-50ML"
+
+    def test_str_representation_falls_back_when_sku_blank(self, db):
+        product = ProductFactory(name="Lip Tint")
+        variant = ProductVariant(product=product, price=10, stock=5)
+        assert str(variant) == "Lip Tint — unsaved"
+
+    def test_reverse_accessor_via_related_name_variants(self, db):
+        product = ProductFactory(name="Setting Powder")
+        v1 = ProductVariantFactory(product=product)
+        v2 = ProductVariantFactory(product=product)
+
+        fetched_product = Product.objects.get(pk=product.pk)
+        variant_ids = set(fetched_product.variants.all().values_list("id", flat=True))
+        assert variant_ids == {v1.id, v2.id}
+
+    def test_color_is_optional(self, db):
+        variant = ProductVariantFactory(color=None)
+        assert variant.color is None
+
+    def test_deleting_color_sets_variant_color_to_null(self, db):
+        color = ColorFactory()
+        variant = ProductVariantFactory(color=color)
+        color.delete()
+        variant.refresh_from_db()
+        assert variant.color is None
+
+    def test_deleting_product_cascades_to_variant(self, db):
+        product = ProductFactory()
+        variant = ProductVariantFactory(product=product)
+        variant_id = variant.id
+        product.delete()
+        assert ProductVariant.objects.filter(id=variant_id).count() == 0
+
+    def test_is_active_defaults_to_true(self, db):
+        variant = ProductVariantFactory()
+        assert variant.is_active is True
+
+    def test_sku_uniqueness_enforced_at_db(self, db):
+        ProductVariantFactory(sku="UNIQUE-SKU-1")
+        with pytest.raises(Exception):
+            ProductVariantFactory(sku="UNIQUE-SKU-1")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
