@@ -6,6 +6,7 @@ from django.utils.http import urlsafe_base64_encode
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -30,7 +31,7 @@ from .services.otp import (
     generate_otp,
     verify_otp,
 )
-from .throttles import PhoneOTPRequestThrottle
+from .throttles import AuthSensitiveRateThrottle, PhoneOTPRequestThrottle
 from .tokens import password_reset_token
 
 User = get_user_model()
@@ -93,6 +94,9 @@ class RegisterView(APIView):
     """
 
     permission_classes = [AllowAny]
+    # Tighter than the general anon rate — mass fake account creation is
+    # a real, specific abuse vector for this endpoint (Task 2.4.1.4).
+    throttle_classes = [AuthSensitiveRateThrottle]
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -124,6 +128,13 @@ class LoginView(TokenObtainPairView):
     """
 
     permission_classes = [AllowAny]
+    # Tighter than the general anon rate — login is the classic
+    # credential-stuffing target (Task 2.4.1.4). TokenObtainPairView
+    # inherits DRF's normal APIView.throttle_classes machinery
+    # unmodified (verified directly, not assumed — see
+    # accounts/tests/test_views.py), so setting this here works exactly
+    # like it does on a plain APIView.
+    throttle_classes = [AuthSensitiveRateThrottle]
 
 
 # ─── Current user  ←  NEW  ───────────────────────────────────────────────────
@@ -209,6 +220,9 @@ class PasswordResetRequestView(APIView):
     """
 
     permission_classes = [AllowAny]
+    # Tighter than the general anon rate — email-enumeration/spam is a
+    # real abuse vector for this endpoint (Task 2.4.1.4).
+    throttle_classes = [AuthSensitiveRateThrottle]
 
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
@@ -235,6 +249,10 @@ class PasswordResetConfirmView(APIView):
     """
 
     permission_classes = [AllowAny]
+    # Tighter than the general anon rate — same sensitive-endpoint
+    # reasoning as PasswordResetRequestView above (Task 2.4.1.4);
+    # guards against scripted token/uid guessing too.
+    throttle_classes = [AuthSensitiveRateThrottle]
 
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
@@ -254,24 +272,27 @@ class OTPRequestView(APIView):
     POST /api/auth/otp/request/
     Body: { phone_number }
 
-    Requests a one-time code be sent to `phone_number`. This single
-    endpoint is used for BOTH login and registration — always requesting
-    with purpose="login" here regardless of whether the phone belongs to
-    an existing account. The login-vs-register split happens at
-    verify-time instead (Task 2.3.1.2), not here: at request-time we
-    don't yet know whether this is a new or returning user, and
-    responding differently based on that (e.g. "no account found for
-    this number" vs "code sent") would itself be a user-enumeration
-    vector — the exact same reasoning PasswordResetRequestView above
-    already follows for email.
+    Requests a one-time code be sent to `phone_number`. Used for BOTH
+    login and registration — the login-vs-register split happens at
+    verify-time instead, not here (revealing whether a phone is
+    registered at request-time would itself be a user-enumeration
+    vector, same reasoning as PasswordResetRequestView above).
 
     Always returns a generic 200 response with no indication of whether
-    the phone number is registered — never the code itself, never a
-    phone-number confirmation, never an "already registered" hint.
+    the phone number is registered.
     """
 
     permission_classes = [AllowAny]
-    throttle_classes = [PhoneOTPRequestThrottle]
+    # Deliberately combining both: setting throttle_classes here
+    # REPLACES DEFAULT_THROTTLE_CLASSES for this view entirely — DRF
+    # does not merge per-view throttle_classes with the global defaults.
+    # PhoneOTPRequestThrottle alone caps requests PER PHONE NUMBER
+    # (3/10min), but does not cap the total volume of requests a single
+    # client can make by cycling through many different phone numbers
+    # (each gets its own fresh 3-request allowance) — AnonRateThrottle
+    # adds a general, IP-based backstop (the project-wide "anon" rate)
+    # against that kind of high-volume enumeration/scanning.
+    throttle_classes = [PhoneOTPRequestThrottle, AnonRateThrottle]
 
     def post(self, request):
         serializer = OTPRequestSerializer(data=request.data)
@@ -286,14 +307,6 @@ class OTPRequestView(APIView):
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
         except SMSDeliveryError:
-            # generate_otp() already logged this at ERROR level for ops
-            # visibility (Task 2.2.1.3). The OTPCode row still exists —
-            # deliberately mask the delivery failure from the client and
-            # respond exactly as if it succeeded, for the same
-            # user-enumeration reasoning as the rest of this view: a
-            # different response here could let an attacker infer things
-            # about the phone number (e.g. "this number's carrier always
-            # fails" vs "succeeds").
             pass
 
         return Response(
@@ -310,36 +323,6 @@ class OTPVerifyView(APIView):
     POST /api/auth/otp/verify/
     Body: { phone_number, code }
     Returns: { access, refresh, is_new_user }
-
-    Verifies a previously-requested OTP (OTPRequestView) and completes
-    login-or-registration in a single step: if a User with this
-    phone_number already exists, logs them in; otherwise creates a new
-    account on the spot and logs into that. This "OTP verification IS
-    registration" pattern (no separate signup step) is the convention
-    Iranian consumer apps overwhelmingly use, and mirrors how
-    RegisterView already issues JWTs immediately on success.
-
-    Unlike OTPRequestView, this endpoint's error messages ARE allowed to
-    be specific per-failure-mode (expired/max-attempts/wrong-code/not-
-    found) — the user-enumeration concern from the request endpoint
-    doesn't apply here, since submitting a code at all already proves
-    the caller received an SMS sent to this phone number (i.e. they
-    already control it).
-
-    Status code: 201 when a brand-new account was created (matching
-    RegisterView's 201 for account creation), 200 when logging into an
-    existing account (matching LoginView's 200) — chosen per-request
-    based on which actually happened, rather than a single fixed code
-    for both outcomes, since REST convention ties 201 specifically to
-    "a new resource was created."
-
-    NOTE: a phone-only account created here has NO first_name/last_name
-    yet (Profile.first_name/last_name are blank=False at the form/
-    validation level, but that's only enforced via full_clean(), not
-    plain .save() — the auto-created Profile from the post_save signal
-    saves fine with empty strings). The frontend (Task 2.3.2) is
-    expected to use the `is_new_user` flag below to show a "complete
-    your profile" prompt so these get filled in.
     """
 
     permission_classes = [AllowAny]
@@ -380,19 +363,12 @@ class OTPVerifyView(APIView):
         is_new_user = user is None
 
         if is_new_user:
-            # email=None: this is the phone-only OTP account path —
-            # UserManager.create_user() was updated (Task 2.3.1.2) to
-            # make email optional specifically to support this. See
-            # accounts/models.py for the full reasoning.
             user = User.objects.create_user(
                 email=None,
                 phone_number=phone_number,
                 is_verified=True,
             )
         elif not user.is_verified:
-            # Phone verification via OTP is itself a form of identity
-            # verification — mark any existing-but-unverified account
-            # verified now, same as a fresh OTP account.
             user.is_verified = True
             user.save(update_fields=["is_verified"])
 

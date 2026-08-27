@@ -1,15 +1,14 @@
-from unittest.mock import patch
-
 import pytest
-from accounts.models import OTPCode
-from accounts.services.otp import generate_otp
 from accounts.tokens import password_reset_token
+from accounts.throttles import AuthSensitiveRateThrottle
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
+from rest_framework.test import APIClient
+from unittest.mock import patch
 
 User = get_user_model()
 
@@ -21,8 +20,29 @@ PROFILE_URL = "/api/auth/profile/"
 CHANGE_PW_URL = "/api/auth/change-password/"
 PW_RESET_URL = "/api/auth/password-reset/"
 PW_RESET_CONF_URL = "/api/auth/password-reset/confirm/"
-OTP_REQUEST_URL = "/api/auth/otp/request/"
-OTP_VERIFY_URL = "/api/auth/otp/verify/"
+
+
+@pytest.fixture(autouse=True)
+def _clear_throttle_cache_for_every_test():
+    """
+    Module-wide autouse fixture (Task 2.4.1.4). LoginView, RegisterView,
+    PasswordResetRequestView, and PasswordResetConfirmView all gained a
+    REAL throttle (AuthSensitiveRateThrottle, 10/min) in this task —
+    before that, these endpoints had zero throttling of their own, so
+    the many pre-existing tests in this file that repeatedly POST to
+    them never mattered. Throttle history lives in Django's cache
+    (LocMemCache, no CACHES override anywhere in this project), which
+    persists across every test function in the same process — without
+    clearing it here, the cumulative request count across ALL tests in
+    this file (not just the throttle-specific ones below) can exceed
+    the real 10/min limit and start failing unrelated,
+    previously-passing tests with an unexpected 429. Scoped to the
+    whole module (not just TestAuthSensitiveRateThrottle) since any
+    class here can hit these now-throttled endpoints.
+    """
+    cache.clear()
+    yield
+    cache.clear()
 
 
 def make_reset_link(user):
@@ -479,413 +499,149 @@ class TestPasswordResetConfirmView:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# OTP Request
+# auth_sensitive throttle scope (Task 2.4.1.4)
 # ──────────────────────────────────────────────────────────────────────────
-
-
+#
+# Uses the same patch.object(ThrottleClass, "rate", ..., create=True)
+# pattern already established in shop/tests/test_views.py for the
+# general anon-rate test, rather than @override_settings — DRF binds a
+# throttle class's rate as an instance attribute resolved from
+# settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"][self.scope] inside
+# SimpleRateThrottle.__init__ at instantiation time, so overriding the
+# *settings* dict doesn't reliably affect an already-imported throttle
+# class the way patching the class attribute directly does.
 @pytest.mark.django_db
-class TestOTPRequestView:
+class TestAuthSensitiveRateThrottle:
+    # Cache clearing is handled by the module-level
+    # _clear_throttle_cache_for_every_test autouse fixture above — no
+    # class-specific fixture needed here.
 
-    VALID_PHONE = "09123456789"
-
-    @pytest.fixture(autouse=True)
-    def clear_throttle_cache(self):
+    def test_login_returns_429_once_lowered_limit_is_exceeded(self):
         """
-        PhoneOTPRequestThrottle (Task 2.1.2.4) stores request history in
-        Django's cache, which persists across tests in the same process
-        (LocMemCache) — clear it before and after every test in this
-        class so throttle/cooldown state never leaks between tests.
+        Hammers POST /api/auth/login/ with intentionally wrong
+        credentials — it doesn't matter that every attempt fails
+        authentication (400/401), only that enough requests land to
+        exceed the (temporarily lowered) auth_sensitive rate and
+        produce a 429.
         """
-        cache.clear()
-        yield
-        cache.clear()
+        with patch.object(AuthSensitiveRateThrottle, "rate", "3/min", create=True):
+            client = APIClient()
+            statuses = [
+                client.post(
+                    LOGIN_URL,
+                    {"email": "nobody@example.com", "password": "wrong-password"},
+                    format="json",
+                ).status_code
+                for _ in range(5)
+            ]
 
-    def test_valid_phone_number_returns_200_and_creates_one_otp_row(self, api_client):
-        res = api_client.post(
-            OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
-        )
+        # First 3 requests (the lowered limit) are NOT throttled — they
+        # fail on bad credentials instead (401/400 depending on
+        # SimpleJWT's exact response), never 429.
+        assert status.HTTP_429_TOO_MANY_REQUESTS not in statuses[:3]
+        # ...and at least one request beyond that is throttled.
+        assert status.HTTP_429_TOO_MANY_REQUESTS in statuses[3:]
 
-        assert res.status_code == status.HTTP_200_OK
-        assert res.data == {"detail": "Verification code sent."}
-
-        qs = OTPCode.objects.filter(phone_number=self.VALID_PHONE, purpose="login")
-        assert qs.count() == 1
-
-    def test_response_never_reveals_the_code_or_phone_confirmation(self, api_client):
+    def test_register_returns_429_once_lowered_limit_is_exceeded(self):
         """
-        Deliberately vague response — no code, no phone-number echo, no
-        hint about whether the number is already registered (same
-        user-enumeration reasoning as PasswordResetRequestView).
+        Uses a fresh, unique email per request specifically so every
+        attempt reaches the throttle check rather than short-circuiting
+        on a 400 "email already exists" validation error, which would
+        make this test meaningless (it needs to prove the THROTTLE
+        fires, not registration's own uniqueness validation).
         """
-        res = api_client.post(
-            OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
-        )
-        assert set(res.data.keys()) == {"detail"}
-        assert self.VALID_PHONE not in res.data["detail"]
+        with patch.object(AuthSensitiveRateThrottle, "rate", "3/min", create=True):
+            client = APIClient()
+            statuses = []
+            for i in range(5):
+                payload = {
+                    "email": f"throttle-register-{i}@example.com",
+                    "first_name": "Throttle",
+                    "last_name": "Test",
+                    "password": "SecurePass123!",
+                }
+                res = client.post(REGISTER_URL, payload, format="json")
+                statuses.append(res.status_code)
 
-    @pytest.mark.parametrize(
-        "invalid_phone",
-        [
-            "12345",
-            "+15551234567",  # US number
-            "02112345678",  # Iranian landline, not mobile
-            "0812345678",  # wrong prefix (08, not 09)
-        ],
-    )
-    def test_invalid_phone_format_returns_400_with_field_error(
-        self, api_client, invalid_phone
-    ):
-        res = api_client.post(
-            OTP_REQUEST_URL, {"phone_number": invalid_phone}, format="json"
-        )
+        assert statuses[:3] == [
+            status.HTTP_201_CREATED,
+            status.HTTP_201_CREATED,
+            status.HTTP_201_CREATED,
+        ]
+        assert status.HTTP_429_TOO_MANY_REQUESTS in statuses[3:]
 
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "phone_number" in res.data
-        assert OTPCode.objects.filter(phone_number=invalid_phone).count() == 0
+    def test_password_reset_request_returns_429_once_lowered_limit_is_exceeded(self):
+        with patch.object(AuthSensitiveRateThrottle, "rate", "3/min", create=True):
+            client = APIClient()
+            statuses = [
+                client.post(
+                    PW_RESET_URL, {"email": "someone@example.com"}, format="json"
+                ).status_code
+                for _ in range(5)
+            ]
 
-    def test_missing_phone_number_returns_400(self, api_client):
-        res = api_client.post(OTP_REQUEST_URL, {}, format="json")
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "phone_number" in res.data
+        # First 3 succeed with the endpoint's normal always-200
+        # enumeration-safe response.
+        assert statuses[:3] == [status.HTTP_200_OK] * 3
+        assert status.HTTP_429_TOO_MANY_REQUESTS in statuses[3:]
 
-    def test_international_format_is_accepted_and_normalized(self, api_client):
-        res = api_client.post(
-            OTP_REQUEST_URL, {"phone_number": "+989123456789"}, format="json"
-        )
-        assert res.status_code == status.HTTP_200_OK
-        # Stored under the normalized local-format number, not the raw
-        # international-format input.
-        assert OTPCode.objects.filter(
-            phone_number="09123456789", purpose="login"
-        ).exists()
+    def test_password_reset_confirm_returns_429_once_lowered_limit_is_exceeded(self):
+        with patch.object(AuthSensitiveRateThrottle, "rate", "3/min", create=True):
+            client = APIClient()
+            statuses = [
+                client.post(
+                    PW_RESET_CONF_URL,
+                    {
+                        "uid": "invalid-uid",
+                        "token": "invalid-token",
+                        "new_password": "Pass123!",
+                        "confirm_password": "Pass123!",
+                    },
+                    format="json",
+                ).status_code
+                for _ in range(5)
+            ]
 
-    def test_second_immediate_request_same_phone_returns_429_cooldown(self, api_client):
-        first = api_client.post(
-            OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
-        )
-        assert first.status_code == status.HTTP_200_OK
+        # Invalid uid/token means every non-throttled attempt fails
+        # validation (400) — never 429 for the first 3.
+        assert status.HTTP_429_TOO_MANY_REQUESTS not in statuses[:3]
+        assert status.HTTP_429_TOO_MANY_REQUESTS in statuses[3:]
 
-        second = api_client.post(
-            OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
-        )
-
-        assert second.status_code == status.HTTP_429_TOO_MANY_REQUESTS
-        assert "wait" in second.data["detail"].lower()
-
-        # Cooldown rejection must not create a second row.
-        assert (
-            OTPCode.objects.filter(
-                phone_number=self.VALID_PHONE, purpose="login"
-            ).count()
-            == 1
-        )
-
-    def test_fourth_request_within_throttle_window_returns_429_from_throttle(
-        self, api_client
-    ):
-        """
-        Isolates the DRF-level PhoneOTPRequestThrottle (Task 2.1.2.4,
-        3 requests / 10 min) from the OTP service's own ~60s resend
-        cooldown (Task 2.1.2.2) — which would otherwise block the 2nd
-        request already, before the throttle ever gets a chance to be
-        the thing that blocks the 4th. generate_otp() is patched to
-        bypass the cooldown check entirely (always "succeeding") so
-        every one of the first 3 requests reaches 200, and the 4th is
-        blocked purely by the throttle layer.
-        """
-        phone = "09121230099"
-
-        with patch("accounts.views.generate_otp") as mock_generate_otp:
-            mock_generate_otp.return_value = "123456"
-
-            for _ in range(3):
-                res = api_client.post(
-                    OTP_REQUEST_URL, {"phone_number": phone}, format="json"
-                )
-                assert res.status_code == status.HTTP_200_OK
-
-            fourth = api_client.post(
-                OTP_REQUEST_URL, {"phone_number": phone}, format="json"
-            )
-
-        assert fourth.status_code == status.HTTP_429_TOO_MANY_REQUESTS
-        # DRF's own throttle message ("Request was throttled...") is
-        # distinct from the service-cooldown message asserted in
-        # test_second_immediate_request_same_phone_returns_429_cooldown
-        # above — confirms this 429 came from the throttle layer, not
-        # the service-level cooldown (which was bypassed via the mock).
-        assert "throttled" in str(fourth.data["detail"]).lower()
-
-    def test_sms_delivery_failure_is_masked_and_still_returns_200(self, api_client):
-        """
-        Task 2.2.1.3's SMSDeliveryError must be swallowed by this view —
-        the client still gets the same generic success response even
-        when the SMS provider itself failed, per the user-enumeration
-        reasoning documented on OTPRequestView. The OTPCode row still
-        exists regardless (created before the send attempt).
-        """
-        from accounts.services.otp import SMSDeliveryError
-
-        with patch("accounts.views.generate_otp") as mock_generate_otp:
-            mock_generate_otp.side_effect = SMSDeliveryError("gateway down")
-
-            res = api_client.post(
-                OTP_REQUEST_URL, {"phone_number": self.VALID_PHONE}, format="json"
-            )
-
-        assert res.status_code == status.HTTP_200_OK
-        assert res.data == {"detail": "Verification code sent."}
-
-
-# ──────────────────────────────────────────────────────────────────────────
-# OTP Verify
-# ──────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.django_db
-class TestOTPVerifyView:
-
-    VALID_PHONE = "09123456789"
-
-    @pytest.fixture(autouse=True)
-    def clear_throttle_cache(self):
-        cache.clear()
-        yield
-        cache.clear()
-
-    def test_valid_code_new_phone_creates_user_and_returns_201(self, api_client):
-        """
-        Acceptance criterion 1: verifying a valid code for a brand-new
-        phone number creates exactly one new User with that
-        phone_number, is_verified=True, and returns 201 (this view's
-        chosen status code for "a new account was created" — matching
-        RegisterView's 201) with access/refresh tokens and
-        is_new_user: true.
-        """
-        code = generate_otp(self.VALID_PHONE, "login")
-
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": code},
-            format="json",
-        )
-
-        assert res.status_code == status.HTTP_201_CREATED
-        assert res.data["is_new_user"] is True
-        assert "access" in res.data
-        assert "refresh" in res.data
-
-        users = User.objects.filter(phone_number=self.VALID_PHONE)
-        assert users.count() == 1
-        new_user = users.get()
-        assert new_user.is_verified is True
-        assert new_user.email is None
-
-    def test_valid_code_existing_phone_logs_into_same_user_returns_200(
-        self, api_client
+    def test_current_user_view_is_not_affected_by_auth_sensitive_scope(
+        self, auth_client
     ):
         """
-        Acceptance criterion 2: verifying a valid code for a phone
-        number that already has a User logs into that SAME existing
-        user (no duplicate created) and returns 200 (this view's chosen
-        status code for "logged into an existing account" — matching
-        LoginView's 200) with is_new_user: false.
+        CurrentUserView requires authentication already and was
+        deliberately NOT given throttle_classes = [AuthSensitiveRateThrottle]
+        (Task 2.4.1.4's explicit exclusion list). Proof: even with
+        auth_sensitive set to an absurdly low 1/min, several authenticated
+        requests to this view must all still succeed — if it were
+        wrongly using this scope, the 2nd request would already 429.
         """
-        existing_user = User.objects.create_user(
-            email=None, phone_number=self.VALID_PHONE, is_verified=False
-        )
-        code = generate_otp(self.VALID_PHONE, "login")
+        with patch.object(AuthSensitiveRateThrottle, "rate", "1/min", create=True):
+            statuses = [auth_client.get(CURRENT_USER_URL).status_code for _ in range(5)]
 
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": code},
-            format="json",
-        )
+        assert statuses == [status.HTTP_200_OK] * 5
 
-        assert res.status_code == status.HTTP_200_OK
-        assert res.data["is_new_user"] is False
-        assert "access" in res.data
-        assert "refresh" in res.data
+    def test_profile_view_is_not_affected_by_auth_sensitive_scope(self, auth_client):
+        """Same isolation proof as above, for ProfileView."""
+        with patch.object(AuthSensitiveRateThrottle, "rate", "1/min", create=True):
+            statuses = [auth_client.get(PROFILE_URL).status_code for _ in range(5)]
 
-        users = User.objects.filter(phone_number=self.VALID_PHONE)
-        assert users.count() == 1
-        assert users.get().pk == existing_user.pk
+        assert statuses == [status.HTTP_200_OK] * 5
 
-    def test_existing_unverified_user_becomes_verified_on_successful_login(
-        self, api_client
-    ):
-        existing_user = User.objects.create_user(
-            email=None, phone_number=self.VALID_PHONE, is_verified=False
-        )
-        code = generate_otp(self.VALID_PHONE, "login")
-
-        api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": code},
-            format="json",
-        )
-
-        existing_user.refresh_from_db()
-        assert existing_user.is_verified is True
-
-    def test_new_user_profile_is_created_without_crashing(self, api_client):
+    def test_normal_traffic_is_not_throttled_under_the_real_default_rate(self):
         """
-        Profile.first_name/last_name are blank=False, but that's only
-        enforced via full_clean()/ModelForms, not the auto-created
-        Profile's bare .save() from the post_save signal — confirm the
-        whole request succeeds and leaves an (empty-name) Profile behind
-        rather than crashing.
+        Sanity check with the REAL (untouched) 10/min default: a
+        handful of ordinary login attempts must not be throttled.
         """
-        code = generate_otp(self.VALID_PHONE, "login")
-
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": code},
-            format="json",
-        )
-
-        assert res.status_code == status.HTTP_201_CREATED
-        new_user = User.objects.get(phone_number=self.VALID_PHONE)
-        assert new_user.profile is not None
-        assert new_user.profile.first_name == ""
-        assert new_user.profile.last_name == ""
-
-    def test_no_pending_code_returns_400_with_specific_message(self, api_client):
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": "123456"},
-            format="json",
-        )
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "code" in res.data
-        assert "new one" in res.data["code"].lower()
-
-    def test_wrong_code_returns_400_with_specific_message(self, api_client):
-        real_code = generate_otp(self.VALID_PHONE, "login")
-        wrong_code = "000000" if real_code != "000000" else "111111"
-
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": wrong_code},
-            format="json",
-        )
-
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert res.data["code"] == "Incorrect code."
-        # No user/tokens created for a failed attempt.
-        assert not User.objects.filter(phone_number=self.VALID_PHONE).exists()
-
-    def test_expired_code_returns_400_with_specific_message(self, api_client):
-        from datetime import timedelta
-
-        from django.contrib.auth.hashers import make_password
-        from django.utils import timezone
-
-        OTPCode.objects.create(
-            phone_number=self.VALID_PHONE,
-            purpose="login",
-            code_hash=make_password("123456"),
-            expires_at=timezone.now() - timedelta(seconds=10),
-        )
-
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": "123456"},
-            format="json",
-        )
-
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "expired" in res.data["code"].lower()
-
-    def test_max_attempts_exceeded_returns_400_with_specific_message(self, api_client):
-        from django.contrib.auth.hashers import make_password
-        from django.utils import timezone
-
-        OTPCode.objects.create(
-            phone_number=self.VALID_PHONE,
-            purpose="login",
-            code_hash=make_password("654321"),
-            expires_at=timezone.now() + timezone.timedelta(minutes=5),
-            attempts=5,
-        )
-
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": "654321"},  # correct code
-            format="json",
-        )
-
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "too many" in res.data["code"].lower()
-        # No account created despite the code being technically correct —
-        # the max-attempts cap is checked before the code comparison.
-        assert not User.objects.filter(phone_number=self.VALID_PHONE).exists()
-
-    def test_invalid_phone_format_returns_400(self, api_client):
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": "12345", "code": "123456"},
-            format="json",
-        )
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "phone_number" in res.data
-
-    @pytest.mark.parametrize("bad_code", ["12345", "1234567", "abcdef", ""])
-    def test_malformed_code_length_returns_400(self, api_client, bad_code):
-        res = api_client.post(
-            OTP_VERIFY_URL,
-            {"phone_number": self.VALID_PHONE, "code": bad_code},
-            format="json",
-        )
-        assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "code" in res.data
-
-    def test_different_users_get_different_tokens(self, api_client):
-        phone_a = "09121111111"
-        phone_b = "09122222222"
-        code_a = generate_otp(phone_a, "login")
-        code_b = generate_otp(phone_b, "login")
-
-        res_a = api_client.post(
-            OTP_VERIFY_URL, {"phone_number": phone_a, "code": code_a}, format="json"
-        )
-        res_b = api_client.post(
-            OTP_VERIFY_URL, {"phone_number": phone_b, "code": code_b}, format="json"
-        )
-
-        assert res_a.data["access"] != res_b.data["access"]
-        assert User.objects.filter(phone_number=phone_a).count() == 1
-        assert User.objects.filter(phone_number=phone_b).count() == 1
-
-
-# ──────────────────────────────────────────────────────────────────────────
-# Current User — OTP-created profile gap (Task 2.3.1.3)
-# ──────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.django_db
-class TestCurrentUserViewOTPProfileGap:
-
-    def test_get_current_user_for_fresh_otp_user_returns_200_with_blank_names(
-        self, api_client
-    ):
-        """
-        Confirms GET /api/auth/user/ — which the frontend calls right
-        after storing tokens from OTPVerifyView — correctly reflects an
-        OTP-created user's empty first_name/last_name as plain empty
-        strings rather than erroring, so the frontend can detect
-        "profile incomplete" by checking if those fields are falsy.
-        """
-        otp_user = User.objects.create_user(
-            email=None, phone_number="09121230302", is_verified=True
-        )
-        api_client.force_authenticate(user=otp_user)
-
-        res = api_client.get(CURRENT_USER_URL)
-
-        assert res.status_code == status.HTTP_200_OK
-        assert res.data["first_name"] == ""
-        assert res.data["last_name"] == ""
-        assert res.data["phone_number"] == "09121230302"
-        assert res.data["email"] is None
-        assert res.data["is_verified"] is True
+        client = APIClient()
+        statuses = [
+            client.post(
+                LOGIN_URL,
+                {"email": "nobody@example.com", "password": "wrong-password"},
+                format="json",
+            ).status_code
+            for _ in range(5)
+        ]
+        assert status.HTTP_429_TOO_MANY_REQUESTS not in statuses

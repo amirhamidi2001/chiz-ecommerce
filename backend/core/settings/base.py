@@ -139,7 +139,41 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "shop.pagination.StandardResultsPagination",
     "PAGE_SIZE": 12,
+    # ── Rate limiting ────────────────────────────────────────────────────
+    # General, project-wide throttling (Task 2.1.3.1). Before this, ONLY
+    # the OTP-specific scope below existed (Task 2.1.2.4) — every other
+    # endpoint (product listing, cart, checkout, login, everything) had
+    # zero rate limiting at all.
+    #
+    # NOTE: setting `throttle_classes` explicitly on a view (as
+    # OTPRequestView does, for PhoneOTPRequestThrottle) REPLACES these
+    # global defaults for that view entirely — DRF does not merge
+    # per-view throttle_classes with DEFAULT_THROTTLE_CLASSES, it's one
+    # or the other. See accounts/views.py:OTPRequestView for the
+    # deliberate decision on whether that view also gets general
+    # anon-rate protection on top of its phone-based cooldown.
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
     "DEFAULT_THROTTLE_RATES": {
+        # Initial, reasonable-guess starting rates for an e-commerce
+        # storefront — generous enough not to break normal
+        # browsing/pagination/search-as-you-type, tight enough to blunt
+        # basic scripted abuse. These are NOT permanently correct: tune
+        # them once the site has real traffic data to look at.
+        "anon": "100/min",
+        "user": "300/min",
+        # Tighter scope for sensitive, high-value-target auth endpoints
+        # (login, register, password-reset-request/confirm) — 10/min per
+        # anonymous client/IP, deliberately much stricter than the
+        # general 100/min anon rate, since these are the endpoints a
+        # credential-stuffing / mass-fake-account / email-enumeration
+        # script would actually target, unlike ordinary browsing. See
+        # accounts/throttles.py:AuthSensitiveRateThrottle and its
+        # application on LoginView/RegisterView/PasswordResetRequestView/
+        # PasswordResetConfirmView in accounts/views.py.
+        "auth_sensitive": "10/min",
         # 3 OTP requests per phone number per 10 minutes — hard,
         # DRF-level cap independent of the OTP service's own ~60s
         # per-(phone, purpose) resend cooldown (Task 2.1.2.2), to stop
@@ -200,10 +234,6 @@ OTP_MAX_VERIFICATION_ATTEMPTS = config(
 
 
 # ─── SMS provider (Feature 2.2.1) ───────────────────────────────────────────────
-# Dotted import path to the SMSProvider implementation currently in use.
-# Swappable via settings/env with zero code changes — see
-# accounts/sms/base.py:get_sms_provider(). Defaults to the console/dev
-# backend (Task 2.2.1.2 implements accounts.sms.console.ConsoleSMSProvider).
 SMS_PROVIDER_CLASS = config(
     "SMS_PROVIDER_CLASS", default="accounts.sms.console.ConsoleSMSProvider"
 )
