@@ -51,7 +51,7 @@ const Hero = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  const img = featuredProduct?.thumbnail_url || '/assets/img/product/product-2.webp';
+  const img = featuredProduct?.thumbnail_url || '/logo.webp';
   const savings = featuredProduct?.original_price
     ? (Number(featuredProduct.original_price) - Number(featuredProduct.price)).toFixed(2)
     : null;
@@ -132,7 +132,7 @@ const Hero = () => {
                   src={img}
                   alt={featuredProduct.name}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  onError={(e) => { e.target.src = '/assets/img/product/product-2.webp'; }}
+                  onError={(e) => { e.target.src = '/logo.webp'; }}
                 />
               </div>
 
@@ -173,19 +173,12 @@ const Hero = () => {
             /* Fallback static card when API returns nothing */
             <div className="bg-white rounded-2xl shadow-xl p-4 relative z-10">
               <img
-                src="/assets/img/product/product-2.webp"
+                src="/logo.webp"
                 alt="Featured Product"
                 className="w-full max-w-md mx-auto rounded-xl"
               />
-              <div className="absolute top-4 right-4 bg-teal-600 text-white text-xs font-bold px-2 py-1 rounded">
-                Best Seller
-              </div>
               <div className="mt-4 text-center">
                 <h4 className="font-bold text-lg">Premium Wireless Headphones</h4>
-                <div className="flex justify-center items-baseline gap-2 mt-1">
-                  <span className="text-2xl font-bold text-teal-700">$299</span>
-                  <span className="text-gray-400 line-through">$399</span>
-                </div>
               </div>
             </div>
           )}
