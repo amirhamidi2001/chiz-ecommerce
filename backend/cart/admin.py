@@ -6,8 +6,8 @@ from .models import Cart, CartItem
 class CartItemInline(admin.TabularInline):
     model = CartItem
     extra = 0
-    readonly_fields = ("product", "quantity", "unit_price", "subtotal", "added_at")
-    fields = ("product", "quantity", "unit_price", "subtotal", "added_at")
+    readonly_fields = ("variant", "quantity", "unit_price", "subtotal", "added_at")
+    fields = ("variant", "quantity", "unit_price", "subtotal", "added_at")
 
     def unit_price(self, obj):
         return f"${obj.unit_price:.2f}"
@@ -47,7 +47,7 @@ class CartItemAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "cart_user",
-        "product_name",
+        "variant_label",
         "quantity",
         "unit_price_display",
         "item_subtotal",
@@ -55,7 +55,8 @@ class CartItemAdmin(admin.ModelAdmin):
     )
     list_filter = ("added_at", "cart__user")
     search_fields = (
-        "product__name",
+        "variant__product__name",
+        "variant__sku",
         "cart__user__email",
         "cart__user__first_name",
         "cart__user__last_name",
@@ -66,8 +67,8 @@ class CartItemAdmin(admin.ModelAdmin):
     def cart_user(self, obj):
         return obj.cart.user.email
 
-    def product_name(self, obj):
-        return obj.product.name
+    def variant_label(self, obj):
+        return f"{obj.variant.product.name} — {obj.variant.color.name if obj.variant.color_id else obj.variant.sku}"
 
     def unit_price_display(self, obj):
         return f"${obj.unit_price:.2f}"
@@ -76,6 +77,6 @@ class CartItemAdmin(admin.ModelAdmin):
         return f"${obj.subtotal:.2f}"
 
     cart_user.short_description = "User"
-    product_name.short_description = "Product"
+    variant_label.short_description = "Variant"
     unit_price_display.short_description = "Unit Price"
     item_subtotal.short_description = "Subtotal"

@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
-from shop.models import Category, Product
+from shop.models import Category, Color, Product, ProductVariant
 
 User = get_user_model()
 
@@ -45,6 +45,43 @@ def make_product(
     )
 
 
+def make_color(name="Red", hex_code="#FF0000"):
+    return Color.objects.create(name=name, hex_code=hex_code)
+
+
+def make_variant(
+    *,
+    product=None,
+    sku=None,
+    color=None,
+    price="49.99",
+    stock=10,
+    original_price=None,
+    is_active=True,
+    **product_kwargs,
+):
+    """
+    Create and return a ProductVariant — the purchasable unit a cart
+    line now points at. Creates a backing Product automatically if
+    none is given, so most tests only need to think about the variant.
+    """
+    if product is None:
+        product = make_product(**product_kwargs)
+    if sku is None:
+        sku = (
+            f"SKU-{product.id}-{ProductVariant.objects.filter(product=product).count()}"
+        )
+    return ProductVariant.objects.create(
+        product=product,
+        sku=sku,
+        color=color,
+        price=Decimal(price),
+        original_price=Decimal(original_price) if original_price else None,
+        stock=stock,
+        is_active=is_active,
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. Model Tests
 # ══════════════════════════════════════════════════════════════════════════════
@@ -56,6 +93,7 @@ class CartModelTests(TestCase):
     def setUp(self):
         self.user = make_user()
         self.product = make_product()
+        self.variant = make_variant(product=self.product)
 
     # ── Cart ──────────────────────────────────────────────────────────────────
 
@@ -77,23 +115,23 @@ class CartModelTests(TestCase):
 
     def test_subtotal_single_item(self):
         cart = Cart.objects.create(user=self.user)
-        CartItem.objects.create(cart=cart, product=self.product, quantity=3)
-        expected = self.product.price * 3
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=3)
+        expected = self.variant.price * 3
         self.assertEqual(cart.subtotal, expected)
 
     def test_subtotal_multiple_items(self):
         cart = Cart.objects.create(user=self.user)
-        product2 = make_product(name="Gadget", slug="gadget", price="29.99")
-        CartItem.objects.create(cart=cart, product=self.product, quantity=2)
-        CartItem.objects.create(cart=cart, product=product2, quantity=5)
-        expected = (self.product.price * 2) + (product2.price * 5)
+        variant2 = make_variant(name="Gadget", slug="gadget", price="29.99")
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
+        CartItem.objects.create(cart=cart, variant=variant2, quantity=5)
+        expected = (self.variant.price * 2) + (variant2.price * 5)
         self.assertEqual(cart.subtotal, expected)
 
     def test_total_items_counts_all_units(self):
         cart = Cart.objects.create(user=self.user)
-        product2 = make_product(name="Gadget", slug="gadget")
-        CartItem.objects.create(cart=cart, product=self.product, quantity=4)
-        CartItem.objects.create(cart=cart, product=product2, quantity=2)
+        variant2 = make_variant(name="Gadget", slug="gadget")
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=4)
+        CartItem.objects.create(cart=cart, variant=variant2, quantity=2)
         self.assertEqual(cart.total_items, 6)
 
     def test_one_cart_per_user_enforced(self):
@@ -106,51 +144,73 @@ class CartModelTests(TestCase):
 
     def test_cart_item_str(self):
         cart = Cart.objects.create(user=self.user)
-        item = CartItem.objects.create(cart=cart, product=self.product, quantity=2)
+        item = CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
         self.assertIn(self.product.name, str(item))
         self.assertIn("2", str(item))
 
-    def test_cart_item_unit_price_equals_product_price(self):
+    def test_cart_item_unit_price_equals_variant_price(self):
         cart = Cart.objects.create(user=self.user)
-        item = CartItem.objects.create(cart=cart, product=self.product, quantity=1)
-        self.assertEqual(item.unit_price, self.product.price)
+        item = CartItem.objects.create(cart=cart, variant=self.variant, quantity=1)
+        self.assertEqual(item.unit_price, self.variant.price)
 
     def test_cart_item_subtotal(self):
         cart = Cart.objects.create(user=self.user)
-        item = CartItem.objects.create(cart=cart, product=self.product, quantity=3)
-        self.assertEqual(item.subtotal, self.product.price * 3)
+        item = CartItem.objects.create(cart=cart, variant=self.variant, quantity=3)
+        self.assertEqual(item.subtotal, self.variant.price * 3)
 
     def test_cart_item_default_quantity_is_one(self):
         cart = Cart.objects.create(user=self.user)
-        item = CartItem.objects.create(cart=cart, product=self.product)
+        item = CartItem.objects.create(cart=cart, variant=self.variant)
         self.assertEqual(item.quantity, 1)
 
     def test_cart_item_quantity_minimum_one(self):
         """Validators should reject quantity < 1."""
         cart = Cart.objects.create(user=self.user)
-        item = CartItem(cart=cart, product=self.product, quantity=0)
+        item = CartItem(cart=cart, variant=self.variant, quantity=0)
         with self.assertRaises(Exception):
             item.full_clean()
 
-    def test_cart_item_unique_together_cart_product(self):
-        """Duplicate (cart, product) must raise an error."""
+    def test_cart_item_unique_together_cart_variant(self):
+        """Duplicate (cart, variant) must raise an error."""
         cart = Cart.objects.create(user=self.user)
-        CartItem.objects.create(cart=cart, product=self.product, quantity=1)
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=1)
         with self.assertRaises(Exception):
-            CartItem.objects.create(cart=cart, product=self.product, quantity=2)
+            CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
+
+    def test_two_variants_of_same_product_can_coexist_in_cart(self):
+        """
+        The exact scenario the OLD unique_together=("cart", "product")
+        would have prevented: two different shades/sizes of the SAME
+        product must be able to live as two separate cart lines.
+        """
+        shade_a = make_variant(product=self.product, sku="SHADE-A", stock=5)
+        shade_b = make_variant(product=self.product, sku="SHADE-B", stock=5)
+        cart = Cart.objects.create(user=self.user)
+
+        item_a = CartItem.objects.create(cart=cart, variant=shade_a, quantity=1)
+        item_b = CartItem.objects.create(cart=cart, variant=shade_b, quantity=1)
+
+        self.assertEqual(cart.items.count(), 2)
+        self.assertNotEqual(item_a.id, item_b.id)
+        self.assertEqual(
+            {item_a.variant_id, item_b.variant_id}, {shade_a.id, shade_b.id}
+        )
+        self.assertTrue(
+            all(i.variant.product_id == self.product.id for i in cart.items.all())
+        )
 
     def test_deleting_item_updates_cart_subtotal(self):
         cart = Cart.objects.create(user=self.user)
-        item = CartItem.objects.create(cart=cart, product=self.product, quantity=2)
+        item = CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
         item.delete()
         self.assertEqual(cart.subtotal, Decimal("0"))
 
     def test_cart_item_ordering_newest_first(self):
         """Items should be returned by -added_at (newest first) by default."""
         cart = Cart.objects.create(user=self.user)
-        product2 = make_product(name="Second", slug="second")
-        item1 = CartItem.objects.create(cart=cart, product=self.product, quantity=1)
-        item2 = CartItem.objects.create(cart=cart, product=product2, quantity=1)
+        variant2 = make_variant(name="Second", slug="second")
+        item1 = CartItem.objects.create(cart=cart, variant=self.variant, quantity=1)
+        item2 = CartItem.objects.create(cart=cart, variant=variant2, quantity=1)
         items = list(CartItem.objects.filter(cart=cart))
         self.assertEqual(items[0], item2)
         self.assertEqual(items[1], item1)
@@ -166,7 +226,7 @@ class CartItemSerializerTests(TestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(stock=5)
+        self.variant = make_variant(stock=5)
         # Fake DRF request with authenticated user
         self.request = type("Request", (), {"user": self.user})()
 
@@ -176,39 +236,47 @@ class CartItemSerializerTests(TestCase):
         return CartItemSerializer(data=data, context={"request": self.request})
 
     def test_valid_data_passes(self):
-        s = self._serialize({"product_id": self.product.id, "quantity": 2})
+        s = self._serialize({"variant_id": self.variant.id, "quantity": 2})
         self.assertTrue(s.is_valid(), s.errors)
 
-    def test_missing_product_id_is_invalid(self):
+    def test_missing_variant_id_is_invalid(self):
         s = self._serialize({"quantity": 1})
         self.assertFalse(s.is_valid())
-        self.assertIn("product_id", s.errors)
+        self.assertIn("variant_id", s.errors)
 
-    def test_nonexistent_product_id_is_invalid(self):
-        s = self._serialize({"product_id": 99999, "quantity": 1})
+    def test_nonexistent_variant_id_is_invalid(self):
+        s = self._serialize({"variant_id": 99999, "quantity": 1})
         self.assertFalse(s.is_valid())
-        self.assertIn("product_id", s.errors)
+        self.assertIn("variant_id", s.errors)
 
-    def test_out_of_stock_product_is_invalid(self):
-        oos = make_product(name="OOS", slug="oos", stock=0)
-        s = self._serialize({"product_id": oos.id, "quantity": 1})
+    def test_out_of_stock_variant_is_invalid(self):
+        oos = make_variant(name="OOS", slug="oos", stock=0)
+        s = self._serialize({"variant_id": oos.id, "quantity": 1})
         self.assertFalse(s.is_valid())
-        self.assertIn("product_id", s.errors)
+        self.assertIn("variant_id", s.errors)
+
+    def test_inactive_variant_is_invalid(self):
+        inactive = make_variant(
+            name="Inactive", slug="inactive", stock=5, is_active=False
+        )
+        s = self._serialize({"variant_id": inactive.id, "quantity": 1})
+        self.assertFalse(s.is_valid())
+        self.assertIn("variant_id", s.errors)
 
     def test_quantity_zero_is_invalid(self):
-        s = self._serialize({"product_id": self.product.id, "quantity": 0})
+        s = self._serialize({"variant_id": self.variant.id, "quantity": 0})
         self.assertFalse(s.is_valid())
         self.assertIn("quantity", s.errors)
 
     def test_quantity_negative_is_invalid(self):
-        s = self._serialize({"product_id": self.product.id, "quantity": -5})
+        s = self._serialize({"variant_id": self.variant.id, "quantity": -5})
         self.assertFalse(s.is_valid())
         self.assertIn("quantity", s.errors)
 
     def test_quantity_large_is_valid(self):
-        self.product.stock = 100
-        self.product.save()
-        s = self._serialize({"product_id": self.product.id, "quantity": 50})
+        self.variant.stock = 100
+        self.variant.save()
+        s = self._serialize({"variant_id": self.variant.id, "quantity": 50})
         self.assertTrue(s.is_valid(), s.errors)
 
 
@@ -223,6 +291,7 @@ class CartAPITests(APITestCase):
     def setUp(self):
         self.user = make_user()
         self.product = make_product(price="19.99", stock=10)
+        self.variant = make_variant(product=self.product, price="19.99", stock=10)
         self.client.force_authenticate(user=self.user)
 
     # ── GET ───────────────────────────────────────────────────────────────────
@@ -242,7 +311,7 @@ class CartAPITests(APITestCase):
 
     def test_get_returns_populated_cart(self):
         cart = Cart.objects.create(user=self.user)
-        CartItem.objects.create(cart=cart, product=self.product, quantity=3)
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=3)
         res = self.client.get(self.URL)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(len(res.data["items"]), 1)
@@ -250,9 +319,9 @@ class CartAPITests(APITestCase):
 
     def test_get_cart_subtotal_is_correct(self):
         cart = Cart.objects.create(user=self.user)
-        CartItem.objects.create(cart=cart, product=self.product, quantity=2)
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
         res = self.client.get(self.URL)
-        expected = (self.product.price * 2).quantize(Decimal("0.01"))
+        expected = (self.variant.price * 2).quantize(Decimal("0.01"))
         self.assertEqual(Decimal(res.data["subtotal"]), expected)
 
     def test_get_does_not_create_duplicate_carts(self):
@@ -263,8 +332,8 @@ class CartAPITests(APITestCase):
     def test_get_does_not_return_another_users_cart(self):
         other = make_user(email="other@example.com")
         other_cart = Cart.objects.create(user=other)
-        product2 = make_product(name="Other", slug="other-product")
-        CartItem.objects.create(cart=other_cart, product=product2, quantity=5)
+        variant2 = make_variant(name="Other", slug="other-product")
+        CartItem.objects.create(cart=other_cart, variant=variant2, quantity=5)
 
         res = self.client.get(self.URL)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
@@ -273,65 +342,106 @@ class CartAPITests(APITestCase):
     # ── POST: add item ────────────────────────────────────────────────────────
 
     def test_post_adds_new_item_returns_201(self):
-        res = self.client.post(self.URL, {"product_id": self.product.id, "quantity": 2})
+        res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 2})
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
 
     def test_post_creates_cart_implicitly(self):
         self.assertFalse(Cart.objects.filter(user=self.user).exists())
-        self.client.post(self.URL, {"product_id": self.product.id, "quantity": 1})
+        self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 1})
         self.assertTrue(Cart.objects.filter(user=self.user).exists())
 
     def test_post_item_appears_in_cart_response(self):
-        res = self.client.post(self.URL, {"product_id": self.product.id, "quantity": 1})
+        res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 1})
         self.assertEqual(len(res.data["items"]), 1)
-        self.assertEqual(res.data["items"][0]["product"]["id"], self.product.id)
+        self.assertEqual(res.data["items"][0]["variant"]["id"], self.variant.id)
+        self.assertEqual(
+            res.data["items"][0]["variant"]["product"]["id"], self.product.id
+        )
 
     def test_post_default_quantity_is_one(self):
-        self.client.post(self.URL, {"product_id": self.product.id})
+        self.client.post(self.URL, {"variant_id": self.variant.id})
         cart = Cart.objects.get(user=self.user)
         self.assertEqual(cart.items.first().quantity, 1)
 
     def test_post_increments_existing_item_quantity(self):
         cart = Cart.objects.create(user=self.user)
-        CartItem.objects.create(cart=cart, product=self.product, quantity=2)
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
 
-        res = self.client.post(self.URL, {"product_id": self.product.id, "quantity": 3})
+        res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 3})
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         cart.refresh_from_db()
         self.assertEqual(cart.items.first().quantity, 5)
 
+    def test_post_same_variant_twice_does_not_create_duplicate_row(self):
+        """
+        Adding the SAME variant to the cart twice must increment the
+        existing row's quantity, not create a second row — this is the
+        "add to cart" endpoint's actual behavior today (via
+        get_or_create + quantity bump) and must be preserved now that
+        the upsert key is `variant` instead of `product`.
+        """
+        self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 1})
+        res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 4})
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        cart = Cart.objects.get(user=self.user)
+        self.assertEqual(cart.items.count(), 1)
+        self.assertEqual(cart.items.first().quantity, 5)
+
     def test_post_updates_subtotal_correctly(self):
-        res = self.client.post(self.URL, {"product_id": self.product.id, "quantity": 2})
-        expected = (self.product.price * 2).quantize(Decimal("0.01"))
+        res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 2})
+        expected = (self.variant.price * 2).quantize(Decimal("0.01"))
         self.assertEqual(Decimal(res.data["subtotal"]), expected)
 
-    def test_post_missing_product_id_returns_400(self):
+    def test_post_missing_variant_id_returns_400(self):
         res = self.client.post(self.URL, {"quantity": 1})
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("product_id", res.data)
+        self.assertIn("variant_id", res.data)
 
-    def test_post_invalid_product_id_returns_400(self):
-        res = self.client.post(self.URL, {"product_id": 99999, "quantity": 1})
+    def test_post_invalid_variant_id_returns_400(self):
+        res = self.client.post(self.URL, {"variant_id": 99999, "quantity": 1})
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_post_out_of_stock_product_returns_400(self):
-        oos = make_product(name="OOS", slug="oos-product", stock=0)
-        res = self.client.post(self.URL, {"product_id": oos.id, "quantity": 1})
+    def test_post_out_of_stock_variant_returns_400(self):
+        oos = make_variant(name="OOS", slug="oos-product", stock=0)
+        res = self.client.post(self.URL, {"variant_id": oos.id, "quantity": 1})
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_post_quantity_zero_returns_400(self):
-        res = self.client.post(self.URL, {"product_id": self.product.id, "quantity": 0})
+        res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 0})
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_post_multiple_different_products(self):
-        product2 = make_product(name="Second", slug="second", price="9.99")
-        self.client.post(self.URL, {"product_id": self.product.id, "quantity": 1})
-        res = self.client.post(self.URL, {"product_id": product2.id, "quantity": 2})
+    def test_post_multiple_different_variants(self):
+        variant2 = make_variant(name="Second", slug="second", price="9.99")
+        self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 1})
+        res = self.client.post(self.URL, {"variant_id": variant2.id, "quantity": 2})
         self.assertEqual(len(res.data["items"]), 2)
         self.assertEqual(res.data["total_items"], 3)
 
+    def test_post_two_variants_of_same_product_both_added_as_separate_lines(self):
+        """
+        The endpoint-level counterpart to the model test: a customer
+        choosing two different shades of the SAME product must end up
+        with two separate cart lines, not a stock error or a merge.
+        """
+        shade_a = make_variant(product=self.product, sku="SHADE-A", stock=5)
+        shade_b = make_variant(product=self.product, sku="SHADE-B", stock=5)
+
+        self.client.post(self.URL, {"variant_id": shade_a.id, "quantity": 1})
+        res = self.client.post(self.URL, {"variant_id": shade_b.id, "quantity": 1})
+
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(res.data["items"]), 2)
+        returned_variant_ids = {item["variant"]["id"] for item in res.data["items"]}
+        self.assertEqual(returned_variant_ids, {shade_a.id, shade_b.id})
+        # Both lines point back at the same underlying product.
+        returned_product_ids = {
+            item["variant"]["product"]["id"] for item in res.data["items"]
+        }
+        self.assertEqual(returned_product_ids, {self.product.id})
+
     def test_post_response_contains_required_fields(self):
-        res = self.client.post(self.URL, {"product_id": self.product.id, "quantity": 1})
+        res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 1})
         self.assertIn("id", res.data)
         self.assertIn("items", res.data)
         self.assertIn("subtotal", res.data)
@@ -350,10 +460,10 @@ class CartItemAPITests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(stock=20)
+        self.variant = make_variant(stock=20)
         self.cart = Cart.objects.create(user=self.user)
         self.item = CartItem.objects.create(
-            cart=self.cart, product=self.product, quantity=2
+            cart=self.cart, variant=self.variant, quantity=2
         )
         self.client.force_authenticate(user=self.user)
 
@@ -379,7 +489,7 @@ class CartItemAPITests(APITestCase):
 
     def test_update_recalculates_subtotal(self):
         res = self.client.put(self._item_url(self.item.id), {"quantity": 4})
-        expected = (self.product.price * 4).quantize(Decimal("0.01"))
+        expected = (self.variant.price * 4).quantize(Decimal("0.01"))
         self.assertEqual(Decimal(res.data["subtotal"]), expected)
 
     def test_update_quantity_zero_returns_400(self):
@@ -406,7 +516,7 @@ class CartItemAPITests(APITestCase):
         other = make_user(email="other@example.com")
         other_cart = Cart.objects.create(user=other)
         other_item = CartItem.objects.create(
-            cart=other_cart, product=self.product, quantity=1
+            cart=other_cart, variant=self.variant, quantity=1
         )
         res = self.client.patch(self._item_url(other_item.id), {"quantity": 5})
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
@@ -415,7 +525,7 @@ class CartItemAPITests(APITestCase):
         other = make_user(email="other@example.com")
         other_cart = Cart.objects.create(user=other)
         other_item = CartItem.objects.create(
-            cart=other_cart, product=self.product, quantity=1
+            cart=other_cart, variant=self.variant, quantity=1
         )
         self.client.patch(self._item_url(other_item.id), {"quantity": 99})
         other_item.refresh_from_db()
@@ -445,15 +555,15 @@ class CartItemAPITests(APITestCase):
         other = make_user(email="other@example.com")
         other_cart = Cart.objects.create(user=other)
         other_item = CartItem.objects.create(
-            cart=other_cart, product=self.product, quantity=1
+            cart=other_cart, variant=self.variant, quantity=1
         )
         res = self.client.delete(self._item_url(other_item.id))
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
         self.assertTrue(CartItem.objects.filter(pk=other_item.id).exists())
 
     def test_delete_only_removes_targeted_item(self):
-        product2 = make_product(name="Second", slug="second-item")
-        item2 = CartItem.objects.create(cart=self.cart, product=product2, quantity=3)
+        variant2 = make_variant(name="Second", slug="second-item")
+        item2 = CartItem.objects.create(cart=self.cart, variant=variant2, quantity=3)
         self.client.delete(self._item_url(self.item.id))
         self.assertFalse(CartItem.objects.filter(pk=self.item.id).exists())
         self.assertTrue(CartItem.objects.filter(pk=item2.id).exists())
@@ -469,21 +579,21 @@ class CartClearAPITests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(stock=10)
+        self.variant = make_variant(stock=10)
         self.cart = Cart.objects.create(user=self.user)
         self.client.force_authenticate(user=self.user)
 
     def test_clear_removes_all_items(self):
-        CartItem.objects.create(cart=self.cart, product=self.product, quantity=2)
-        product2 = make_product(name="Second", slug="second-clr")
-        CartItem.objects.create(cart=self.cart, product=product2, quantity=5)
+        CartItem.objects.create(cart=self.cart, variant=self.variant, quantity=2)
+        variant2 = make_variant(name="Second", slug="second-clr")
+        CartItem.objects.create(cart=self.cart, variant=variant2, quantity=5)
 
         res = self.client.delete(self.URL)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(self.cart.items.count(), 0)
 
     def test_clear_returns_empty_cart_payload(self):
-        CartItem.objects.create(cart=self.cart, product=self.product, quantity=3)
+        CartItem.objects.create(cart=self.cart, variant=self.variant, quantity=3)
         res = self.client.delete(self.URL)
         self.assertEqual(res.data["items"], [])
         self.assertEqual(res.data["total_items"], 0)
@@ -503,17 +613,17 @@ class CartClearAPITests(APITestCase):
     def test_clear_does_not_affect_other_users_cart(self):
         other = make_user(email="other@example.com")
         other_cart = Cart.objects.create(user=other)
-        product2 = make_product(name="Other", slug="other-clr")
-        CartItem.objects.create(cart=other_cart, product=product2, quantity=4)
+        variant2 = make_variant(name="Other", slug="other-clr")
+        CartItem.objects.create(cart=other_cart, variant=variant2, quantity=4)
 
-        CartItem.objects.create(cart=self.cart, product=self.product, quantity=1)
+        CartItem.objects.create(cart=self.cart, variant=self.variant, quantity=1)
         self.client.delete(self.URL)
 
         self.assertEqual(other_cart.items.count(), 1)
 
     def test_clear_preserves_cart_object(self):
         """The Cart row must survive; only CartItems are deleted."""
-        CartItem.objects.create(cart=self.cart, product=self.product, quantity=1)
+        CartItem.objects.create(cart=self.cart, variant=self.variant, quantity=1)
         self.client.delete(self.URL)
         self.assertTrue(Cart.objects.filter(user=self.user).exists())
 
@@ -528,10 +638,10 @@ class CartAuthTests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(stock=5)
+        self.variant = make_variant(stock=5)
         self.cart = Cart.objects.create(user=self.user)
         self.item = CartItem.objects.create(
-            cart=self.cart, product=self.product, quantity=1
+            cart=self.cart, variant=self.variant, quantity=1
         )
 
     def test_get_cart_unauthenticated(self):
@@ -539,7 +649,7 @@ class CartAuthTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_post_cart_unauthenticated(self):
-        res = self.client.post("/api/cart/", {"product_id": self.product.id})
+        res = self.client.post("/api/cart/", {"variant_id": self.variant.id})
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_put_item_unauthenticated(self):

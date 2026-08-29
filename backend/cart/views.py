@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from shop.models import Product
+from shop.models import ProductVariant
 
 from .models import Cart, CartItem
 from .serializers import CartItemSerializer, CartSerializer
@@ -17,7 +17,7 @@ def get_or_create_cart(user):
 class CartView(APIView):
     """
     GET  /api/cart/        → return the authenticated user's cart
-    POST /api/cart/        → add a product to the cart (or increment qty)
+    POST /api/cart/        → add a variant to the cart (or increment qty)
     DELETE /api/cart/clear/ → empty the entire cart
     """
 
@@ -31,18 +31,18 @@ class CartView(APIView):
 
     # ── POST: add item (or bump quantity) ────────────────────────────────────
     def post(self, request):
-        product_id = request.data.get("product_id")
+        variant_id = request.data.get("variant_id")
         quantity = int(request.data.get("quantity", 1))
 
-        if not product_id:
+        if not variant_id:
             return Response(
-                {"product_id": "This field is required."},
+                {"variant_id": "This field is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Validate via serializer
         serializer = CartItemSerializer(
-            data={"product_id": product_id, "quantity": quantity},
+            data={"variant_id": variant_id, "quantity": quantity},
             context={"request": request},
         )
         if not serializer.is_valid():
@@ -51,17 +51,17 @@ class CartView(APIView):
         cart = get_or_create_cart(request.user)
 
         try:
-            product = Product.objects.get(pk=product_id)
-        except Product.DoesNotExist:
+            variant = ProductVariant.objects.get(pk=variant_id)
+        except ProductVariant.DoesNotExist:
             return Response(
-                {"product_id": "Product not found."},
+                {"variant_id": "Product variant not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         # Upsert: increment if already in cart, otherwise create
         cart_item, created = CartItem.objects.get_or_create(
             cart=cart,
-            product=product,
+            variant=variant,
             defaults={"quantity": quantity},
         )
         if not created:

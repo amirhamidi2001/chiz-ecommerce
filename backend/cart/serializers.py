@@ -1,20 +1,16 @@
 from rest_framework import serializers
+from shop.serializers import ColorSerializer
 
 from .models import Cart, CartItem
 
 
 class CartItemProductSerializer(serializers.Serializer):
-    """Lightweight product snapshot embedded inside a cart item."""
+    """Lightweight product snapshot embedded inside a cart item's variant."""
 
     id = serializers.IntegerField()
     name = serializers.CharField()
     slug = serializers.SlugField()
-    price = serializers.DecimalField(max_digits=10, decimal_places=2)
-    original_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2, allow_null=True
-    )
     image = serializers.SerializerMethodField()
-    stock = serializers.IntegerField()
 
     def get_image(self, obj):
         request = self.context.get("request")
@@ -35,9 +31,28 @@ class CartItemProductSerializer(serializers.Serializer):
         return None
 
 
-class CartItemSerializer(serializers.ModelSerializer):
+class CartItemVariantSerializer(serializers.Serializer):
+    """
+    Variant snapshot embedded inside a cart item — this is now where
+    price/original_price/stock/color live (previously flat on
+    `product`), since each cart line is tied to one specific
+    shade/size, not the product in the abstract.
+    """
+
+    id = serializers.IntegerField()
+    sku = serializers.CharField()
+    color = ColorSerializer(read_only=True, allow_null=True)
+    price = serializers.DecimalField(max_digits=10, decimal_places=2)
+    original_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, allow_null=True
+    )
+    stock = serializers.IntegerField()
     product = CartItemProductSerializer(read_only=True)
-    product_id = serializers.IntegerField(write_only=True)
+
+
+class CartItemSerializer(serializers.ModelSerializer):
+    variant = CartItemVariantSerializer(read_only=True)
+    variant_id = serializers.IntegerField(write_only=True)
     unit_price = serializers.DecimalField(
         max_digits=10, decimal_places=2, read_only=True
     )
@@ -47,8 +62,8 @@ class CartItemSerializer(serializers.ModelSerializer):
         model = CartItem
         fields = [
             "id",
-            "product",
-            "product_id",
+            "variant",
+            "variant_id",
             "quantity",
             "unit_price",
             "subtotal",
@@ -62,15 +77,17 @@ class CartItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Quantity must be at least 1.")
         return value
 
-    def validate_product_id(self, value):
-        from shop.models import Product
+    def validate_variant_id(self, value):
+        from shop.models import ProductVariant
 
         try:
-            product = Product.objects.get(pk=value)
-        except Product.DoesNotExist:
-            raise serializers.ValidationError("Product not found.")
-        if product.stock < 1:
-            raise serializers.ValidationError("This product is out of stock.")
+            variant = ProductVariant.objects.get(pk=value)
+        except ProductVariant.DoesNotExist:
+            raise serializers.ValidationError("Product variant not found.")
+        if not variant.is_active:
+            raise serializers.ValidationError("This product variant is unavailable.")
+        if variant.stock < 1:
+            raise serializers.ValidationError("This product variant is out of stock.")
         return value
 
 

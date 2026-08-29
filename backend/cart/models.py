@@ -41,8 +41,8 @@ class CartItem(models.Model):
         on_delete=models.CASCADE,
         related_name="items",
     )
-    product = models.ForeignKey(
-        "shop.Product",
+    variant = models.ForeignKey(
+        "shop.ProductVariant",
         on_delete=models.CASCADE,
         related_name="cart_items",
     )
@@ -54,18 +54,21 @@ class CartItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("cart", "product")
+        unique_together = ("cart", "variant")
         ordering = ["-added_at"]
         verbose_name = "Cart Item"
         verbose_name_plural = "Cart Items"
 
     def __str__(self):
-        return f"{self.quantity}× {self.product.name} in {self.cart}"
+        variant_detail = (
+            self.variant.color.name if self.variant.color_id else self.variant.sku
+        )
+        return f"{self.quantity}× {self.variant.product.name} ({variant_detail}) in {self.cart}"
 
     @property
     def unit_price(self):
-        """Return sale price if available, otherwise regular price."""
-        return self.product.price
+        """Return the specific variant's price."""
+        return self.variant.price
 
     @property
     def subtotal(self):
