@@ -21,6 +21,9 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "product_name",
             "product_slug",
             "product_image",
+            "variant",
+            "variant_sku",
+            "variant_attributes_json",
             "unit_price",
             "quantity",
             "subtotal",
@@ -175,13 +178,18 @@ class OrderCreateSerializer(serializers.Serializer):
 
             # ── Lock the referenced Product rows ────────────────────────────
             # Row-level lock so concurrent checkouts against the same
-            # product(s) serialize instead of racing on stock.
+            # product(s) serialize instead of racing on stock. Stock is
+            # still tracked/locked at the Product level here (unchanged
+            # in spirit from before Task 3.1.1.3) — we now just reach
+            # the product one level deeper, through each cart item's
+            # variant, since CartItem no longer has a direct `product`
+            # FK.
             cart_items = list(
-                cart.items.select_related("product")
-                .prefetch_related("product__images")
+                cart.items.select_related("variant__product", "variant__color")
+                .prefetch_related("variant__product__images")
                 .all()
             )
-            product_ids = {cart_item.product_id for cart_item in cart_items}
+            product_ids = {cart_item.variant.product_id for cart_item in cart_items}
             locked_products = {
                 product.id: product
                 for product in Product.objects.select_for_update().filter(
@@ -191,7 +199,8 @@ class OrderCreateSerializer(serializers.Serializer):
 
             # ── Snapshot each cart item ────────────────────────────────────
             for cart_item in cart_items:
-                product = locked_products[cart_item.product_id]
+                variant = cart_item.variant
+                product = locked_products[variant.product_id]
 
                 # Validate stock, then decrement it. Raising here inside the
                 # atomic block rolls back the Order (and any earlier
@@ -228,6 +237,11 @@ class OrderCreateSerializer(serializers.Serializer):
                     product_name=product.name,
                     product_slug=product.slug,
                     product_image=image_url,
+                    variant=variant,
+                    variant_sku=variant.sku,
+                    variant_attributes_json={
+                        "color": variant.color.name if variant.color else None
+                    },
                     unit_price=cart_item.unit_price,
                     quantity=cart_item.quantity,
                 )

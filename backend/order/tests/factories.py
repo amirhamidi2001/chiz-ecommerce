@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from cart.models import Cart, CartItem
 from django.contrib.auth import get_user_model
-from shop.models import Category, Product
+from shop.models import Category, Color, Product, ProductVariant
 
 User = get_user_model()
 
@@ -41,17 +41,65 @@ def make_product(
     )
 
 
+def make_color(name="Red", hex_code="#FF0000"):
+    return Color.objects.create(name=name, hex_code=hex_code)
+
+
+def make_variant(
+    *,
+    product=None,
+    sku=None,
+    color=None,
+    price=None,
+    stock=10,
+    is_active=True,
+    **product_kwargs,
+):
+    """
+    Create and return a ProductVariant. If no product is given, one is
+    created via make_product(**product_kwargs). If no price is given,
+    the variant mirrors the backing product's price (matching how
+    checkout reads price off the variant now, per Task 3.1.1.3).
+    """
+    if product is None:
+        product = make_product(**product_kwargs)
+    if price is None:
+        price = product.price
+    if sku is None:
+        sku = (
+            f"SKU-{product.id}-{ProductVariant.objects.filter(product=product).count()}"
+        )
+    return ProductVariant.objects.create(
+        product=product,
+        sku=sku,
+        color=color,
+        price=Decimal(price),
+        stock=stock,
+        is_active=is_active,
+    )
+
+
 def make_cart_with_items(user, items):
     """
     Create a Cart for *user* populated with *items*.
 
-    items: list of dicts  →  {"product": Product, "quantity": int}
+    items: list of dicts, either:
+      - {"variant": ProductVariant, "quantity": int}                 (preferred)
+      - {"product": Product, "quantity": int}  → auto-creates/reuses
+        a default variant for that product, for callers that only
+        care about product-level setup.
     """
     cart, _ = Cart.objects.get_or_create(user=user)
     for entry in items:
+        variant = entry.get("variant")
+        if variant is None:
+            product = entry["product"]
+            variant = ProductVariant.objects.filter(product=product).first()
+            if variant is None:
+                variant = make_variant(product=product, stock=product.stock)
         CartItem.objects.get_or_create(
             cart=cart,
-            product=entry["product"],
+            variant=variant,
             defaults={"quantity": entry["quantity"]},
         )
     return cart

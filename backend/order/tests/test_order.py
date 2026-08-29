@@ -14,8 +14,10 @@ from .factories import (
     VALID_PAYLOAD,
     make_cart_with_items,
     make_category,
+    make_color,
     make_product,
     make_user,
+    make_variant,
 )
 
 User = get_user_model()
@@ -205,6 +207,83 @@ class OrderModelTests(TestCase):
         # Snapshot fields must still be intact
         self.assertEqual(item.product_name, "T-Shirt")
 
+    # ── OrderItem: variant fields (this task) ───────────────────────────────────
+
+    def test_order_item_variant_field_links_to_variant(self):
+        order = self._make_order()
+        variant = make_variant(product=self.product, sku="VARIANT-1")
+        item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_slug=self.product.slug,
+            variant=variant,
+            variant_sku=variant.sku,
+            unit_price=variant.price,
+            quantity=1,
+        )
+        self.assertEqual(item.variant, variant)
+        self.assertEqual(item.variant_sku, "VARIANT-1")
+
+    def test_order_item_variant_attributes_json_default_is_empty_dict(self):
+        order = self._make_order()
+        item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_slug=self.product.slug,
+            unit_price=self.product.price,
+            quantity=1,
+        )
+        self.assertEqual(item.variant_attributes_json, {})
+
+    def test_order_item_variant_attributes_json_stores_color(self):
+        order = self._make_order()
+        color = make_color(name="Shade 320 - Warm Beige")
+        variant = make_variant(product=self.product, color=color)
+        item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_slug=self.product.slug,
+            variant=variant,
+            variant_sku=variant.sku,
+            variant_attributes_json={"color": color.name},
+            unit_price=variant.price,
+            quantity=1,
+        )
+        self.assertEqual(
+            item.variant_attributes_json, {"color": "Shade 320 - Warm Beige"}
+        )
+
+    def test_order_item_variant_null_on_variant_deletion(self):
+        """
+        When the ProductVariant is deleted the FK becomes NULL
+        (SET_NULL) — same survivability guarantee as `product` — but
+        the frozen `variant_sku`/`variant_attributes_json` snapshots
+        must remain intact, since that's the whole point of freezing
+        them.
+        """
+        order = self._make_order()
+        color = make_color(name="Matte Red")
+        variant = make_variant(product=self.product, sku="DOOMED-SKU", color=color)
+        item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_slug=self.product.slug,
+            variant=variant,
+            variant_sku=variant.sku,
+            variant_attributes_json={"color": color.name},
+            unit_price=variant.price,
+            quantity=1,
+        )
+        variant.delete()
+        item.refresh_from_db()
+        self.assertIsNone(item.variant)
+        self.assertEqual(item.variant_sku, "DOOMED-SKU")
+        self.assertEqual(item.variant_attributes_json, {"color": "Matte Red"})
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. OrderCreateSerializer Tests
@@ -378,6 +457,130 @@ class OrderCreateSerializerTests(TestCase):
         order = s.save()
         item = order.items.first()
         self.assertEqual(item.quantity, 2)
+
+    # ── Variant snapshot fields (this task) ───────────────────────────────────
+
+    def test_order_item_snapshots_variant_and_sku(self):
+        """
+        OrderCreateSerializer.create() must read cart_item.variant
+        (not cart_item.product, which no longer exists on CartItem
+        after Task 3.1.1.3) and populate variant/variant_sku on the
+        resulting OrderItem.
+        """
+        Cart.objects.filter(user=self.user).delete()
+        color = make_color(name="Shade 320 - Warm Beige")
+        variant = make_variant(
+            product=self.product, sku="FOUND-320", color=color, price="100.00"
+        )
+        make_cart_with_items(self.user, [{"variant": variant, "quantity": 2}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        item = order.items.first()
+        self.assertEqual(item.variant, variant)
+        self.assertEqual(item.variant_sku, "FOUND-320")
+
+    def test_order_item_snapshots_variant_attributes_json_with_color(self):
+        Cart.objects.filter(user=self.user).delete()
+        color = make_color(name="Shade 320 - Warm Beige")
+        variant = make_variant(product=self.product, color=color, price="100.00")
+        make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        item = order.items.first()
+        self.assertEqual(
+            item.variant_attributes_json, {"color": "Shade 320 - Warm Beige"}
+        )
+
+    def test_order_item_snapshots_variant_attributes_json_without_color(self):
+        """A colorless variant must snapshot color=None, not omit the key."""
+        Cart.objects.filter(user=self.user).delete()
+        variant = make_variant(product=self.product, color=None, price="100.00")
+        make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        item = order.items.first()
+        self.assertEqual(item.variant_attributes_json, {"color": None})
+
+    def test_order_item_still_populates_parent_product_fields(self):
+        """
+        Product-level snapshot fields (product/product_name/product_slug)
+        must still be populated correctly — just sourced through
+        cart_item.variant.product instead of cart_item.product now.
+        """
+        Cart.objects.filter(user=self.user).delete()
+        variant = make_variant(product=self.product, price="100.00")
+        make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        item = order.items.first()
+        self.assertEqual(item.product, self.product)
+        self.assertEqual(item.product_name, self.product.name)
+        self.assertEqual(item.product_slug, self.product.slug)
+
+    def test_ordering_two_color_variants_of_same_product_creates_two_order_items(self):
+        """
+        A customer ordering two different shades of the SAME product
+        (two separate cart lines, per Task 3.1.1.3) must end up with
+        two separate OrderItem rows — distinct variant_sku and
+        variant_attributes_json — both correctly linked back to the
+        same underlying product.
+        """
+        Cart.objects.filter(user=self.user).delete()
+        shade_a_color = make_color(name="Shade 110 - Porcelain")
+        shade_b_color = make_color(name="Shade 320 - Warm Beige")
+        shade_a = make_variant(
+            product=self.product, sku="FOUND-110", color=shade_a_color, price="100.00"
+        )
+        shade_b = make_variant(
+            product=self.product, sku="FOUND-320", color=shade_b_color, price="100.00"
+        )
+        make_cart_with_items(
+            self.user,
+            [
+                {"variant": shade_a, "quantity": 1},
+                {"variant": shade_b, "quantity": 1},
+            ],
+        )
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        self.assertEqual(order.items.count(), 2)
+
+        items_by_sku = {item.variant_sku: item for item in order.items.all()}
+        self.assertEqual(set(items_by_sku.keys()), {"FOUND-110", "FOUND-320"})
+
+        item_a = items_by_sku["FOUND-110"]
+        item_b = items_by_sku["FOUND-320"]
+
+        self.assertNotEqual(
+            item_a.variant_attributes_json, item_b.variant_attributes_json
+        )
+        self.assertEqual(
+            item_a.variant_attributes_json, {"color": "Shade 110 - Porcelain"}
+        )
+        self.assertEqual(
+            item_b.variant_attributes_json, {"color": "Shade 320 - Warm Beige"}
+        )
+
+        # Both lines trace back to the same underlying product.
+        self.assertEqual(item_a.product_id, self.product.id)
+        self.assertEqual(item_b.product_id, self.product.id)
+        self.assertEqual(item_a.variant_id, shade_a.id)
+        self.assertEqual(item_b.variant_id, shade_b.id)
 
     def test_cart_cleared_after_order_creation(self):
         s = self._serialize()

@@ -10,6 +10,9 @@ class OrderItemInline(admin.TabularInline):
         "product",
         "product_name",
         "product_slug",
+        "variant",
+        "variant_sku",
+        "variant_attributes_json",
         "unit_price",
         "quantity",
         "item_subtotal",
@@ -17,6 +20,8 @@ class OrderItemInline(admin.TabularInline):
     fields = (
         "product",
         "product_name",
+        "variant_sku",
+        "variant_attributes_json",
         "unit_price",
         "quantity",
         "item_subtotal",

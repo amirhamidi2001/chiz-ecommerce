@@ -134,11 +134,23 @@ class OrderItem(models.Model):
         null=True,
         related_name="order_items",
     )
+    variant = models.ForeignKey(
+        "shop.ProductVariant",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="order_items",
+    )
 
     # Frozen snapshot so price history is preserved
     product_name = models.CharField(max_length=255)
     product_slug = models.SlugField(max_length=255)
     product_image = models.URLField(blank=True)  # absolute URL at order time
+    variant_sku = models.CharField(max_length=64, blank=True)
+    # Frozen snapshot of variant-identifying attributes (e.g. shade/size)
+    # at order time, so the order remains a fully self-contained
+    # fulfillment record even if the variant is later deleted or its
+    # color is renamed.
+    variant_attributes_json = models.JSONField(default=dict, blank=True)
     unit_price = models.DecimalField(
         max_digits=10, decimal_places=2, validators=[MinValueValidator(0)]
     )
