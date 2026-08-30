@@ -1,6 +1,15 @@
 from django.contrib import admin
 
-from .models import Brand, Category, Color, Product, ProductColor, ProductImage, Review
+from .models import (
+    Brand,
+    Category,
+    Color,
+    Product,
+    ProductColor,
+    ProductImage,
+    ProductVariant,
+    Review,
+)
 
 
 @admin.register(Category)
@@ -37,6 +46,20 @@ class ProductColorInline(admin.TabularInline):
     extra = 1
 
 
+class ProductVariantInline(admin.TabularInline):
+    model = ProductVariant
+    extra = 1
+    fields = (
+        "sku",
+        "barcode",
+        "color",
+        "price",
+        "original_price",
+        "stock",
+        "is_active",
+    )
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = (
@@ -57,7 +80,7 @@ class ProductAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug", "short_description")
     prepopulated_fields = {"slug": ("name",)}
     ordering = ("-created_at",)
-    inlines = [ProductImageInline, ProductColorInline]
+    inlines = [ProductImageInline, ProductColorInline, ProductVariantInline]
     readonly_fields = ("created_at",)
     list_per_page = 25
 
@@ -73,6 +96,15 @@ class ProductColorAdmin(admin.ModelAdmin):
     list_display = ("id", "product", "color")
     list_filter = ("color",)
     search_fields = ("product__name", "color__name")
+
+
+@admin.register(ProductVariant)
+class ProductVariantAdmin(admin.ModelAdmin):
+    list_display = ("id", "product", "sku", "color", "price", "stock", "is_active")
+    list_filter = ("is_active", "color")
+    search_fields = ("sku", "barcode", "product__name")
+    autocomplete_fields = ("product", "color")
+    ordering = ("product__name", "id")
 
 
 @admin.register(Review)
