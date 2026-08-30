@@ -296,7 +296,12 @@ class OrderCreateSerializerTests(TestCase):
     def setUp(self):
         self.user = make_user()
         self.product = make_product(price="100.00", stock=5)
-        make_cart_with_items(self.user, [{"product": self.product, "quantity": 2}])
+        # ProductVariant.stock is the real, authoritative inventory count
+        # (Tasks 3.1.1.1–3.1.1.4) — deliberately different from
+        # self.product.stock so any test that accidentally asserts
+        # against the wrong (superseded) field would fail loudly.
+        self.variant = make_variant(product=self.product, price="100.00", stock=5)
+        make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])
         self.request = type(
             "Request", (), {"user": self.user, "build_absolute_uri": lambda s, u: u}
         )()
@@ -654,62 +659,77 @@ class OrderCreateSerializerTests(TestCase):
 
     # ── Row-level locking on checkout ─────────────────────────────────────────
 
-    def test_checkout_locks_only_the_products_in_the_cart(self):
+    def test_checkout_locks_only_the_variants_in_the_cart(self):
         """
-        select_for_update() must be invoked on the Product queryset, scoped
-        to exactly the product ids referenced by the cart being checked
-        out — not the whole table.
+        select_for_update() must be invoked on the ProductVariant
+        queryset, scoped to exactly the variant ids referenced by the
+        cart being checked out — not the whole table. Locking moved
+        from Product to ProductVariant in this task, since
+        ProductVariant.stock is now the real, authoritative inventory
+        count.
         """
         from unittest.mock import patch
 
-        from shop.models import Product
+        from shop.models import ProductVariant
 
-        other_product = make_product(
+        other_variant = make_variant(
             name="Untouched", slug="untouched", price="15.00"
         )  # not in the cart — must not be locked
 
         s = self._serialize()
         self.assertTrue(s.is_valid(), s.errors)
 
-        real_qs = Product.objects.select_for_update()
+        real_qs = ProductVariant.objects.select_for_update(of=("self",))
         with patch(
-            "order.serializers.Product.objects.select_for_update",
+            "order.serializers.ProductVariant.objects.select_for_update",
             return_value=real_qs,
         ) as mock_select_for_update:
             order = s.save()
 
-        mock_select_for_update.assert_called_once_with()
+        mock_select_for_update.assert_called_once_with(of=("self",))
 
-        locked_product_ids = set(order.items.values_list("product_id", flat=True))
-        self.assertEqual(locked_product_ids, {self.product.id})
-        self.assertNotIn(other_product.id, locked_product_ids)
+        locked_variant_ids = set(order.items.values_list("variant_id", flat=True))
+        self.assertEqual(locked_variant_ids, {self.variant.id})
+        self.assertNotIn(other_variant.id, locked_variant_ids)
 
-    def test_checkout_product_query_uses_for_update(self):
+    def test_checkout_variant_query_uses_for_update(self):
         """
         The locking queryset's compiled SQL must contain FOR UPDATE. This
         only has real meaning on Postgres (the project's configured engine
         in core/settings/base.py); skip on backends where SELECT ... FOR
         UPDATE isn't part of the compiled SQL the same way.
+
+        `of=("self",)` scopes the lock to just the ProductVariant table
+        (not any select_related joins) — required because `color` is a
+        nullable FK, and Postgres rejects `FOR UPDATE` across the
+        nullable side of an outer join.
         """
         from django.db import connection
-        from shop.models import Product
+        from shop.models import ProductVariant
 
         if connection.vendor == "sqlite":
             self.skipTest("SELECT ... FOR UPDATE semantics differ on SQLite")
 
-        qs = Product.objects.select_for_update().filter(id=self.product.id)
+        qs = ProductVariant.objects.select_for_update(of=("self",)).filter(
+            id=self.variant.id
+        )
         self.assertIn("FOR UPDATE", str(qs.query))
 
-    def test_order_item_product_is_the_locked_instance(self):
+    def test_order_item_variant_is_the_locked_instance(self):
         """
-        The Product referenced on the created OrderItem must be the same
-        row fetched (and locked) by the select_for_update() query, not a
-        stale copy obtained earlier via the cart's select_related.
+        The ProductVariant referenced on the created OrderItem must be
+        the same row fetched (and locked) by the select_for_update()
+        query, not a stale copy obtained earlier via the cart's
+        select_related.
         """
         s = self._serialize()
         s.is_valid()
         order = s.save()
         item = order.items.first()
+        self.assertEqual(item.variant_id, self.variant.id)
+        self.assertEqual(item.variant_sku, self.variant.sku)
+        # And the parent product snapshot fields still trace back
+        # correctly, one level deeper through the locked variant.
         self.assertEqual(item.product_id, self.product.id)
         self.assertEqual(item.product_name, self.product.name)
 
@@ -718,32 +738,39 @@ class OrderCreateSerializerTests(TestCase):
     def test_sufficient_stock_decrements_by_ordered_quantity(self):
         """
         Ordering a quantity within available stock succeeds, and the
-        product's stock is reduced by exactly the ordered quantity.
+        VARIANT's stock is reduced by exactly the ordered quantity.
+        ProductVariant.stock is the real, authoritative inventory count
+        now — Product.stock is superseded and must be left untouched by
+        checkout.
         """
-        # self.product has stock=5, cart quantity=2 (see setUp).
+        # self.variant has stock=5, cart quantity=2 (see setUp).
         s = self._serialize()
         self.assertTrue(s.is_valid(), s.errors)
         s.save()
 
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.stock, 5 - 2)
+
+        # Product.stock is superseded and must be untouched by checkout.
         self.product.refresh_from_db()
-        self.assertEqual(self.product.stock, 5 - 2)
+        self.assertEqual(self.product.stock, 5)
 
     def test_insufficient_stock_raises_and_rolls_back_everything(self):
         """
         Ordering more than available stock must raise a ValidationError,
         and afterward: no Order or OrderItem rows exist, and the
-        product's stock is completely unchanged — proving the atomic
+        variant's stock is completely unchanged — proving the atomic
         rollback covers the new stock-decrement logic too.
         """
-        low_stock_product = make_product(
+        low_stock_variant = make_variant(
             name="Scarce Item", slug="scarce-item", price="40.00", stock=1
         )
         Cart.objects.filter(user=self.user).delete()
-        make_cart_with_items(self.user, [{"product": low_stock_product, "quantity": 3}])
+        make_cart_with_items(self.user, [{"variant": low_stock_variant, "quantity": 3}])
 
         orders_before = Order.objects.count()
         items_before = OrderItem.objects.count()
-        stock_before = low_stock_product.stock
+        stock_before = low_stock_variant.stock
 
         s = self._serialize()
         self.assertTrue(s.is_valid(), s.errors)
@@ -755,33 +782,71 @@ class OrderCreateSerializerTests(TestCase):
         self.assertEqual(Order.objects.count(), orders_before)
         self.assertEqual(OrderItem.objects.count(), items_before)
 
-        low_stock_product.refresh_from_db()
-        self.assertEqual(low_stock_product.stock, stock_before)
+        low_stock_variant.refresh_from_db()
+        self.assertEqual(low_stock_variant.stock, stock_before)
+
+    def test_insufficient_stock_error_message_identifies_specific_variant(self):
+        """
+        The stock-shortage error must name the SPECIFIC variant that's
+        short (color if set, else SKU) — not just the base product name
+        — so a customer/support team knows exactly which shade is out.
+        """
+        color = make_color(name="Shade 320 - Warm Beige")
+        low_stock_variant = make_variant(
+            product=self.product, sku="FOUND-320", color=color, stock=1
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(self.user, [{"variant": low_stock_variant, "quantity": 3}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        with self.assertRaises(serializers.ValidationError) as ctx:
+            s.save()
+        message = str(ctx.exception.detail["stock"])
+        self.assertIn(self.product.name, message)
+        self.assertIn("Shade 320 - Warm Beige", message)
+
+    def test_insufficient_stock_error_message_falls_back_to_sku_without_color(self):
+        """Colorless variants identify themselves by SKU in the error."""
+        colorless_variant = make_variant(
+            product=self.product, sku="COLORLESS-SKU", color=None, stock=1
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(self.user, [{"variant": colorless_variant, "quantity": 3}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        with self.assertRaises(serializers.ValidationError) as ctx:
+            s.save()
+        message = str(ctx.exception.detail["stock"])
+        self.assertIn("COLORLESS-SKU", message)
 
     def test_second_item_out_of_stock_prevents_first_item_decrement_too(self):
         """
         Cart with two items: the first has enough stock, the second does
-        not. Neither product's stock should be decremented — partial
+        not. Neither variant's stock should be decremented — partial
         success across items is not allowed.
         """
-        healthy_product = make_product(
+        healthy_variant = make_variant(
             name="Plenty", slug="plenty", price="10.00", stock=10
         )
-        scarce_product = make_product(
+        scarce_variant = make_variant(
             name="Scarce Two", slug="scarce-two", price="20.00", stock=1
         )
         Cart.objects.filter(user=self.user).delete()
         make_cart_with_items(
             self.user,
             [
-                {"product": healthy_product, "quantity": 2},
-                {"product": scarce_product, "quantity": 5},
+                {"variant": healthy_variant, "quantity": 2},
+                {"variant": scarce_variant, "quantity": 5},
             ],
         )
 
         orders_before = Order.objects.count()
-        healthy_stock_before = healthy_product.stock
-        scarce_stock_before = scarce_product.stock
+        healthy_stock_before = healthy_variant.stock
+        scarce_stock_before = scarce_variant.stock
 
         s = self._serialize()
         self.assertTrue(s.is_valid(), s.errors)
@@ -791,10 +856,37 @@ class OrderCreateSerializerTests(TestCase):
 
         self.assertEqual(Order.objects.count(), orders_before)
 
-        healthy_product.refresh_from_db()
-        scarce_product.refresh_from_db()
-        self.assertEqual(healthy_product.stock, healthy_stock_before)
-        self.assertEqual(scarce_product.stock, scarce_stock_before)
+        healthy_variant.refresh_from_db()
+        scarce_variant.refresh_from_db()
+        self.assertEqual(healthy_variant.stock, healthy_stock_before)
+        self.assertEqual(scarce_variant.stock, scarce_stock_before)
+
+    def test_two_different_variants_of_same_product_do_not_contend_for_stock(self):
+        """
+        Ordering two different color variants of the SAME product in one
+        cart must decrement each variant's stock independently — they
+        must not be treated as sharing one pooled stock number (that
+        would be the old, incorrect Product-level behavior).
+        """
+        shade_a = make_variant(product=self.product, sku="SHADE-A", stock=3)
+        shade_b = make_variant(product=self.product, sku="SHADE-B", stock=3)
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(
+            self.user,
+            [
+                {"variant": shade_a, "quantity": 2},
+                {"variant": shade_b, "quantity": 1},
+            ],
+        )
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        shade_a.refresh_from_db()
+        shade_b.refresh_from_db()
+        self.assertEqual(shade_a.stock, 1)  # 3 - 2
+        self.assertEqual(shade_b.stock, 2)  # 3 - 1
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -927,13 +1019,13 @@ class OrderListCreateAPITests(APITestCase):
 
     def test_post_insufficient_stock_returns_400_and_nothing_committed(self):
         Cart.objects.filter(user=self.user).delete()
-        low_stock = make_product(
+        low_stock_variant = make_variant(
             name="API Scarce", slug="api-scarce", price="12.00", stock=1
         )
-        make_cart_with_items(self.user, [{"product": low_stock, "quantity": 2}])
+        make_cart_with_items(self.user, [{"variant": low_stock_variant, "quantity": 2}])
 
         orders_before = Order.objects.count()
-        stock_before = low_stock.stock
+        stock_before = low_stock_variant.stock
 
         res = self._post_order()
 
@@ -941,8 +1033,8 @@ class OrderListCreateAPITests(APITestCase):
         self.assertIn("stock", res.data)
         self.assertEqual(Order.objects.count(), orders_before)
 
-        low_stock.refresh_from_db()
-        self.assertEqual(low_stock.stock, stock_before)
+        low_stock_variant.refresh_from_db()
+        self.assertEqual(low_stock_variant.stock, stock_before)
 
     def test_post_multiple_orders_each_get_unique_numbers(self):
         res1 = self._post_order()
@@ -1019,7 +1111,11 @@ class OrderDetailAPITests(APITestCase):
     def setUp(self):
         self.user = make_user()
         self.product = make_product(price="30.00", stock=10)
-        make_cart_with_items(self.user, [{"product": self.product, "quantity": 2}])
+        # ProductVariant.stock is authoritative now; keep it distinct
+        # from Product.stock so any assertion against the wrong field
+        # fails loudly rather than passing by coincidence.
+        self.variant = make_variant(product=self.product, price="30.00", stock=10)
+        make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])
         self.client.force_authenticate(user=self.user)
         res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
         self.order = Order.objects.get(pk=res.data["id"])
@@ -1181,13 +1277,15 @@ class OrderDetailAPITests(APITestCase):
 
     def test_patch_cancel_restores_stock_for_each_item(self):
         """
-        Cancelling an order returns every OrderItem's quantity back to its
-        product's stock.
+        Cancelling an order returns every OrderItem's quantity back to
+        its VARIANT's stock — ProductVariant.stock is the real,
+        authoritative inventory count now (this task), not
+        Product.stock.
         """
-        # setUp() created self.order for 2 units of self.product (stock
-        # started at 10, and Task 1.1.1.3's decrement left it at 8).
-        self.product.refresh_from_db()
-        stock_after_purchase = self.product.stock
+        # setUp() created self.order for 2 units of self.variant (stock
+        # started at 10, and checkout's decrement left it at 8).
+        self.variant.refresh_from_db()
+        stock_after_purchase = self.variant.stock
         self.assertEqual(stock_after_purchase, 8)
 
         res = self.client.patch(
@@ -1195,60 +1293,89 @@ class OrderDetailAPITests(APITestCase):
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
 
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.stock, stock_after_purchase + 2)
+        self.assertEqual(self.variant.stock, 10)
+
+        # Product.stock is superseded and was never touched.
         self.product.refresh_from_db()
-        self.assertEqual(self.product.stock, stock_after_purchase + 2)
         self.assertEqual(self.product.stock, 10)
 
-    def test_patch_cancel_with_deleted_product_skips_gracefully(self):
+    def test_patch_cancel_with_deleted_variant_skips_gracefully(self):
         """
-        If one of the order's OrderItem.product rows was deleted after the
-        order was placed (SET_NULL), cancelling must not raise, and stock
-        restoration should still happen for the remaining valid items.
+        If one of the order's OrderItem.variant rows was deleted after
+        the order was placed (SET_NULL), cancelling must not raise, and
+        stock restoration should still happen for the remaining valid
+        items.
         """
-        second_product = make_product(
+        second_variant = make_variant(
             name="Backpack", slug="backpack", price="45.00", stock=10
         )
         make_cart_with_items(
             self.user,
             [
-                {"product": self.product, "quantity": 1},
-                {"product": second_product, "quantity": 3},
+                {"variant": self.variant, "quantity": 1},
+                {"variant": second_variant, "quantity": 3},
             ],
         )
         res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
         order = Order.objects.get(pk=res.data["id"])
 
-        second_product.refresh_from_db()
-        self.assertEqual(second_product.stock, 7)  # 10 - 3
+        second_variant.refresh_from_db()
+        self.assertEqual(second_variant.stock, 7)  # 10 - 3
 
-        # Simulate the product having been deleted after the order was
-        # placed — OrderItem.product is SET_NULL, so this leaves the
-        # OrderItem with product=None.
-        second_product.delete()
+        # Simulate the variant having been deleted after the order was
+        # placed — OrderItem.variant is SET_NULL, so this leaves the
+        # OrderItem with variant=None.
+        second_variant.delete()
 
-        other_item = order.items.exclude(product__isnull=True).first()
+        other_item = order.items.exclude(variant__isnull=True).first()
         self.assertIsNotNone(other_item)
-        restored_product = other_item.product
-        stock_before_cancel = restored_product.stock
+        restored_variant = other_item.variant
+        stock_before_cancel = restored_variant.stock
 
         res = self.client.patch(
             self._detail_url(order.pk), {"status": "cancelled"}, format="json"
         )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
 
-        restored_product.refresh_from_db()
+        restored_variant.refresh_from_db()
         self.assertEqual(
-            restored_product.stock, stock_before_cancel + other_item.quantity
+            restored_variant.stock, stock_before_cancel + other_item.quantity
         )
+
+    def test_patch_cancel_with_deleted_product_cascades_and_skips_gracefully(self):
+        """
+        ProductVariant.product is on_delete=CASCADE (a variant can't
+        outlive its parent product), so deleting the Product also
+        deletes the ProductVariant, which in turn SET_NULLs
+        OrderItem.variant. Confirms the graceful-skip check — now keyed
+        on `variant`, not `product` — correctly catches this
+        transitive case too, without raising.
+        """
+        self.variant.refresh_from_db()
+
+        self.product.delete()  # cascades: Product -> ProductVariant
+
+        item = self.order.items.first()
+        item.refresh_from_db()
+        self.assertIsNone(item.product_id)
+        self.assertIsNone(item.variant_id)  # cascaded away, not just SET_NULL'd
+
+        res = self.client.patch(
+            self._detail_url(self.order.pk), {"status": "cancelled"}, format="json"
+        )
+        # Must not raise — gracefully skips restoration for this item.
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
 
     def test_patch_cancel_shipped_order_does_not_modify_stock(self):
         """
         Regression: the shipped/delivered guard clause must still run
         before any stock-restoration logic, so a rejected cancellation
-        leaves product stock untouched.
+        leaves variant stock untouched.
         """
-        self.product.refresh_from_db()
-        stock_before = self.product.stock
+        self.variant.refresh_from_db()
+        stock_before = self.variant.stock
 
         self.order.status = Order.Status.SHIPPED
         self.order.save()
@@ -1258,8 +1385,8 @@ class OrderDetailAPITests(APITestCase):
         )
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
-        self.product.refresh_from_db()
-        self.assertEqual(self.product.stock, stock_before)
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.stock, stock_before)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

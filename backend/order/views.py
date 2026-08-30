@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from shop.models import Product
+from shop.models import ProductVariant
 
 from .models import Order
 from .serializers import OrderCreateSerializer, OrderListSerializer, OrderSerializer
@@ -49,9 +49,9 @@ class OrderDetailView(APIView):
 
     def _get_order(self, request, pk):
         try:
-            return Order.objects.prefetch_related("items__product").get(
-                pk=pk, user=request.user
-            )
+            return Order.objects.prefetch_related(
+                "items__product", "items__variant"
+            ).get(pk=pk, user=request.user)
         except Order.DoesNotExist:
             return None
 
@@ -94,17 +94,21 @@ class OrderDetailView(APIView):
             order.save(update_fields=["status", "updated_at"])
 
             # ── Restore stock for each item ──────────────────────────────
+            # ProductVariant.stock is the real, authoritative inventory
+            # count now (Tasks 3.1.1.1–3.1.1.4); Product.stock is
+            # superseded and unused in the order flow — candidate for
+            # removal in a future cleanup task.
             for order_item in order.items.all():
-                if order_item.product_id is None:
-                    # Product was deleted after the order was placed
-                    # (OrderItem.product is SET_NULL) — nothing to restore.
+                if order_item.variant_id is None:
+                    # Variant was deleted after the order was placed
+                    # (OrderItem.variant is SET_NULL) — nothing to restore.
                     continue
 
-                product = Product.objects.select_for_update().get(
-                    pk=order_item.product_id
+                variant = ProductVariant.objects.select_for_update().get(
+                    pk=order_item.variant_id
                 )
-                product.stock += order_item.quantity
-                product.save(update_fields=["stock"])
+                variant.stock += order_item.quantity
+                variant.save(update_fields=["stock"])
 
         serializer = OrderSerializer(order, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)

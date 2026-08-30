@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from rest_framework import serializers
-from shop.models import Product
+from shop.models import ProductVariant
 
 from .models import Order, OrderItem
 from .services.pricing import PricingError, calculate_order_totals
@@ -176,46 +176,56 @@ class OrderCreateSerializer(serializers.Serializer):
                 status=Order.Status.PROCESSING,
             )
 
-            # ── Lock the referenced Product rows ────────────────────────────
+            # ── Lock the referenced ProductVariant rows ─────────────────────
             # Row-level lock so concurrent checkouts against the same
-            # product(s) serialize instead of racing on stock. Stock is
-            # still tracked/locked at the Product level here (unchanged
-            # in spirit from before Task 3.1.1.3) — we now just reach
-            # the product one level deeper, through each cart item's
-            # variant, since CartItem no longer has a direct `product`
-            # FK.
+            # variant(s) serialize instead of racing on stock.
+            # ProductVariant.stock is the real, authoritative per-shade/
+            # size inventory count (Tasks 3.1.1.1–3.1.1.4); locking is
+            # scoped to the variant, not the product, so two customers
+            # ordering the LAST unit of two DIFFERENT variants of the
+            # SAME product don't spuriously contend with each other.
             cart_items = list(
                 cart.items.select_related("variant__product", "variant__color")
                 .prefetch_related("variant__product__images")
                 .all()
             )
-            product_ids = {cart_item.variant.product_id for cart_item in cart_items}
-            locked_products = {
-                product.id: product
-                for product in Product.objects.select_for_update().filter(
-                    id__in=product_ids
-                )
+            variant_ids = {cart_item.variant_id for cart_item in cart_items}
+            locked_variants = {
+                variant.id: variant
+                for variant in ProductVariant.objects.select_for_update(of=("self",))
+                .select_related("product", "color")
+                .prefetch_related("product__images")
+                .filter(id__in=variant_ids)
             }
 
             # ── Snapshot each cart item ────────────────────────────────────
             for cart_item in cart_items:
-                variant = cart_item.variant
-                product = locked_products[variant.product_id]
+                locked_variant = locked_variants[cart_item.variant_id]
+                product = locked_variant.product
 
                 # Validate stock, then decrement it. Raising here inside the
                 # atomic block rolls back the Order (and any earlier
                 # OrderItem/stock writes from this same loop) as a unit.
-                if product.stock < cart_item.quantity:
+                if locked_variant.stock < cart_item.quantity:
+                    variant_detail = (
+                        locked_variant.color.name
+                        if locked_variant.color
+                        else locked_variant.sku
+                    )
                     raise serializers.ValidationError(
                         {
                             "stock": (
-                                f"Only {product.stock} of '{product.name}' "
+                                f"Only {locked_variant.stock} of "
+                                f"'{locked_variant.product.name} — {variant_detail}' "
                                 "left in stock."
                             )
                         }
                     )
-                product.stock -= cart_item.quantity
-                product.save(update_fields=["stock"])
+                locked_variant.stock -= cart_item.quantity
+                locked_variant.save(update_fields=["stock"])
+                # Product.stock is now superseded by ProductVariant.stock and
+                # unused in the order flow — candidate for removal in a
+                # future cleanup task.
 
                 # Build absolute image URL
                 image_url = ""
@@ -237,10 +247,12 @@ class OrderCreateSerializer(serializers.Serializer):
                     product_name=product.name,
                     product_slug=product.slug,
                     product_image=image_url,
-                    variant=variant,
-                    variant_sku=variant.sku,
+                    variant=locked_variant,
+                    variant_sku=locked_variant.sku,
                     variant_attributes_json={
-                        "color": variant.color.name if variant.color else None
+                        "color": (
+                            locked_variant.color.name if locked_variant.color else None
+                        )
                     },
                     unit_price=cart_item.unit_price,
                     quantity=cart_item.quantity,
