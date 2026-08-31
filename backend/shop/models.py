@@ -236,6 +236,19 @@ class ProductVariant(models.Model):
     )
     stock = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    # Unlike skin_type/hair_type/spf (formulation-level, on Product),
+    # volume/weight genuinely differ per purchasable unit — a serum
+    # sold in 30ml and 50ml sizes needs each size tracked as its own
+    # variant with its own volume/price/stock. Both nullable/optional:
+    # a variant is typically measured in EITHER volume (liquids —
+    # serums, toners, perfume) OR weight (solids/powders — pressed
+    # powder, lipstick, some balms), not both, and some variants (e.g.
+    # a color-only eyeshadow-palette variant with no size variation)
+    # may need neither. Deliberately no "exactly one must be set"
+    # validation — that would break perfectly valid variants that have
+    # neither dimension recorded.
+    volume_ml = models.PositiveIntegerField(null=True, blank=True)
+    weight_g = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

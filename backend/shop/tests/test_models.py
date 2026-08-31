@@ -404,6 +404,48 @@ class TestProductVariantModel:
         variant.refresh_from_db()
         assert variant.barcode == "not-a-valid-barcode"
 
+    # ── volume_ml / weight_g ─────────────────────────────────────────────────
+
+    def test_volume_ml_set_weight_g_null(self, db):
+        """The common liquid case: a 30ml serum has volume, no weight."""
+        variant = ProductVariantFactory(volume_ml=30, weight_g=None)
+        variant.full_clean()  # must not raise
+        variant.refresh_from_db()
+        assert variant.volume_ml == 30
+        assert variant.weight_g is None
+
+    def test_weight_g_set_volume_ml_null(self, db):
+        """The common solid case: a pressed powder has weight, no volume."""
+        variant = ProductVariantFactory(volume_ml=None, weight_g=12)
+        variant.full_clean()  # must not raise
+        variant.refresh_from_db()
+        assert variant.volume_ml is None
+        assert variant.weight_g == 12
+
+    def test_both_volume_ml_and_weight_g_null(self, db):
+        """
+        Deliberately permissive: a color-only variant (e.g. an
+        eyeshadow palette shade with no size variation) may need
+        neither dimension recorded — this must remain valid, not be
+        forced into picking one.
+        """
+        variant = ProductVariantFactory(volume_ml=None, weight_g=None)
+        variant.full_clean()  # must not raise
+        variant.refresh_from_db()
+        assert variant.volume_ml is None
+        assert variant.weight_g is None
+
+    def test_both_volume_ml_and_weight_g_set(self, db):
+        """
+        No "exactly one must be set" constraint exists on purpose — a
+        variant with both dimensions recorded must also be valid.
+        """
+        variant = ProductVariantFactory(volume_ml=50, weight_g=75)
+        variant.full_clean()  # must not raise
+        variant.refresh_from_db()
+        assert variant.volume_ml == 50
+        assert variant.weight_g == 75
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Review

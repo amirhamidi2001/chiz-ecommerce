@@ -56,6 +56,8 @@ class ProductVariantInline(admin.TabularInline):
         "price",
         "original_price",
         "stock",
+        "volume_ml",
+        "weight_g",
         "is_active",
     )
 
@@ -100,7 +102,17 @@ class ProductColorAdmin(admin.ModelAdmin):
 
 @admin.register(ProductVariant)
 class ProductVariantAdmin(admin.ModelAdmin):
-    list_display = ("id", "product", "sku", "color", "price", "stock", "is_active")
+    list_display = (
+        "id",
+        "product",
+        "sku",
+        "color",
+        "price",
+        "stock",
+        "volume_ml",
+        "weight_g",
+        "is_active",
+    )
     list_filter = ("is_active", "color")
     search_fields = ("sku", "barcode", "product__name")
     autocomplete_fields = ("product", "color")
