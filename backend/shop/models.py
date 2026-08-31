@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator
 from django.db import models
 from django.utils.text import slugify
 
@@ -123,6 +124,16 @@ class Product(models.Model):
         max_length=20,
         choices=HairType.choices,
         blank=True,
+    )
+    # Nullable (not just blank) since this is numeric: 0 would be
+    # ambiguous between "SPF 0 / no protection" and "not specified",
+    # so None genuinely means "not applicable" (most makeup remover,
+    # most haircare) while blank/0 aren't overloaded to mean that too.
+    # MaxValueValidator(100) is a generous sanity bound, not an attempt
+    # to encode exact real-world SPF labeling regulations — real
+    # products realistically top out around SPF 50-100.
+    spf = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MaxValueValidator(100)]
     )
     thumbnail = models.ImageField(
         upload_to="products/thumbnails/", null=True, blank=True

@@ -209,6 +209,31 @@ class TestProductModel:
         with pytest.raises(ValidationError):
             product.full_clean()
 
+    # ── spf ──────────────────────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("value", [0, 15, 30, 50, 100])
+    def test_saves_with_valid_spf_values(self, db, value):
+        product = ProductFactory(spf=value)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.spf == value
+
+    def test_spf_none_is_valid(self, db):
+        """
+        spf is nullable (not just blank) since it's numeric: None means
+        genuinely "not applicable" (most makeup remover, most
+        haircare), distinct from 0 which would mean "SPF 0 / no
+        protection".
+        """
+        product = ProductFactory(spf=None)
+        product.full_clean()  # must not raise
+        assert product.spf is None
+
+    def test_spf_above_max_bound_fails_full_clean(self, db):
+        product = ProductFactory(spf=101)  # over the MaxValueValidator(100) bound
+        with pytest.raises(ValidationError):
+            product.full_clean()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ProductColor
