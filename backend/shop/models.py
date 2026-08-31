@@ -2,6 +2,8 @@ from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
 
+from .validators import validate_ean13
+
 
 class Category(models.Model):
     name = models.CharField(max_length=200)
@@ -57,6 +59,23 @@ class Color(models.Model):
         return f"{self.name} ({self.hex_code})"
 
 
+class SkinType(models.TextChoices):
+    OILY = "oily", "Oily"
+    DRY = "dry", "Dry"
+    COMBINATION = "combination", "Combination"
+    SENSITIVE = "sensitive", "Sensitive"
+    NORMAL = "normal", "Normal"
+    ALL = "all", "All Skin Types"
+
+
+class HairType(models.TextChoices):
+    STRAIGHT = "straight", "Straight"
+    WAVY = "wavy", "Wavy"
+    CURLY = "curly", "Curly"
+    COILY = "coily", "Coily"
+    ALL = "all", "All Hair Types"
+
+
 class Product(models.Model):
     category = models.ForeignKey(
         Category,
@@ -81,6 +100,30 @@ class Product(models.Model):
     reviews_count = models.PositiveIntegerField(default=0)
     is_new = models.BooleanField(default=False)
     is_sale = models.BooleanField(default=False)
+    # Skin-type suitability is a property of the product formulation
+    # itself (e.g. "this serum is for oily skin"), not of a specific
+    # shade/size — unlike price/stock, it does NOT vary per
+    # ProductVariant, so it lives here on Product. blank=True with no
+    # default on purpose: not every category (haircare, fragrance,
+    # tools) has a meaningful skin type, and leaving it unset must be
+    # valid rather than forcing an arbitrary "all" default onto
+    # products where the concept doesn't apply.
+    skin_type = models.CharField(
+        max_length=20,
+        choices=SkinType.choices,
+        blank=True,
+    )
+    # Same rationale as skin_type: a property of the product
+    # formulation (shampoo/conditioner/styling products), not of a
+    # specific shade/size, so it lives on Product rather than
+    # ProductVariant. blank=True with no default — most product
+    # categories (skincare, fragrance, tools) have no meaningful hair
+    # type, and leaving it unset must be valid.
+    hair_type = models.CharField(
+        max_length=20,
+        choices=HairType.choices,
+        blank=True,
+    )
     thumbnail = models.ImageField(
         upload_to="products/thumbnails/", null=True, blank=True
     )
@@ -136,11 +179,39 @@ class ProductColor(models.Model):
 
 
 class ProductVariant(models.Model):
+    # NOTE on when `barcode`'s validate_ean13 validator actually fires:
+    # like every Django field validator, it does NOT run on a bare
+    # `.save()`/`.objects.create()` call — Django only runs field
+    # validators as part of `full_clean()`. That means:
+    #   - Django admin (ProductVariantAdmin / ProductVariantInline,
+    #     Task 3.1.1.6) DOES enforce it, since ModelForm-based admin
+    #     forms call full_clean() during validation — malformed
+    #     barcodes typed by hand there will be correctly rejected.
+    #   - A DRF ModelSerializer for ProductVariant (none exists yet in
+    #     this codebase as of this task — cart/serializers.py only
+    #     reads/validates a variant_id, it doesn't create/update
+    #     ProductVariant rows) WOULD also enforce it automatically,
+    #     since DRF auto-generates field-level validators from the
+    #     model field's `validators=[...]` and runs them in
+    #     `is_valid()`. Any future variant-creation/bulk-import API
+    #     serializer just needs to be a ModelSerializer (or otherwise
+    #     include this validator) for the same protection to apply.
+    #   - Code paths that call `.save()` directly without going through
+    #     a ModelForm/DRF serializer/explicit `full_clean()` (e.g. the
+    #     legacy-data migration in Task 3.1.1.2, or test factories) do
+    #     NOT get this validation for free — that's expected/desired,
+    #     since blank barcodes and legacy placeholder data shouldn't be
+    #     forced through EAN-13 validation retroactively.
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="variants"
     )
     sku = models.CharField(max_length=64, unique=True, blank=True)
-    barcode = models.CharField(max_length=20, blank=True)
+    barcode = models.CharField(
+        max_length=20,
+        blank=True,
+        validators=[validate_ean13],
+        help_text="EAN-13 barcode (13 digits with a valid check digit). Optional.",
+    )
     color = models.ForeignKey(
         Color,
         on_delete=models.SET_NULL,
@@ -159,6 +230,26 @@ class ProductVariant(models.Model):
 
     class Meta:
         ordering = ["id"]
+
+    def save(self, *args, **kwargs):
+        if not self.sku:
+            self.sku = self._generate_sku()
+        super().save(*args, **kwargs)
+
+    def _generate_sku(self) -> str:
+        category_code = (
+            self.product.category.name[:3].upper() if self.product.category else "GEN"
+        )
+        brand_code = (
+            self.product.brand.name[:3].upper() if self.product.brand else "UNK"
+        )
+        base = f"{category_code}-{brand_code}-{self.product.id}"
+        sku = base
+        counter = 1
+        while ProductVariant.objects.filter(sku=sku).exclude(pk=self.pk).exists():
+            sku = f"{base}-{counter}"
+            counter += 1
+        return sku
 
     def __str__(self):
         return f"{self.product.name} — {self.sku or 'unsaved'}"

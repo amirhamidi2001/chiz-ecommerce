@@ -76,7 +76,7 @@ class ProductAdmin(admin.ModelAdmin):
         "is_sale",
         "created_at",
     )
-    list_filter = ("category", "brand", "is_new", "is_sale")
+    list_filter = ("category", "brand", "is_new", "is_sale", "skin_type", "hair_type")
     search_fields = ("name", "slug", "short_description")
     prepopulated_fields = {"slug": ("name",)}
     ordering = ("-created_at",)

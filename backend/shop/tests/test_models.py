@@ -1,15 +1,18 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils.text import slugify
 from shop.models import (
     Brand,
     Category,
     Color,
+    HairType,
     Product,
     ProductColor,
     ProductVariant,
     Review,
+    SkinType,
 )
 from shop.tests.factories import (
     BrandFactory,
@@ -157,6 +160,55 @@ class TestProductModel:
         product = ProductFactory(stock=0)
         assert product.stock == 0
 
+    # ── skin_type ────────────────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("choice", [c.value for c in SkinType])
+    def test_saves_with_each_valid_skin_type_choice(self, db, choice):
+        product = ProductFactory(skin_type=choice)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.skin_type == choice
+
+    def test_blank_skin_type_is_valid(self, db):
+        """
+        skin_type has no default and blank=True on purpose — not every
+        category (haircare, fragrance, tools) has a meaningful skin
+        type, so leaving it unset must be valid, not force an
+        arbitrary "all" default.
+        """
+        product = ProductFactory(skin_type="")
+        product.full_clean()  # must not raise
+        assert product.skin_type == ""
+
+    def test_invalid_skin_type_fails_full_clean(self, db):
+        product = ProductFactory(skin_type="glowing")  # not a real choice
+        with pytest.raises(ValidationError):
+            product.full_clean()
+
+    # ── hair_type ────────────────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("choice", [c.value for c in HairType])
+    def test_saves_with_each_valid_hair_type_choice(self, db, choice):
+        product = ProductFactory(hair_type=choice)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.hair_type == choice
+
+    def test_blank_hair_type_is_valid(self, db):
+        """
+        Same rationale as skin_type: no default, blank=True — most
+        categories (skincare, fragrance, tools) have no meaningful
+        hair type, so leaving it unset must be valid.
+        """
+        product = ProductFactory(hair_type="")
+        product.full_clean()  # must not raise
+        assert product.hair_type == ""
+
+    def test_invalid_hair_type_fails_full_clean(self, db):
+        product = ProductFactory(hair_type="frizzy")  # not a real choice
+        with pytest.raises(ValidationError):
+            product.full_clean()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ProductColor
@@ -238,6 +290,94 @@ class TestProductVariantModel:
         ProductVariantFactory(sku="UNIQUE-SKU-1")
         with pytest.raises(Exception):
             ProductVariantFactory(sku="UNIQUE-SKU-1")
+
+    def test_sku_auto_generated_when_blank(self, db):
+        product = ProductFactory(name="Auto SKU Product")
+        variant = ProductVariantFactory(product=product, sku="")
+        assert variant.sku != ""
+        assert variant.sku is not None
+
+    def test_explicit_sku_is_respected(self, db):
+        variant = ProductVariantFactory(sku="MY-CUSTOM-SKU")
+        assert variant.sku == "MY-CUSTOM-SKU"
+
+    def test_sku_auto_generated_format_uses_category_brand_and_product_id(self, db):
+        category = CategoryFactory(name="Cosmetics")
+        brand = BrandFactory(name="Glow")
+        product = ProductFactory(category=category, brand=brand)
+        variant = ProductVariantFactory(product=product, sku="")
+        assert variant.sku == f"COS-GLO-{product.id}"
+
+    def test_sku_auto_generated_falls_back_when_no_category_or_brand(self, db):
+        product = ProductFactory(category=None, brand=None)
+        variant = ProductVariantFactory(product=product, sku="")
+        assert variant.sku == f"GEN-UNK-{product.id}"
+
+    def test_sku_collision_resolved_with_counter(self, db):
+        """
+        Two variants generated for the SAME product (and therefore the
+        same base category/brand/product-id SKU) must resolve their
+        collision via the same counter-suffix pattern already used by
+        Product.slug generation.
+        """
+        category = CategoryFactory(name="Skincare")
+        brand = BrandFactory(name="Luxe")
+        product = ProductFactory(category=category, brand=brand)
+
+        v1 = ProductVariantFactory(product=product, sku="")
+        assert v1.sku == f"SKI-LUX-{product.id}"
+
+        # Force a second variant for the SAME product (so it would
+        # naturally generate the identical base SKU) to prove the
+        # collision-avoidance loop kicks in.
+        v2 = ProductVariant.objects.create(product=product, price=15, stock=5)
+        assert v2.sku == f"SKI-LUX-{product.id}-1"
+
+        v3 = ProductVariant.objects.create(product=product, price=20, stock=3)
+        assert v3.sku == f"SKI-LUX-{product.id}-2"
+
+    def test_sku_not_regenerated_on_subsequent_save(self, db):
+        """Saving an already-SKU'd variant again must not change its SKU."""
+        variant = ProductVariantFactory(sku="")
+        original_sku = variant.sku
+        variant.stock = variant.stock + 1
+        variant.save()
+        assert variant.sku == original_sku
+
+    # ── barcode: EAN-13 validation ──────────────────────────────────────────
+
+    def test_valid_ean13_barcode_passes_full_clean(self, db):
+        variant = ProductVariantFactory(barcode="4006381333931")
+        variant.full_clean()  # must not raise
+
+    def test_ean13_barcode_with_wrong_checksum_fails_full_clean(self, db):
+        variant = ProductVariantFactory(barcode="4006381333932")  # bad check digit
+        with pytest.raises(ValidationError):
+            variant.full_clean()
+
+    def test_non_13_digit_barcode_fails_full_clean(self, db):
+        for bad_value in ["12345", "400638133393112", "40063813393a1"]:
+            variant = ProductVariantFactory(barcode=bad_value)
+            with pytest.raises(ValidationError):
+                variant.full_clean()
+
+    def test_blank_barcode_passes_full_clean(self, db):
+        variant = ProductVariantFactory(barcode="")
+        variant.full_clean()  # must not raise — barcode remains optional
+
+    def test_barcode_validator_does_not_run_on_bare_save(self, db):
+        """
+        Field validators (including validate_ean13) only run via
+        full_clean(), never on a bare .save()/.objects.create() — this
+        is standard Django behavior, not a bug. A malformed barcode
+        written directly via .save() is NOT rejected; only ModelForm
+        (Django admin) / DRF serializer / explicit full_clean() paths
+        enforce it.
+        """
+        variant = ProductVariantFactory(barcode="not-a-valid-barcode")
+        variant.save()  # must NOT raise, unlike full_clean() above
+        variant.refresh_from_db()
+        assert variant.barcode == "not-a-valid-barcode"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
