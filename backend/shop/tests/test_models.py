@@ -201,6 +201,24 @@ class TestProductModel:
         product.full_clean()  # must not raise
         assert product.ingredients == ""
 
+    # ── country_of_origin ────────────────────────────────────────────────────
+
+    def test_country_of_origin_saves_and_retrieves(self, db):
+        product = ProductFactory(country_of_origin="South Korea")
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.country_of_origin == "South Korea"
+
+    def test_country_of_origin_blank_is_valid(self, db):
+        """
+        Free text, no choices list, no default — plenty of products
+        (or admins who haven't gotten to it yet) legitimately have no
+        recorded origin.
+        """
+        product = ProductFactory(country_of_origin="")
+        product.full_clean()  # must not raise
+        assert product.country_of_origin == ""
+
     # ── skin_type ────────────────────────────────────────────────────────────
 
     @pytest.mark.parametrize("choice", [c.value for c in SkinType])

@@ -102,6 +102,13 @@ class Product(models.Model):
     # project's Search epic if/when ingredient-based search becomes a
     # requirement.
     ingredients = models.TextField(blank=True)
+    # Free text rather than a curated ISO country-code choices list:
+    # cosmetics on this platform are sourced from a very wide range of
+    # countries, and a hardcoded choices list would need constant
+    # maintenance as new brands/origins are added. A proper
+    # ISO-3166-backed dropdown is a reasonable future enhancement but
+    # is explicitly out of scope for this task.
+    country_of_origin = models.CharField(max_length=100, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     original_price = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
