@@ -92,6 +92,16 @@ class Product(models.Model):
     slug = models.SlugField(max_length=320, unique=True, blank=True)
     short_description = models.CharField(max_length=500, blank=True)
     description = models.TextField(blank=True)
+    # Raw INCI (International Nomenclature of Cosmetic Ingredients)
+    # ingredients text — a long, comma-separated technical ingredient
+    # list. Plain storable/displayable text only for now; a
+    # structured, individually-searchable ingredient list with
+    # allergen-flagging is a much bigger feature and explicitly out of
+    # scope here. Not made searchable via ProductFilter/full-text
+    # search in this task either — that's tracked separately under the
+    # project's Search epic if/when ingredient-based search becomes a
+    # requirement.
+    ingredients = models.TextField(blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     original_price = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True

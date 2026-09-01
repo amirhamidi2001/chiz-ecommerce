@@ -160,6 +160,47 @@ class TestProductModel:
         product = ProductFactory(stock=0)
         assert product.stock == 0
 
+    # ── ingredients ──────────────────────────────────────────────────────────
+
+    def test_ingredients_stores_and_retrieves_long_inci_list_without_truncation(
+        self, db
+    ):
+        """
+        A realistic INCI (International Nomenclature of Cosmetic
+        Ingredients) list: a long, comma-separated technical ingredient
+        list, well over a few hundred characters. Must round-trip
+        through the DB exactly, with no truncation — this is plain
+        storage/display only (no structured parsing, no search
+        indexing) per this task's scope.
+        """
+        inci_list = (
+            "Aqua/Water/Eau, Glycerin, Butylene Glycol, Niacinamide, "
+            "1,2-Hexanediol, Panthenol, Sodium Hyaluronate, Betaine, "
+            "Centella Asiatica Leaf Water, Camellia Sinensis Leaf Extract, "
+            "Sodium Polyacrylate, Ethylhexylglycerin, Carbomer, "
+            "Polysorbate 20, Disodium EDTA, Allantoin, Tocopherol, "
+            "Adenosine, Sodium Hydroxide, Madecassoside, "
+            "Zinc PCA, Panax Ginseng Root Extract, Portulaca Oleracea Extract, "
+            "Houttuynia Cordata Extract, Hydrolyzed Hyaluronic Acid, "
+            "Sodium Hyaluronate Crosspolymer, Fragrance/Parfum, Citric Acid, "
+            "Sodium Citrate, Xanthan Gum, Caprylyl Glycol, "
+            "1,2-Hexanediol, Beta-Glucan, Arginine, Serine, Threonine, "
+            "Glutamic Acid, Lysine HCl, Aspartic Acid, Alanine, "
+            "Trisodium Ethylenediamine Disuccinate."
+        )
+        assert len(inci_list) > 500  # confirm this is genuinely long
+
+        product = ProductFactory(ingredients=inci_list)
+        product.refresh_from_db()
+
+        assert product.ingredients == inci_list
+        assert len(product.ingredients) == len(inci_list)
+
+    def test_ingredients_blank_is_valid(self, db):
+        product = ProductFactory(ingredients="")
+        product.full_clean()  # must not raise
+        assert product.ingredients == ""
+
     # ── skin_type ────────────────────────────────────────────────────────────
 
     @pytest.mark.parametrize("choice", [c.value for c in SkinType])
