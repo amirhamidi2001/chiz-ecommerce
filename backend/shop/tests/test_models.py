@@ -221,6 +221,49 @@ class TestProductModel:
         product.full_clean()  # must not raise
         assert product.country_of_origin == ""
 
+    # ── usage_instructions / warnings ────────────────────────────────────────
+
+    def test_usage_instructions_and_warnings_save_and_retrieve_independently(self, db):
+        """
+        Two separate fields, not one combined field — confirm they
+        store/retrieve independently without interfering with each
+        other (e.g. one overwriting or concatenating into the other).
+        """
+        usage_text = (
+            "Apply a thin layer to clean, dry skin every morning and evening. "
+            "Follow with moisturizer and, during the day, sunscreen."
+        )
+        warning_text = (
+            "For external use only. Perform a patch test 24 hours before first "
+            "use. Discontinue use if irritation, redness, or itching occurs. "
+            "Avoid contact with eyes. Keep out of reach of children."
+        )
+
+        product = ProductFactory(usage_instructions=usage_text, warnings=warning_text)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+
+        assert product.usage_instructions == usage_text
+        assert product.warnings == warning_text
+        # The two fields must not bleed into each other.
+        assert product.usage_instructions != product.warnings
+        assert "patch test" not in product.usage_instructions
+        assert "moisturizer" not in product.warnings
+
+    def test_usage_instructions_and_warnings_blank_is_valid(self, db):
+        product = ProductFactory(usage_instructions="", warnings="")
+        product.full_clean()  # must not raise
+        assert product.usage_instructions == ""
+        assert product.warnings == ""
+
+    def test_one_field_set_other_blank_is_valid(self, db):
+        """A product may have only one of the two populated, not both."""
+        product = ProductFactory(usage_instructions="Apply nightly.", warnings="")
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.usage_instructions == "Apply nightly."
+        assert product.warnings == ""
+
     # ── skin_type ────────────────────────────────────────────────────────────
 
     @pytest.mark.parametrize("choice", [c.value for c in SkinType])

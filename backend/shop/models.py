@@ -103,6 +103,13 @@ class Product(models.Model):
     # project's Search epic if/when ingredient-based search becomes a
     # requirement.
     ingredients = models.TextField(blank=True)
+    # Separate fields on purpose (not one combined field): these are
+    # semantically distinct and will likely be displayed in visually
+    # distinct sections on the product detail page — usage_instructions
+    # as routine informational content, warnings often styled with more
+    # visual prominence/urgency (e.g. an icon or colored callout box).
+    usage_instructions = models.TextField(blank=True)
+    warnings = models.TextField(blank=True)
     # Free text rather than a curated ISO country-code choices list:
     # cosmetics on this platform are sourced from a very wide range of
     # countries, and a hardcoded choices list would need constant
