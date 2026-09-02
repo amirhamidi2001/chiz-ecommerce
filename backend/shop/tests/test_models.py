@@ -1,3 +1,5 @@
+import datetime
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -504,6 +506,58 @@ class TestProductVariantModel:
         variant.refresh_from_db()
         assert variant.volume_ml == 50
         assert variant.weight_g == 75
+
+    # ── manufacture_date / expiration_date ──────────────────────────────────
+
+    def test_expiration_after_manufacture_date_passes_full_clean(self, db):
+        variant = ProductVariantFactory(
+            manufacture_date=datetime.date(2026, 1, 1),
+            expiration_date=datetime.date(2028, 1, 1),
+        )
+        variant.full_clean()  # must not raise
+        variant.refresh_from_db()
+        assert variant.manufacture_date == datetime.date(2026, 1, 1)
+        assert variant.expiration_date == datetime.date(2028, 1, 1)
+
+    def test_expiration_before_manufacture_date_fails_full_clean(self, db):
+        variant = ProductVariantFactory(
+            manufacture_date=datetime.date(2026, 1, 1),
+            expiration_date=datetime.date(2025, 1, 1),  # before manufacture
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            variant.full_clean()
+        assert "expiration_date" in exc_info.value.message_dict
+
+    def test_expiration_equal_to_manufacture_date_fails_full_clean(self):
+        """
+        "After" means strictly after — same-day manufacture and
+        expiration doesn't make sense for a real product, so equal
+        dates must also be rejected, not just earlier ones.
+        """
+        variant = ProductVariantFactory.build(
+            manufacture_date=datetime.date(2026, 1, 1),
+            expiration_date=datetime.date(2026, 1, 1),
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            variant.clean()
+        assert "expiration_date" in exc_info.value.message_dict
+
+    def test_only_manufacture_date_set_passes_full_clean(self, db):
+        """Only one of the two dates set — comparison must be skipped entirely."""
+        variant = ProductVariantFactory(
+            manufacture_date=datetime.date(2026, 1, 1), expiration_date=None
+        )
+        variant.full_clean()  # must not raise
+
+    def test_only_expiration_date_set_passes_full_clean(self, db):
+        variant = ProductVariantFactory(
+            manufacture_date=None, expiration_date=datetime.date(2028, 1, 1)
+        )
+        variant.full_clean()  # must not raise
+
+    def test_neither_date_set_passes_full_clean(self, db):
+        variant = ProductVariantFactory(manufacture_date=None, expiration_date=None)
+        variant.full_clean()  # must not raise
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

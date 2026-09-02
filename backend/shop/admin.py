@@ -58,6 +58,8 @@ class ProductVariantInline(admin.TabularInline):
         "stock",
         "volume_ml",
         "weight_g",
+        "manufacture_date",
+        "expiration_date",
         "is_active",
     )
 
@@ -111,9 +113,11 @@ class ProductVariantAdmin(admin.ModelAdmin):
         "stock",
         "volume_ml",
         "weight_g",
+        "manufacture_date",
+        "expiration_date",
         "is_active",
     )
-    list_filter = ("is_active", "color")
+    list_filter = ("is_active", "color", "expiration_date")
     search_fields = ("sku", "barcode", "product__name")
     autocomplete_fields = ("product", "color")
     ordering = ("product__name", "id")

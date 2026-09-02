@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator
 from django.db import models
 from django.utils.text import slugify
@@ -266,11 +267,34 @@ class ProductVariant(models.Model):
     # neither dimension recorded.
     volume_ml = models.PositiveIntegerField(null=True, blank=True)
     weight_g = models.PositiveIntegerField(null=True, blank=True)
+    # Batch-specific, not formulation-specific: a single Product can
+    # have multiple variants (and, in a fuller implementation, multiple
+    # batches per variant) with different expiration dates — matching
+    # the volume_ml/weight_g placement decision (Task 3.2.1.4), this
+    # lives on ProductVariant, not Product. Both nullable/optional
+    # since not every product category has meaningful expiration data,
+    # though most cosmetics/skincare will. See clean() below for the
+    # expiration-after-manufacture validation.
+    manufacture_date = models.DateField(null=True, blank=True)
+    expiration_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["id"]
+
+    def clean(self):
+        super().clean()
+        # Skip the comparison entirely if either date is unset — only
+        # meaningful to compare when both are actually present.
+        if (
+            self.expiration_date is not None
+            and self.manufacture_date is not None
+            and self.expiration_date <= self.manufacture_date
+        ):
+            raise ValidationError(
+                {"expiration_date": "Expiration date must be after manufacture date."}
+            )
 
     def save(self, *args, **kwargs):
         if not self.sku:
