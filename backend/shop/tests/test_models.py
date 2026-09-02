@@ -559,6 +559,19 @@ class TestProductVariantModel:
         variant = ProductVariantFactory(manufacture_date=None, expiration_date=None)
         variant.full_clean()  # must not raise
 
+    # ── batch_number ─────────────────────────────────────────────────────────
+
+    def test_batch_number_saves_and_retrieves(self, db):
+        variant = ProductVariantFactory(batch_number="LOT-2026-0472")
+        variant.full_clean()  # must not raise
+        variant.refresh_from_db()
+        assert variant.batch_number == "LOT-2026-0472"
+
+    def test_batch_number_blank_is_valid(self, db):
+        variant = ProductVariantFactory(batch_number="")
+        variant.full_clean()  # must not raise
+        assert variant.batch_number == ""
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Review

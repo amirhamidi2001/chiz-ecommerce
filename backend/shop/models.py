@@ -277,6 +277,13 @@ class ProductVariant(models.Model):
     # expiration-after-manufacture validation.
     manufacture_date = models.DateField(null=True, blank=True)
     expiration_date = models.DateField(null=True, blank=True)
+    # Standard cosmetics industry practice for recall management and
+    # quality control, pairing naturally with the dates above. Plain
+    # free text — real batch/lot number formats vary significantly by
+    # manufacturer, so unlike sku/barcode (which have this platform's
+    # own generation/checksum logic), no format validation is imposed
+    # here.
+    batch_number = models.CharField(max_length=50, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
