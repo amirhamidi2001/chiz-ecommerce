@@ -78,6 +78,12 @@ class HairType(models.TextChoices):
     ALL = "all", "All Hair Types"
 
 
+class ProductGender(models.TextChoices):
+    UNISEX = "unisex", "Unisex"
+    FEMALE = "female", "Female"
+    MALE = "male", "Male"
+
+
 class Product(models.Model):
     category = models.ForeignKey(
         Category,
@@ -149,6 +155,16 @@ class Product(models.Model):
         max_length=20,
         choices=HairType.choices,
         blank=True,
+    )
+    # Unlike skin_type/hair_type, defaults to UNISEX rather than blank:
+    # every product realistically has SOME applicable answer here (even
+    # if it's "unisex"), and defaulting to the most inclusive option
+    # avoids accidentally mis-filtering products that haven't been
+    # explicitly tagged yet.
+    gender = models.CharField(
+        max_length=10,
+        choices=ProductGender.choices,
+        default=ProductGender.UNISEX,
     )
     # Nullable (not just blank) since this is numeric: 0 would be
     # ambiguous between "SPF 0 / no protection" and "not specified",

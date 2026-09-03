@@ -12,6 +12,7 @@ from shop.models import (
     HairType,
     Product,
     ProductColor,
+    ProductGender,
     ProductVariant,
     Review,
     SkinType,
@@ -263,6 +264,35 @@ class TestProductModel:
         product.refresh_from_db()
         assert product.usage_instructions == "Apply nightly."
         assert product.warnings == ""
+
+    # ── gender ───────────────────────────────────────────────────────────────
+
+    def test_gender_defaults_to_unisex_when_not_set(self, db):
+        """
+        Unlike skin_type/hair_type (blank by default), gender defaults
+        to UNISEX — every product realistically has some applicable
+        answer, and defaulting to the most inclusive option avoids
+        accidentally mis-filtering untagged products.
+        """
+        product = ProductFactory()  # gender intentionally not passed
+        assert product.gender == ProductGender.UNISEX
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.gender == ProductGender.UNISEX
+
+    @pytest.mark.parametrize("choice", [c.value for c in ProductGender])
+    def test_saves_with_each_valid_gender_choice(self, db, choice):
+        product = ProductFactory(gender=choice)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.gender == choice
+
+    def test_invalid_gender_fails_full_clean(self, db):
+        product = ProductFactory(
+            gender="nonbinary"
+        )  # not a real choice, fits max_length
+        with pytest.raises(ValidationError):
+            product.full_clean()
 
     # ── skin_type ────────────────────────────────────────────────────────────
 
