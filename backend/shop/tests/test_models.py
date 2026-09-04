@@ -269,6 +269,25 @@ class TestProductModel:
         product.full_clean()  # must not raise
         assert product.country_of_origin == ""
 
+    # ── irc_regulatory_code ──────────────────────────────────────────────────
+
+    def test_irc_regulatory_code_saves_and_retrieves(self, db):
+        product = ProductFactory(irc_regulatory_code="IRC-1404-00281773")
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.irc_regulatory_code == "IRC-1404-00281773"
+
+    def test_irc_regulatory_code_blank_is_valid(self, db):
+        """
+        Genuinely optional: not every product legally requires an IRC
+        code, and this task doesn't yet enforce that products which DO
+        require one have it set (that's the future admin verification
+        workflow, Task 3.2.1.13).
+        """
+        product = ProductFactory(irc_regulatory_code="")
+        product.full_clean()  # must not raise
+        assert product.irc_regulatory_code == ""
+
     # ── usage_instructions / warnings ────────────────────────────────────────
 
     def test_usage_instructions_and_warnings_save_and_retrieve_independently(self, db):

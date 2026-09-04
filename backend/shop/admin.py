@@ -93,7 +93,13 @@ class ProductAdmin(admin.ModelAdmin):
         "is_vegan",
         "is_organic",
     )
-    search_fields = ("name", "slug", "short_description", "country_of_origin")
+    search_fields = (
+        "name",
+        "slug",
+        "short_description",
+        "country_of_origin",
+        "irc_regulatory_code",
+    )
     prepopulated_fields = {"slug": ("name",)}
     ordering = ("-created_at",)
     inlines = [ProductImageInline, ProductColorInline, ProductVariantInline]

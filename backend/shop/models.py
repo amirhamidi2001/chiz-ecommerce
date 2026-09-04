@@ -123,6 +123,15 @@ class Product(models.Model):
     # ISO-3166-backed dropdown is a reasonable future enhancement but
     # is explicitly out of scope for this task.
     country_of_origin = models.CharField(max_length=100, blank=True)
+    # Iran Food & Drug Administration (IRC) registration code, required
+    # for legal retail sale of many cosmetics in Iran. This is a
+    # compliance-relevant field, not just display metadata — but format
+    # validation is deliberately left out of scope here: the backlog
+    # doesn't specify a format, and IRC code formats aren't something
+    # to guess at without authoritative documentation. Plain optional
+    # text for now; this lays groundwork for a future admin
+    # verification workflow (Task 3.2.1.13) rather than implementing it.
+    irc_regulatory_code = models.CharField(max_length=50, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     original_price = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
