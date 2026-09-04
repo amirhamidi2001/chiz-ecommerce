@@ -1,6 +1,15 @@
 from rest_framework import serializers
 
-from .models import Brand, Category, Color, Product, ProductColor, ProductImage, Review
+from .models import (
+    Brand,
+    Category,
+    Color,
+    Product,
+    ProductColor,
+    ProductImage,
+    ProductVariant,
+    Review,
+)
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -47,6 +56,28 @@ class ProductColorSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductColor
         fields = ("id", "color")
+
+
+class ProductVariantSerializer(serializers.ModelSerializer):
+    color = ColorSerializer(read_only=True)
+
+    class Meta:
+        model = ProductVariant
+        fields = (
+            "id",
+            "sku",
+            "barcode",
+            "color",
+            "price",
+            "original_price",
+            "stock",
+            "volume_ml",
+            "weight_g",
+            "manufacture_date",
+            "expiration_date",
+            "batch_number",
+            "is_active",
+        )
 
 
 # ─── Review — read (used inside product detail & review list responses) ───────
@@ -171,6 +202,18 @@ class ProductListSerializer(serializers.ModelSerializer):
             "category",
             "brand",
             "created_at",
+            # Browse/filter-relevant new fields only (Tasks 3.2.1.1–3.2.1.13)
+            # — these drive badges/filter chips shown directly on product
+            # cards. Detail-only fields (ingredients, usage_instructions,
+            # warnings, country_of_origin, irc_regulatory_code,
+            # regulatory_verified) are deliberately NOT included here to
+            # keep list/grid payloads lightweight.
+            "skin_type",
+            "hair_type",
+            "gender",
+            "is_cruelty_free",
+            "is_vegan",
+            "is_organic",
         )
 
     def get_thumbnail_url(self, obj):
@@ -185,7 +228,10 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     category = CategoryMinimalSerializer(read_only=True)
     brand = BrandSerializer(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
+    # TODO: colors field is superseded by variants and should be removed
+    # once frontend fully migrates to variant-based rendering.
     colors = ProductColorSerializer(many=True, read_only=True)
+    variants = ProductVariantSerializer(many=True, read_only=True)
     reviews = ReviewSerializer(many=True, read_only=True)
     thumbnail_url = serializers.SerializerMethodField()
     discount_percent = serializers.ReadOnlyField()
@@ -209,10 +255,28 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "thumbnail_url",
             "images",
             "colors",
+            "variants",
             "reviews",
             "category",
             "brand",
             "created_at",
+            # All new Product fields (Tasks 3.2.1.1–3.2.1.13) — the detail
+            # page is exactly where a customer needs the full ingredient
+            # list, usage instructions, and warnings, and where
+            # regulatory transparency matters most.
+            "skin_type",
+            "hair_type",
+            "spf",
+            "ingredients",
+            "country_of_origin",
+            "usage_instructions",
+            "warnings",
+            "gender",
+            "is_cruelty_free",
+            "is_vegan",
+            "is_organic",
+            "irc_regulatory_code",
+            "regulatory_verified",
         )
 
     def get_thumbnail_url(self, obj):

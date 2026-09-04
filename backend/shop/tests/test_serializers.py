@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory
+from shop.models import ProductGender
 from shop.serializers import (
     BrandSerializer,
     CategoryMinimalSerializer,
@@ -12,6 +13,7 @@ from shop.serializers import (
     ProductDetailSerializer,
     ProductImageSerializer,
     ProductListSerializer,
+    ProductVariantSerializer,
     ReviewSerializer,
 )
 from shop.tests.factories import (
@@ -21,6 +23,7 @@ from shop.tests.factories import (
     ProductColorFactory,
     ProductFactory,
     ProductImageFactory,
+    ProductVariantFactory,
     ReviewFactory,
 )
 
@@ -224,6 +227,121 @@ class TestProductListSerializer:
         assert "name" in data["brand"]
         assert "slug" in data["brand"]
 
+    # ── Browse-relevant new fields (Tasks 3.2.1.1–3.2.1.13) ──────────────────
+
+    def test_browse_relevant_new_fields_present(self):
+        """
+        The 6 fields that drive badges/filter chips on product cards
+        must be exposed on the lightweight list serializer.
+        """
+        product = ProductFactory(
+            skin_type="oily",
+            hair_type="curly",
+            gender=ProductGender.FEMALE,
+            is_cruelty_free=True,
+            is_vegan=True,
+            is_organic=True,
+        )
+        data = ProductListSerializer(product, context={"request": make_request()}).data
+        assert data["skin_type"] == "oily"
+        assert data["hair_type"] == "curly"
+        assert data["gender"] == "female"
+        assert data["is_cruelty_free"] is True
+        assert data["is_vegan"] is True
+        assert data["is_organic"] is True
+
+    def test_detail_only_fields_absent_from_list_serializer(self):
+        """
+        Detail-page-only fields must NOT bloat the list/grid payload —
+        ingredients, usage_instructions, warnings, country_of_origin,
+        irc_regulatory_code, regulatory_verified have no browse-page
+        use case.
+        """
+        product = ProductFactory(
+            ingredients="Aqua, Glycerin",
+            usage_instructions="Apply nightly.",
+            warnings="Patch test recommended.",
+            country_of_origin="South Korea",
+            irc_regulatory_code="IRC-1404-00281773",
+            regulatory_verified=True,
+        )
+        data = ProductListSerializer(product, context={"request": make_request()}).data
+        for field in (
+            "ingredients",
+            "usage_instructions",
+            "warnings",
+            "country_of_origin",
+            "irc_regulatory_code",
+            "regulatory_verified",
+        ):
+            assert (
+                field not in data
+            ), f"Unexpected detail-only field in list output: {field}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ProductVariantSerializer
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestProductVariantSerializer:
+
+    def test_contains_expected_fields(self):
+        variant = ProductVariantFactory()
+        data = ProductVariantSerializer(variant).data
+        expected = {
+            "id",
+            "sku",
+            "barcode",
+            "color",
+            "price",
+            "original_price",
+            "stock",
+            "volume_ml",
+            "weight_g",
+            "manufacture_date",
+            "expiration_date",
+            "batch_number",
+            "is_active",
+        }
+        assert set(data.keys()) == expected
+
+    def test_color_is_nested(self):
+        color = ColorFactory(name="Ruby Red", hex_code="#E0115F")
+        variant = ProductVariantFactory(color=color)
+        data = ProductVariantSerializer(variant).data
+        assert data["color"]["name"] == "Ruby Red"
+        assert data["color"]["hex_code"] == "#E0115F"
+
+    def test_color_is_null_when_variant_has_no_color(self):
+        variant = ProductVariantFactory(color=None)
+        data = ProductVariantSerializer(variant).data
+        assert data["color"] is None
+
+    def test_volume_ml_and_weight_g_serialize_correctly(self):
+        variant = ProductVariantFactory(volume_ml=30, weight_g=None)
+        data = ProductVariantSerializer(variant).data
+        assert data["volume_ml"] == 30
+        assert data["weight_g"] is None
+
+    def test_dates_and_batch_number_serialize_correctly(self):
+        import datetime
+
+        variant = ProductVariantFactory(
+            manufacture_date=datetime.date(2026, 1, 1),
+            expiration_date=datetime.date(2028, 1, 1),
+            batch_number="LOT-2026-0472",
+        )
+        data = ProductVariantSerializer(variant).data
+        assert data["manufacture_date"] == "2026-01-01"
+        assert data["expiration_date"] == "2028-01-01"
+        assert data["batch_number"] == "LOT-2026-0472"
+
+    def test_sku_and_barcode_present(self):
+        variant = ProductVariantFactory(sku="FOUND-320", barcode="4006381333931")
+        data = ProductVariantSerializer(variant).data
+        assert data["sku"] == "FOUND-320"
+        assert data["barcode"] == "4006381333931"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ProductDetailSerializer
@@ -290,3 +408,145 @@ class TestProductDetailSerializer:
             product, context={"request": make_request()}
         ).data
         assert str(data["price"]) == "29.99"
+
+    # ── All new Product fields (Tasks 3.2.1.1–3.2.1.13) ──────────────────────
+
+    def test_all_new_product_fields_present(self):
+        product = ProductFactory(
+            skin_type="dry",
+            hair_type="wavy",
+            spf=30,
+            ingredients="Aqua/Water/Eau, Glycerin, Niacinamide",
+            country_of_origin="France",
+            usage_instructions="Apply a thin layer every morning.",
+            warnings="Discontinue use if irritation occurs.",
+            gender=ProductGender.MALE,
+            is_cruelty_free=True,
+            is_vegan=False,
+            is_organic=True,
+            irc_regulatory_code="IRC-1404-00281773",
+            regulatory_verified=True,
+        )
+        data = ProductDetailSerializer(
+            product, context={"request": make_request()}
+        ).data
+
+        assert data["skin_type"] == "dry"
+        assert data["hair_type"] == "wavy"
+        assert data["spf"] == 30
+        assert data["ingredients"] == "Aqua/Water/Eau, Glycerin, Niacinamide"
+        assert data["country_of_origin"] == "France"
+        assert data["usage_instructions"] == "Apply a thin layer every morning."
+        assert data["warnings"] == "Discontinue use if irritation occurs."
+        assert data["gender"] == "male"
+        assert data["is_cruelty_free"] is True
+        assert data["is_vegan"] is False
+        assert data["is_organic"] is True
+        assert data["irc_regulatory_code"] == "IRC-1404-00281773"
+        assert data["regulatory_verified"] is True
+
+    def test_new_fields_default_values_present_when_not_set(self):
+        """
+        Fields not explicitly set on the factory must still be present
+        in the output with their model defaults (blank string / False /
+        None), not silently omitted.
+        """
+        product = ProductFactory()
+        data = ProductDetailSerializer(
+            product, context={"request": make_request()}
+        ).data
+        assert data["skin_type"] == ""
+        assert data["hair_type"] == ""
+        assert data["spf"] is None
+        assert data["ingredients"] == ""
+        assert data["country_of_origin"] == ""
+        assert data["usage_instructions"] == ""
+        assert data["warnings"] == ""
+        assert data["gender"] == "unisex"
+        assert data["is_cruelty_free"] is False
+        assert data["is_vegan"] is False
+        assert data["is_organic"] is False
+        assert data["irc_regulatory_code"] == ""
+        assert data["regulatory_verified"] is False
+
+    # ── variants (this task) ──────────────────────────────────────────────────
+
+    def test_variants_field_present(self):
+        product = ProductFactory()
+        data = ProductDetailSerializer(
+            product, context={"request": make_request()}
+        ).data
+        assert "variants" in data
+
+    def test_empty_variants_returns_empty_list(self):
+        product = ProductFactory()
+        data = ProductDetailSerializer(
+            product, context={"request": make_request()}
+        ).data
+        assert data["variants"] == []
+
+    def test_variants_list_populated_with_nested_attributes(self):
+        import datetime
+
+        product = ProductFactory()
+        color = ColorFactory(name="Shade 320 - Warm Beige")
+        ProductVariantFactory(
+            product=product,
+            sku="FOUND-320",
+            barcode="4006381333931",
+            color=color,
+            price="35.00",
+            stock=12,
+            volume_ml=30,
+            weight_g=None,
+            manufacture_date=datetime.date(2026, 1, 1),
+            expiration_date=datetime.date(2028, 1, 1),
+            batch_number="LOT-2026-0472",
+            is_active=True,
+        )
+        data = ProductDetailSerializer(
+            product, context={"request": make_request()}
+        ).data
+
+        assert len(data["variants"]) == 1
+        variant_data = data["variants"][0]
+        assert variant_data["sku"] == "FOUND-320"
+        assert variant_data["barcode"] == "4006381333931"
+        assert variant_data["color"]["name"] == "Shade 320 - Warm Beige"
+        assert str(variant_data["price"]) == "35.00"
+        assert variant_data["stock"] == 12
+        assert variant_data["volume_ml"] == 30
+        assert variant_data["weight_g"] is None
+        assert variant_data["manufacture_date"] == "2026-01-01"
+        assert variant_data["expiration_date"] == "2028-01-01"
+        assert variant_data["batch_number"] == "LOT-2026-0472"
+        assert variant_data["is_active"] is True
+
+    def test_multiple_variants_all_serialized(self):
+        product = ProductFactory()
+        ProductVariantFactory(product=product, sku="SHADE-A")
+        ProductVariantFactory(product=product, sku="SHADE-B")
+        data = ProductDetailSerializer(
+            product, context={"request": make_request()}
+        ).data
+        assert len(data["variants"]) == 2
+        skus = {v["sku"] for v in data["variants"]}
+        assert skus == {"SHADE-A", "SHADE-B"}
+
+    def test_colors_and_variants_coexist(self):
+        """
+        Both `colors` (legacy) and `variants` (authoritative) must be
+        present simultaneously — colors is deliberately kept in place
+        for now (see TODO in serializers.py) rather than removed as a
+        silent side effect of this task.
+        """
+        product = ProductFactory()
+        ProductColorFactory(product=product)
+        ProductVariantFactory(product=product)
+        data = ProductDetailSerializer(
+            product, context={"request": make_request()}
+        ).data
+        assert "colors" in data
+        assert "variants" in data
+        assert len(data["colors"]) == 1
+        assert len(data["variants"]) == 1
