@@ -89,6 +89,9 @@ class ProductAdmin(admin.ModelAdmin):
         "skin_type",
         "hair_type",
         "gender",
+        "is_cruelty_free",
+        "is_vegan",
+        "is_organic",
     )
     search_fields = ("name", "slug", "short_description", "country_of_origin")
     prepopulated_fields = {"slug": ("name",)}

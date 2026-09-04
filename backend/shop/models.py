@@ -132,6 +132,14 @@ class Product(models.Model):
     reviews_count = models.PositiveIntegerField(default=0)
     is_new = models.BooleanField(default=False)
     is_sale = models.BooleanField(default=False)
+    # Cruelty-free/vegan/organic certification badges — all default
+    # False (unverified/unclaimed by default). A product should only
+    # display one of these badges once genuinely confirmed by an
+    # admin, not opt-in-by-default, since a false-positive claim here
+    # is a meaningfully worse outcome than a missing badge.
+    is_cruelty_free = models.BooleanField(default=False)
+    is_vegan = models.BooleanField(default=False)
+    is_organic = models.BooleanField(default=False)
     # Skin-type suitability is a property of the product formulation
     # itself (e.g. "this serum is for oily skin"), not of a specific
     # shade/size — unlike price/stock, it does NOT vary per

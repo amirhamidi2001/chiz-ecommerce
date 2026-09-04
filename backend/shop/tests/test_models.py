@@ -159,6 +159,53 @@ class TestProductModel:
         product = ProductFactory()
         assert product.is_sale is False
 
+    # ── cruelty-free / vegan / organic badges ───────────────────────────────
+
+    def test_certification_flags_default_false_on_fresh_product(self, db):
+        """
+        All three default False (unverified/unclaimed by default) — a
+        product should only show these badges once genuinely confirmed
+        by an admin, not opt-in-by-default.
+        """
+        product = ProductFactory()
+        assert product.is_cruelty_free is False
+        assert product.is_vegan is False
+        assert product.is_organic is False
+
+    def test_is_cruelty_free_can_be_toggled_independently(self, db):
+        product = ProductFactory(is_cruelty_free=True)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.is_cruelty_free is True
+        # The other two flags remain untouched by toggling this one.
+        assert product.is_vegan is False
+        assert product.is_organic is False
+
+    def test_is_vegan_can_be_toggled_independently(self, db):
+        product = ProductFactory(is_vegan=True)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.is_vegan is True
+        assert product.is_cruelty_free is False
+        assert product.is_organic is False
+
+    def test_is_organic_can_be_toggled_independently(self, db):
+        product = ProductFactory(is_organic=True)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.is_organic is True
+        assert product.is_cruelty_free is False
+        assert product.is_vegan is False
+
+    def test_all_three_certification_flags_can_be_true_simultaneously(self, db):
+        """No mutual exclusivity constraint — a product can genuinely be all three."""
+        product = ProductFactory(is_cruelty_free=True, is_vegan=True, is_organic=True)
+        product.full_clean()  # must not raise
+        product.refresh_from_db()
+        assert product.is_cruelty_free is True
+        assert product.is_vegan is True
+        assert product.is_organic is True
+
     def test_stock_can_be_zero(self, db):
         product = ProductFactory(stock=0)
         assert product.stock == 0
