@@ -4,6 +4,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.test import override_settings
 from django.utils.text import slugify
 from shop.models import (
     Brand,
@@ -287,6 +288,51 @@ class TestProductModel:
         product = ProductFactory(irc_regulatory_code="")
         product.full_clean()  # must not raise
         assert product.irc_regulatory_code == ""
+
+    # ── regulatory_verified / REQUIRE_REGULATORY_VERIFICATION guard ─────────
+
+    def test_regulatory_verified_defaults_false(self, db):
+        product = ProductFactory()
+        assert product.regulatory_verified is False
+
+    def test_guard_off_by_default_unverified_code_still_passes(self, db):
+        """
+        REQUIRE_REGULATORY_VERIFICATION defaults to False — a product
+        with a code but regulatory_verified=False must still pass
+        full_clean() when the guard isn't enabled.
+        """
+        product = ProductFactory(
+            irc_regulatory_code="IRC-1404-00281773", regulatory_verified=False
+        )
+        product.full_clean()  # must not raise
+
+    @override_settings(REQUIRE_REGULATORY_VERIFICATION=True)
+    def test_guard_enabled_unverified_code_fails_full_clean(self, db):
+        product = ProductFactory(
+            irc_regulatory_code="IRC-1404-00281773", regulatory_verified=False
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            product.full_clean()
+        assert "regulatory_verified" in exc_info.value.message_dict
+
+    @override_settings(REQUIRE_REGULATORY_VERIFICATION=True)
+    def test_guard_enabled_verified_code_passes_full_clean(self, db):
+        product = ProductFactory(
+            irc_regulatory_code="IRC-1404-00281773", regulatory_verified=True
+        )
+        product.full_clean()  # must not raise
+
+    @override_settings(REQUIRE_REGULATORY_VERIFICATION=True)
+    def test_guard_enabled_no_code_at_all_still_passes(self, db):
+        """
+        Proves the guard doesn't make IRC codes universally mandatory:
+        a product with NO code entered at all — regardless of
+        regulatory_verified — must still pass full_clean() even with
+        the guard enabled. Only claimed-but-unverified codes are
+        blocked.
+        """
+        product = ProductFactory(irc_regulatory_code="", regulatory_verified=False)
+        product.full_clean()  # must not raise
 
     # ── usage_instructions / warnings ────────────────────────────────────────
 

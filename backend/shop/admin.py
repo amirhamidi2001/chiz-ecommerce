@@ -65,6 +65,12 @@ class ProductVariantInline(admin.TabularInline):
     )
 
 
+@admin.action(description="Mark selected products as regulatory-verified")
+def mark_regulatory_verified(modeladmin, request, queryset):
+    updated = queryset.update(regulatory_verified=True)
+    modeladmin.message_user(request, f"{updated} product(s) marked as verified.")
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = (
@@ -79,6 +85,7 @@ class ProductAdmin(admin.ModelAdmin):
         "reviews_count",
         "is_new",
         "is_sale",
+        "regulatory_verified",
         "created_at",
     )
     list_filter = (
@@ -92,6 +99,7 @@ class ProductAdmin(admin.ModelAdmin):
         "is_cruelty_free",
         "is_vegan",
         "is_organic",
+        "regulatory_verified",
     )
     search_fields = (
         "name",
@@ -105,6 +113,7 @@ class ProductAdmin(admin.ModelAdmin):
     inlines = [ProductImageInline, ProductColorInline, ProductVariantInline]
     readonly_fields = ("created_at",)
     list_per_page = 25
+    actions = [mark_regulatory_verified]
 
 
 @admin.register(ProductImage)

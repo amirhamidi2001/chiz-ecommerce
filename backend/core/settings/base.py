@@ -237,3 +237,13 @@ OTP_MAX_VERIFICATION_ATTEMPTS = config(
 SMS_PROVIDER_CLASS = config(
     "SMS_PROVIDER_CLASS", default="accounts.sms.console.ConsoleSMSProvider"
 )
+
+
+# ─── Regulatory compliance (Iran cosmetics IRC registration) ───────────────────
+# OFF by default: when True, a Product that HAS an irc_regulatory_code
+# entered but hasn't been marked regulatory_verified fails full_clean().
+# This deliberately does NOT make IRC codes mandatory for every
+# product — see Product.clean() in shop/models.py for the exact scope.
+REQUIRE_REGULATORY_VERIFICATION = config(
+    "REQUIRE_REGULATORY_VERIFICATION", default=False, cast=bool
+)

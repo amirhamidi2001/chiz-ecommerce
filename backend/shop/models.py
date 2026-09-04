@@ -132,6 +132,11 @@ class Product(models.Model):
     # text for now; this lays groundwork for a future admin
     # verification workflow (Task 3.2.1.13) rather than implementing it.
     irc_regulatory_code = models.CharField(max_length=50, blank=True)
+    # Whether a staff member has actually checked/confirmed the
+    # irc_regulatory_code above is valid — distinct from merely having
+    # something typed into the code field. See clean() below for the
+    # optional, settings-driven publish-guard this enables.
+    regulatory_verified = models.BooleanField(default=False)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     original_price = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
@@ -200,6 +205,30 @@ class Product(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+    def clean(self):
+        super().clean()
+        # OFF by default (REQUIRE_REGULATORY_VERIFICATION defaults to
+        # False in settings). When enabled, this only blocks products
+        # that HAVE an irc_regulatory_code entered but haven't been
+        # verified yet — it deliberately does NOT make IRC codes
+        # mandatory for every product. Whether codes should be
+        # mandatory for all products (vs. only claimed-but-unverified
+        # ones) is a separate business decision the backlog didn't ask
+        # for here ("optional (configurable)").
+        if (
+            settings.REQUIRE_REGULATORY_VERIFICATION
+            and self.irc_regulatory_code
+            and not self.regulatory_verified
+        ):
+            raise ValidationError(
+                {
+                    "regulatory_verified": (
+                        "This product has an IRC regulatory code entered but "
+                        "has not been verified by a staff member yet."
+                    )
+                }
+            )
 
     def save(self, *args, **kwargs):
         if not self.slug:
