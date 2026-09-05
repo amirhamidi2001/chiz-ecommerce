@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.contrib import admin
+from django.utils import timezone
 
 from .models import (
     Brand,
@@ -129,6 +132,40 @@ class ProductColorAdmin(admin.ModelAdmin):
     search_fields = ("product__name", "color__name")
 
 
+class NearExpiryFilter(admin.SimpleListFilter):
+    """
+    Business-relevant quick-filter for inventory staff, complementing
+    (not replacing) the plain expiration_date filter already in
+    list_filter — that one is still useful for browsing by specific
+    date ranges via Django's default date-hierarchy buckets, while
+    this offers the two views staff actually want to check regularly.
+    """
+
+    title = "expiry status"
+    parameter_name = "expiry_status"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("near", "Expiring within 90 days"),
+            ("expired", "Already expired"),
+        )
+
+    def queryset(self, request, queryset):
+        today = timezone.now().date()
+        if self.value() == "near":
+            return queryset.filter(
+                expiration_date__isnull=False,
+                expiration_date__gte=today,
+                expiration_date__lte=today + timedelta(days=90),
+            )
+        if self.value() == "expired":
+            return queryset.filter(
+                expiration_date__isnull=False,
+                expiration_date__lt=today,
+            )
+        return queryset
+
+
 @admin.register(ProductVariant)
 class ProductVariantAdmin(admin.ModelAdmin):
     list_display = (
@@ -144,10 +181,16 @@ class ProductVariantAdmin(admin.ModelAdmin):
         "expiration_date",
         "is_active",
     )
-    list_filter = ("is_active", "color", "expiration_date")
+    list_filter = ("is_active", "color", "expiration_date", NearExpiryFilter)
     search_fields = ("sku", "barcode", "product__name", "batch_number")
     autocomplete_fields = ("product", "color")
-    ordering = ("product__name", "id")
+    # Soonest-to-expire first by default — a reasonable ordering
+    # regardless of which filter is active, so a static ordering is
+    # used rather than a get_ordering() override keyed on the request's
+    # expiry_status param (that would add complexity for little real
+    # benefit, since "soonest expiration first" is what inventory staff
+    # want to see whether or not the Near Expiry filter is applied).
+    ordering = ("expiration_date", "product__name")
 
 
 @admin.register(Review)
