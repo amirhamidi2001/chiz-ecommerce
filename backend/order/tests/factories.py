@@ -53,6 +53,7 @@ def make_variant(
     price=None,
     stock=10,
     is_active=True,
+    expiration_date=None,
     **product_kwargs,
 ):
     """
@@ -76,6 +77,7 @@ def make_variant(
         price=Decimal(price),
         stock=stock,
         is_active=is_active,
+        expiration_date=expiration_date,
     )
 
 

@@ -1,8 +1,10 @@
 from decimal import Decimal
+from datetime import timedelta
 
 from cart.models import Cart, CartItem
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from order.models import Order, OrderItem
 from rest_framework import serializers, status
 from rest_framework.test import APITestCase
@@ -887,6 +889,196 @@ class OrderCreateSerializerTests(TestCase):
         shade_b.refresh_from_db()
         self.assertEqual(shade_a.stock, 1)  # 3 - 2
         self.assertEqual(shade_b.stock, 2)  # 3 - 1
+
+    # ── Expiration validation at checkout (defense in depth) ────────────────
+
+    def test_checkout_with_already_expired_variant_fails(self):
+        yesterday = timezone.now().date() - timedelta(days=1)
+        expired_variant = make_variant(
+            name="Expired Toner",
+            slug="expired-toner",
+            stock=5,
+            expiration_date=yesterday,
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(self.user, [{"variant": expired_variant, "quantity": 1}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        with self.assertRaises(serializers.ValidationError) as ctx:
+            s.save()
+        self.assertIn("expired_item", ctx.exception.detail)
+
+    def test_checkout_error_identifies_the_expired_item(self):
+        color = make_color(name="Shade 320 - Warm Beige")
+        yesterday = timezone.now().date() - timedelta(days=1)
+        expired_variant = make_variant(
+            product=self.product,
+            sku="FOUND-320",
+            color=color,
+            expiration_date=yesterday,
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(self.user, [{"variant": expired_variant, "quantity": 1}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        with self.assertRaises(serializers.ValidationError) as ctx:
+            s.save()
+        message = str(ctx.exception.detail["expired_item"])
+        self.assertIn(self.product.name, message)
+        self.assertIn("Shade 320 - Warm Beige", message)
+
+    def test_checkout_with_variant_expiring_today_succeeds(self):
+        """Boundary check: expiring exactly today is still purchasable at checkout."""
+        today = timezone.now().date()
+        variant = make_variant(
+            name="Expires Today",
+            slug="expires-today",
+            stock=5,
+            expiration_date=today,
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()  # must not raise
+
+        variant.refresh_from_db()
+        self.assertEqual(variant.stock, 4)
+
+    def test_checkout_with_no_expiration_date_succeeds(self):
+        """Regression: a variant with expiration_date=None is unaffected."""
+        variant = make_variant(
+            name="No Expiry", slug="no-expiry", stock=5, expiration_date=None
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()  # must not raise
+
+        variant.refresh_from_db()
+        self.assertEqual(variant.stock, 4)
+
+    def test_checkout_with_future_expiration_date_succeeds(self):
+        tomorrow = timezone.now().date() + timedelta(days=1)
+        variant = make_variant(
+            name="Fresh Toner",
+            slug="fresh-toner",
+            stock=5,
+            expiration_date=tomorrow,
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()  # must not raise
+
+    def test_item_expired_after_being_added_to_cart_blocks_checkout_atomically(self):
+        """
+        The critical scenario: a cart item was VALID when added (no
+        expiration_date, or a future one) but the variant has since
+        expired by the time checkout happens — simulated here by
+        creating the CartItem first with a valid variant, then updating
+        that variant's expiration_date into the past afterward, exactly
+        as the task describes.
+
+        Must fail with 400 identifying the expired item, and — the
+        critical all-or-nothing guarantee — NO Order/OrderItem rows may
+        exist afterward, and NO other (non-expired) item's stock in the
+        same cart may have been decremented either, proving the new
+        expiration check participates correctly in the SAME atomic
+        rollback as the pre-existing stock check, not some separate,
+        weaker guarantee.
+        """
+        healthy_variant = make_variant(
+            name="Still Good", slug="still-good", price="15.00", stock=10
+        )
+        soon_to_expire_variant = make_variant(
+            name="Will Expire", slug="will-expire", price="20.00", stock=8
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(
+            self.user,
+            [
+                {"variant": healthy_variant, "quantity": 2},
+                {"variant": soon_to_expire_variant, "quantity": 3},
+            ],
+        )
+
+        # The variant was valid (no expiration_date) when added to the
+        # cart above. Now simulate time passing / the variant's
+        # expiration being set after the fact — it's since expired.
+        soon_to_expire_variant.expiration_date = timezone.now().date() - timedelta(
+            days=1
+        )
+        soon_to_expire_variant.save(update_fields=["expiration_date"])
+
+        orders_before = Order.objects.count()
+        order_items_before = OrderItem.objects.count()
+        healthy_stock_before = healthy_variant.stock
+        expired_stock_before = soon_to_expire_variant.stock
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        with self.assertRaises(serializers.ValidationError) as ctx:
+            s.save()
+        self.assertIn("expired_item", ctx.exception.detail)
+        message = str(ctx.exception.detail["expired_item"])
+        self.assertIn("Will Expire", message)
+
+        # Nothing committed at all.
+        self.assertEqual(Order.objects.count(), orders_before)
+        self.assertEqual(OrderItem.objects.count(), order_items_before)
+
+        # Neither variant's stock moved — including the healthy one,
+        # proving this is a genuine all-or-nothing rollback, not a
+        # partial per-item commit.
+        healthy_variant.refresh_from_db()
+        soon_to_expire_variant.refresh_from_db()
+        self.assertEqual(healthy_variant.stock, healthy_stock_before)
+        self.assertEqual(soon_to_expire_variant.stock, expired_stock_before)
+
+    def test_expired_item_checked_before_stock_decrement_of_earlier_items(self):
+        """
+        Cart-item ordering matters for proving the atomicity claim: put
+        the expired item AFTER a healthy item so the healthy item's
+        stock would already have been decremented by the time the loop
+        reaches the expired one, if the transaction weren't rolled back
+        correctly.
+        """
+        healthy_variant = make_variant(
+            name="Processed First", slug="processed-first", stock=10
+        )
+        expired_variant = make_variant(
+            name="Processed Second",
+            slug="processed-second",
+            stock=5,
+            expiration_date=timezone.now().date() - timedelta(days=2),
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(
+            self.user,
+            [
+                {"variant": healthy_variant, "quantity": 1},
+                {"variant": expired_variant, "quantity": 1},
+            ],
+        )
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        with self.assertRaises(serializers.ValidationError):
+            s.save()
+
+        healthy_variant.refresh_from_db()
+        self.assertEqual(healthy_variant.stock, 10)  # untouched despite being "first"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

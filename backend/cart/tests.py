@@ -1,8 +1,10 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from cart.models import Cart, CartItem
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 from shop.models import Category, Color, Product, ProductVariant
@@ -58,6 +60,7 @@ def make_variant(
     stock=10,
     original_price=None,
     is_active=True,
+    expiration_date=None,
     **product_kwargs,
 ):
     """
@@ -79,6 +82,7 @@ def make_variant(
         original_price=Decimal(original_price) if original_price else None,
         stock=stock,
         is_active=is_active,
+        expiration_date=expiration_date,
     )
 
 
@@ -406,6 +410,55 @@ class CartAPITests(APITestCase):
         oos = make_variant(name="OOS", slug="oos-product", stock=0)
         res = self.client.post(self.URL, {"variant_id": oos.id, "quantity": 1})
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_post_expired_variant_returns_400_and_creates_no_cart_item(self):
+        yesterday = timezone.now().date() - timedelta(days=1)
+        expired = make_variant(
+            name="Expired Serum",
+            slug="expired-serum",
+            stock=5,
+            expiration_date=yesterday,
+        )
+        res = self.client.post(self.URL, {"variant_id": expired.id, "quantity": 1})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(CartItem.objects.filter(variant=expired).exists())
+
+    def test_post_variant_expiring_today_is_not_treated_as_expired(self):
+        """Boundary check: expiring exactly today is still purchasable (< today, not <=)."""
+        today = timezone.now().date()
+        variant = make_variant(
+            name="Expires Today",
+            slug="expires-today",
+            stock=5,
+            expiration_date=today,
+        )
+        res = self.client.post(self.URL, {"variant_id": variant.id, "quantity": 1})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+    def test_post_variant_expiring_in_future_succeeds(self):
+        tomorrow = timezone.now().date() + timedelta(days=1)
+        variant = make_variant(
+            name="Fresh Serum",
+            slug="fresh-serum",
+            stock=5,
+            expiration_date=tomorrow,
+        )
+        res = self.client.post(self.URL, {"variant_id": variant.id, "quantity": 1})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+    def test_post_variant_with_no_expiration_date_succeeds(self):
+        """
+        Regression check: a variant with expiration_date=None has no
+        expiration data at all — that must NOT be treated as expired.
+        """
+        variant = make_variant(
+            name="No Expiry Data",
+            slug="no-expiry-data",
+            stock=5,
+            expiration_date=None,
+        )
+        res = self.client.post(self.URL, {"variant_id": variant.id, "quantity": 1})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
 
     def test_post_quantity_zero_returns_400(self):
         res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 0})

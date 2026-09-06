@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 from shop.models import ProductVariant
 
@@ -202,6 +203,46 @@ class OrderCreateSerializer(serializers.Serializer):
             for cart_item in cart_items:
                 locked_variant = locked_variants[cart_item.variant_id]
                 product = locked_variant.product
+
+                # Defense in depth: re-validate expiration at checkout,
+                # mirroring the existing "re-validate stock at checkout,
+                # don't just trust the cart" principle. A cart item can
+                # have been valid when added (Task's cart-side check)
+                # but since expired — e.g. it sat in the cart for days
+                # past the variant's expiration_date. This check runs
+                # BEFORE any OrderItem is created or stock decremented
+                # for ANY item in this checkout, so if this is, say,
+                # the 3rd of 5 cart items, raising here rolls back the
+                # Order and the earlier 2 items' stock decrements too,
+                # via the outer transaction.atomic() block — nothing is
+                # left partially committed.
+                #
+                # NOTE: this block is currently absolute — there is no
+                # override letting an admin deliberately sell expired
+                # stock (e.g. a disclosed clearance/close-out sale).
+                # The backlog doesn't ask for that exception; if it
+                # becomes a real business need it deserves its own
+                # deliberate design (e.g. a per-variant flag or
+                # admin-only checkout path), not a silent workaround
+                # here.
+                if (
+                    locked_variant.expiration_date is not None
+                    and locked_variant.expiration_date < timezone.now().date()
+                ):
+                    variant_detail = (
+                        locked_variant.color.name
+                        if locked_variant.color
+                        else locked_variant.sku
+                    )
+                    raise serializers.ValidationError(
+                        {
+                            "expired_item": (
+                                f"'{locked_variant.product.name} — {variant_detail}' "
+                                "has expired and can no longer be purchased. Please "
+                                "remove it from your cart."
+                            )
+                        }
+                    )
 
                 # Validate stock, then decrement it. Raising here inside the
                 # atomic block rolls back the Order (and any earlier

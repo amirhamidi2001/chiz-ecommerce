@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 from shop.serializers import ColorSerializer
 
@@ -88,6 +89,21 @@ class CartItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("This product variant is unavailable.")
         if variant.stock < 1:
             raise serializers.ValidationError("This product variant is out of stock.")
+        # A variant with expiration_date=None has no expiration data at
+        # all — that is NOT treated as "expired"; only a set date in
+        # the past blocks the add. NOTE: this block is currently
+        # absolute — there is no override for an admin to deliberately
+        # sell expired stock (e.g. a disclosed clearance/close-out
+        # sale). The backlog doesn't ask for that exception; if it
+        # becomes a real business need it deserves its own deliberate
+        # design, not a silent workaround here.
+        if (
+            variant.expiration_date is not None
+            and variant.expiration_date < timezone.now().date()
+        ):
+            raise serializers.ValidationError(
+                "This product has expired and is no longer available for purchase."
+            )
         return value
 
 
