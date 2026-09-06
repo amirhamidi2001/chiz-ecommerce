@@ -8,7 +8,7 @@ from django.utils import timezone
 from order.models import Order, OrderItem
 from rest_framework import serializers, status
 from rest_framework.test import APITestCase
-from shop.models import Category, Product
+from shop.models import Category, Product, StockMovement
 
 from .factories import (
     SHIPPING_COST,
@@ -889,6 +889,78 @@ class OrderCreateSerializerTests(TestCase):
         shade_b.refresh_from_db()
         self.assertEqual(shade_a.stock, 1)  # 3 - 2
         self.assertEqual(shade_b.stock, 2)  # 3 - 1
+
+    # ── StockMovement audit trail (Task 4.1.1.2) ─────────────────────────────
+
+    def test_successful_order_creates_one_stock_movement_per_variant(self):
+        """
+        Placing a successful order creates exactly one StockMovement per
+        distinct variant ordered, with reason="sale", a negative
+        quantity_delta matching the ordered quantity, stock_after
+        matching the variant's real post-order stock, and related_order
+        pointing at the created order.
+        """
+        shade_a = make_variant(product=self.product, sku="SHADE-A", stock=5)
+        shade_b = make_variant(product=self.product, sku="SHADE-B", stock=5)
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(
+            self.user,
+            [
+                {"variant": shade_a, "quantity": 2},
+                {"variant": shade_b, "quantity": 1},
+            ],
+        )
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        shade_a.refresh_from_db()
+        shade_b.refresh_from_db()
+
+        movements = StockMovement.objects.filter(related_order=order)
+        self.assertEqual(movements.count(), 2)
+
+        movement_a = movements.get(variant=shade_a)
+        self.assertEqual(movement_a.reason, StockMovement.Reason.SALE)
+        self.assertEqual(movement_a.quantity_delta, -2)
+        self.assertEqual(movement_a.stock_after, shade_a.stock)
+        self.assertEqual(movement_a.related_order_id, order.id)
+
+        movement_b = movements.get(variant=shade_b)
+        self.assertEqual(movement_b.reason, StockMovement.Reason.SALE)
+        self.assertEqual(movement_b.quantity_delta, -1)
+        self.assertEqual(movement_b.stock_after, shade_b.stock)
+        self.assertEqual(movement_b.related_order_id, order.id)
+
+    def test_failed_order_creates_zero_stock_movements(self):
+        """
+        The single most important test in this task: an order that
+        fails (insufficient stock, triggering the existing Epic 3
+        validation error) must create ZERO StockMovement rows. The
+        movement is written inside the same atomic block as the stock
+        decrement, so if the transaction rolls back, the audit entry
+        must be discarded right along with it — an audit log entry for
+        a decrement that never actually happened would be a lie.
+        """
+        low_stock_variant = make_variant(
+            name="Scarce Item", slug="scarce-item", price="40.00", stock=1
+        )
+        Cart.objects.filter(user=self.user).delete()
+        make_cart_with_items(self.user, [{"variant": low_stock_variant, "quantity": 3}])
+
+        movements_before = StockMovement.objects.count()
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+
+        with self.assertRaises(serializers.ValidationError):
+            s.save()
+
+        self.assertEqual(StockMovement.objects.count(), movements_before)
+        self.assertFalse(
+            StockMovement.objects.filter(variant=low_stock_variant).exists()
+        )
 
     # ── Expiration validation at checkout (defense in depth) ────────────────
 

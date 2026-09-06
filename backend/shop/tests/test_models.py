@@ -17,6 +17,7 @@ from shop.models import (
     ProductVariant,
     Review,
     SkinType,
+    StockMovement,
 )
 from shop.tests.factories import (
     BrandFactory,
@@ -26,6 +27,8 @@ from shop.tests.factories import (
     ProductFactory,
     ProductVariantFactory,
     ReviewFactory,
+    StockMovementFactory,
+    UserFactory,
 )
 
 
@@ -756,6 +759,109 @@ class TestProductVariantModel:
         variant = ProductVariantFactory(batch_number="")
         variant.full_clean()  # must not raise
         assert variant.batch_number == ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# StockMovement
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestStockMovementModel:
+
+    def test_movement_can_be_created_linked_to_variant(self, db):
+        variant = ProductVariantFactory(stock=20)
+        movement = StockMovementFactory(
+            variant=variant,
+            reason=StockMovement.Reason.RESTOCK,
+            quantity_delta=10,
+            stock_after=30,
+        )
+
+        assert movement.pk is not None
+        assert movement.variant_id == variant.id
+        assert movement.reason == StockMovement.Reason.RESTOCK
+        assert movement.quantity_delta == 10
+        assert movement.stock_after == 30
+        assert movement in variant.stock_movements.all()
+
+    def test_str_representation_is_readable(self, db):
+        variant = ProductVariantFactory(sku="SERUM-50ML")
+        increase = StockMovementFactory(
+            variant=variant, reason=StockMovement.Reason.RESTOCK, quantity_delta=10
+        )
+        decrease = StockMovementFactory(
+            variant=variant, reason=StockMovement.Reason.SALE, quantity_delta=-3
+        )
+
+        assert str(increase) == f"{variant} +10 (restock)"
+        assert str(decrease) == f"{variant} -3 (sale)"
+
+    def test_actor_related_order_and_note_are_all_optional(self, db):
+        # Simulates a future automated expiry-sweep: no admin actor
+        # triggered it and no order is involved, only a system reason.
+        variant = ProductVariantFactory(stock=0)
+        movement = StockMovement.objects.create(
+            variant=variant,
+            reason=StockMovement.Reason.EXPIRY_SWEEP,
+            quantity_delta=-5,
+            stock_after=0,
+        )
+
+        assert movement.pk is not None
+        assert movement.actor is None
+        assert movement.related_order is None
+        assert movement.note == ""
+
+    def test_actor_and_related_order_can_be_set(self, db):
+        from order.models import Order
+
+        user = UserFactory()
+        order = Order.objects.create(
+            user=user,
+            first_name="Jane",
+            last_name="Doe",
+            email="jane@example.com",
+            phone="+15551234567",
+            shipping_address="123 Main St",
+            shipping_city="Springfield",
+            shipping_state="IL",
+            shipping_zip="62704",
+            shipping_country="US",
+            subtotal=100,
+            tax=10,
+            total=110,
+        )
+        movement = StockMovementFactory(
+            reason=StockMovement.Reason.CANCELLATION,
+            actor=user,
+            related_order=order,
+            note="Restored after customer cancellation",
+        )
+
+        assert movement.actor == user
+        assert movement.related_order == order
+        assert movement.note == "Restored after customer cancellation"
+
+    def test_actor_set_null_on_user_deletion(self, db):
+        user = UserFactory()
+        movement = StockMovementFactory(reason=StockMovement.Reason.MANUAL, actor=user)
+        user.delete()
+        movement.refresh_from_db()
+        assert movement.actor is None
+
+    def test_ordering_is_most_recent_first(self, db):
+        variant = ProductVariantFactory()
+        older = StockMovementFactory(variant=variant)
+        newer = StockMovementFactory(variant=variant)
+        movements = list(StockMovement.objects.filter(variant=variant))
+        assert movements[0] == newer
+        assert movements[1] == older
+
+    def test_variant_deletion_cascades_to_movements(self, db):
+        variant = ProductVariantFactory()
+        movement = StockMovementFactory(variant=variant)
+        movement_id = movement.id
+        variant.delete()
+        assert not StockMovement.objects.filter(id=movement_id).exists()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

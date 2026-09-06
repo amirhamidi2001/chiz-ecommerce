@@ -11,6 +11,7 @@ from shop.models import (
     ProductImage,
     ProductVariant,
     Review,
+    StockMovement,
 )
 
 User = get_user_model()
@@ -117,6 +118,16 @@ class ProductVariantFactory(DjangoModelFactory):
     original_price = None
     stock = factory.Faker("pyint", min_value=0, max_value=200)
     is_active = True
+
+
+class StockMovementFactory(DjangoModelFactory):
+    class Meta:
+        model = StockMovement
+
+    variant = factory.SubFactory(ProductVariantFactory)
+    reason = StockMovement.Reason.MANUAL
+    quantity_delta = 5
+    stock_after = 20
 
 
 class ReviewFactory(DjangoModelFactory):

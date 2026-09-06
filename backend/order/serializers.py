@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
-from shop.models import ProductVariant
+from shop.models import ProductVariant, StockMovement
 
 from .models import Order, OrderItem
 from .services.pricing import PricingError, calculate_order_totals
@@ -267,6 +267,19 @@ class OrderCreateSerializer(serializers.Serializer):
                 # Product.stock is now superseded by ProductVariant.stock and
                 # unused in the order flow — candidate for removal in a
                 # future cleanup task.
+
+                # Audit trail (Task 4.1.1.1): logged inside this same atomic
+                # block so the movement row and the stock decrement commit
+                # or roll back together — an audit entry for a decrement
+                # that got rolled back would be a lie.
+                StockMovement.objects.create(
+                    variant=locked_variant,
+                    reason=StockMovement.Reason.SALE,
+                    quantity_delta=-cart_item.quantity,
+                    stock_after=locked_variant.stock,
+                    related_order=order,
+                    note=f"Order {order.order_number}",
+                )
 
                 # Build absolute image URL
                 image_url = ""

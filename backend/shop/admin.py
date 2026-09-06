@@ -12,6 +12,7 @@ from .models import (
     ProductImage,
     ProductVariant,
     Review,
+    StockMovement,
 )
 
 
@@ -191,6 +192,32 @@ class ProductVariantAdmin(admin.ModelAdmin):
     # benefit, since "soonest expiration first" is what inventory staff
     # want to see whether or not the Near Expiry filter is applied).
     ordering = ("expiration_date", "product__name")
+
+
+@admin.register(StockMovement)
+class StockMovementAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "variant",
+        "reason",
+        "quantity_delta",
+        "stock_after",
+        "actor",
+        "created_at",
+    )
+    list_filter = ("reason", "created_at")
+    search_fields = ("variant__sku", "variant__product__name", "note")
+    ordering = ("-created_at",)
+    readonly_fields = [f.name for f in StockMovement._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Review)

@@ -396,6 +396,51 @@ class ProductVariant(models.Model):
         return f"{self.product.name} — {self.sku or 'unsaved'}"
 
 
+class StockMovement(models.Model):
+    class Reason(models.TextChoices):
+        SALE = "sale", "Sale"
+        CANCELLATION = "cancellation", "Order Cancellation"
+        MANUAL = "manual", "Manual Adjustment"
+        RESTOCK = "restock", "Restock"
+        EXPIRY_SWEEP = "expiry_sweep", "Expiry Deactivation"
+
+    variant = models.ForeignKey(
+        "shop.ProductVariant", on_delete=models.CASCADE, related_name="stock_movements"
+    )
+    reason = models.CharField(max_length=20, choices=Reason.choices)
+    quantity_delta = models.IntegerField(
+        help_text="Positive for increases, negative for decreases."
+    )
+    stock_after = models.PositiveIntegerField(
+        help_text="Variant's stock value immediately after this movement."
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stock_movements",
+        help_text="Admin user who triggered this (manual adjustments only); null for system-triggered movements.",
+    )
+    note = models.CharField(max_length=255, blank=True)
+    related_order = models.ForeignKey(
+        "order.Order",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stock_movements",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["variant", "-created_at"])]
+
+    def __str__(self):
+        sign = "+" if self.quantity_delta >= 0 else ""
+        return f"{self.variant} {sign}{self.quantity_delta} ({self.reason})"
+
+
 class Review(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="reviews"
