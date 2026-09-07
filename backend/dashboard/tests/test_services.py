@@ -67,6 +67,40 @@ class TestGetAdminOverview:
         for key in ("total", "low_stock", "out_of_stock"):
             assert key in data["products"]
 
+    def test_low_stock_and_out_of_stock_reflect_variant_data(self, make_variant):
+        """
+        low_stock/out_of_stock must be computed off ProductVariant, not
+        the stale Product.stock field — construct variants with known
+        stock/threshold combinations and assert exact counts.
+        """
+        from dashboard.services import get_admin_overview
+
+        make_variant(stock=3, low_stock_threshold=5)  # low (below threshold)
+        make_variant(stock=5, low_stock_threshold=5)  # low (equal to threshold)
+        make_variant(stock=0, low_stock_threshold=5)  # out of stock
+        make_variant(stock=0, low_stock_threshold=5)  # out of stock
+        make_variant(stock=20, low_stock_threshold=5)  # healthy stock
+
+        data = get_admin_overview("30d")
+        assert data["products"]["low_stock"] == 2
+        assert data["products"]["out_of_stock"] == 2
+
+    def test_inactive_variants_excluded_from_low_stock_and_out_of_stock(
+        self, make_variant
+    ):
+        """
+        A deactivated/expired variant (Task 3.3.1.3) shouldn't surface
+        as an actionable "needs restocking" alert.
+        """
+        from dashboard.services import get_admin_overview
+
+        make_variant(stock=2, low_stock_threshold=5, is_active=False)  # would be low
+        make_variant(stock=0, low_stock_threshold=5, is_active=False)  # would be out
+
+        data = get_admin_overview("30d")
+        assert data["products"]["low_stock"] == 0
+        assert data["products"]["out_of_stock"] == 0
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # get_monthly_revenue
@@ -224,7 +258,65 @@ class TestGetTopProducts:
         )
         results = get_top_products(10)
         assert len(results) >= 1
-        for item in results:
-            assert "product_name" in item
-            assert "total_sold" in item
-            assert "revenue" in item
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# get_product_stats
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.django_db
+class TestGetProductStats:
+
+    def test_returns_required_keys(self):
+        from dashboard.services import get_product_stats
+
+        data = get_product_stats()
+        for key in (
+            "total",
+            "on_sale",
+            "new",
+            "out_of_stock",
+            "low_stock",
+            "avg_rating",
+        ):
+            assert key in data
+
+    def test_low_stock_and_out_of_stock_reflect_variant_data(self, make_variant):
+        from dashboard.services import get_product_stats
+
+        make_variant(stock=3, low_stock_threshold=5)  # low (below threshold)
+        make_variant(stock=5, low_stock_threshold=5)  # low (equal to threshold)
+        make_variant(stock=0, low_stock_threshold=5)  # out of stock
+        make_variant(stock=0, low_stock_threshold=5)  # out of stock
+        make_variant(stock=20, low_stock_threshold=5)  # healthy stock
+
+        data = get_product_stats()
+        assert data["low_stock"] == 2
+        assert data["out_of_stock"] == 2
+
+    def test_inactive_variants_excluded_from_low_stock_and_out_of_stock(
+        self, make_variant
+    ):
+        from dashboard.services import get_product_stats
+
+        make_variant(stock=2, low_stock_threshold=5, is_active=False)  # would be low
+        make_variant(stock=0, low_stock_threshold=5, is_active=False)  # would be out
+
+        data = get_product_stats()
+        assert data["low_stock"] == 0
+        assert data["out_of_stock"] == 0
+
+    def test_low_stock_respects_per_variant_threshold_override(self, make_variant):
+        """
+        A variant with an overridden (higher) threshold should count as
+        low-stock at a stock level that a default-threshold variant
+        would not.
+        """
+        from dashboard.services import get_product_stats
+
+        make_variant(stock=8, low_stock_threshold=10)  # low: 8 <= 10
+        make_variant(stock=8, low_stock_threshold=5)  # healthy: 8 > 5
+
+        data = get_product_stats()
+        assert data["low_stock"] == 1

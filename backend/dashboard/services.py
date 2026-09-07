@@ -7,7 +7,7 @@ from django.db.models import Avg, Count, DecimalField, F, Sum
 from django.db.models.functions import Coalesce, TruncDate, TruncMonth
 from django.utils import timezone
 from order.models import Order, OrderItem
-from shop.models import Product, Review
+from shop.models import Product, ProductVariant, Review
 
 User = get_user_model()
 
@@ -62,8 +62,19 @@ def get_admin_overview(period: str = "30d") -> dict:
 
     # Products
     total_products = Product.objects.count()
-    low_stock = Product.objects.filter(stock__gt=0, stock__lte=5).count()
-    out_of_stock = Product.objects.filter(stock=0).count()
+    # NOTE: these now count VARIANTS, not products, since Epic 3 moved
+    # authoritative stock tracking to ProductVariant.stock — a product
+    # with 3 variants where 1 is low-stock now contributes 1 to this
+    # count, not the product itself. Product.stock is a stale,
+    # unmaintained field (Task 3.1.1.5) and is no longer queried here.
+    # Follow-up: if the admin dashboard frontend labels this metric
+    # "Low stock products" / "Out of stock products", that copy is now
+    # slightly inaccurate and should be updated to say "variants" —
+    # not fixed here since it's a frontend-only concern.
+    low_stock = ProductVariant.objects.filter(
+        stock__gt=0, stock__lte=F("low_stock_threshold"), is_active=True
+    ).count()
+    out_of_stock = ProductVariant.objects.filter(stock=0, is_active=True).count()
 
     # Daily revenue chart
     revenue_chart = list(
@@ -180,8 +191,14 @@ def get_product_stats() -> dict:
         "total": Product.objects.count(),
         "on_sale": Product.objects.filter(is_sale=True).count(),
         "new": Product.objects.filter(is_new=True).count(),
-        "out_of_stock": Product.objects.filter(stock=0).count(),
-        "low_stock": Product.objects.filter(stock__gt=0, stock__lte=5).count(),
+        # NOTE: these now count VARIANTS, not products — see the
+        # matching comment in get_admin_overview() above. Follow-up:
+        # update frontend label copy ("... products") if it hasn't
+        # already been adjusted for the variant-based catalog.
+        "out_of_stock": ProductVariant.objects.filter(stock=0, is_active=True).count(),
+        "low_stock": ProductVariant.objects.filter(
+            stock__gt=0, stock__lte=F("low_stock_threshold"), is_active=True
+        ).count(),
         "avg_rating": float(Product.objects.aggregate(a=Avg("rating"))["a"] or 0),
     }
 

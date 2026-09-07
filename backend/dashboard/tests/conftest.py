@@ -159,6 +159,7 @@ def make_variant(db, make_product):
         sku: str | None = None,
         price: Decimal = Decimal("99.99"),
         stock: int = 10,
+        low_stock_threshold: int = 5,
         is_active: bool = True,
     ) -> "ProductVariant":
         _counter[0] += 1
@@ -167,6 +168,7 @@ def make_variant(db, make_product):
             sku=sku or f"SKU-TEST-{_counter[0]:04d}",
             price=price,
             stock=stock,
+            low_stock_threshold=low_stock_threshold,
             is_active=is_active,
         )
 

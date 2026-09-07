@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.contrib import admin
+from django.db.models import F
 from django.utils import timezone
 
 from .models import (
@@ -60,6 +61,7 @@ class ProductVariantInline(admin.TabularInline):
         "price",
         "original_price",
         "stock",
+        "low_stock_threshold",
         "volume_ml",
         "weight_g",
         "manufacture_date",
@@ -167,6 +169,21 @@ class NearExpiryFilter(admin.SimpleListFilter):
         return queryset
 
 
+class LowStockFilter(admin.SimpleListFilter):
+    title = "stock status"
+    parameter_name = "stock_status"
+
+    def lookups(self, request, model_admin):
+        return (("low", "Low stock"), ("out", "Out of stock"))
+
+    def queryset(self, request, queryset):
+        if self.value() == "low":
+            return queryset.filter(stock__gt=0, stock__lte=F("low_stock_threshold"))
+        if self.value() == "out":
+            return queryset.filter(stock=0)
+        return queryset
+
+
 @admin.register(ProductVariant)
 class ProductVariantAdmin(admin.ModelAdmin):
     list_display = (
@@ -176,13 +193,20 @@ class ProductVariantAdmin(admin.ModelAdmin):
         "color",
         "price",
         "stock",
+        "low_stock_threshold",
         "volume_ml",
         "weight_g",
         "manufacture_date",
         "expiration_date",
         "is_active",
     )
-    list_filter = ("is_active", "color", "expiration_date", NearExpiryFilter)
+    list_filter = (
+        "is_active",
+        "color",
+        "expiration_date",
+        NearExpiryFilter,
+        LowStockFilter,
+    )
     search_fields = ("sku", "barcode", "product__name", "batch_number")
     autocomplete_fields = ("product", "color")
     # Soonest-to-expire first by default — a reasonable ordering

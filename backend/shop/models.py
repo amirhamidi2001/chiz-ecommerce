@@ -322,6 +322,7 @@ class ProductVariant(models.Model):
         max_digits=10, decimal_places=2, null=True, blank=True
     )
     stock = models.PositiveIntegerField(default=0)
+    low_stock_threshold = models.PositiveIntegerField(default=5)
     is_active = models.BooleanField(default=True)
     # Unlike skin_type/hair_type/spf (formulation-level, on Product),
     # volume/weight genuinely differ per purchasable unit — a serum
@@ -394,6 +395,10 @@ class ProductVariant(models.Model):
 
     def __str__(self):
         return f"{self.product.name} — {self.sku or 'unsaved'}"
+
+    @property
+    def is_low_stock(self) -> bool:
+        return 0 < self.stock <= self.low_stock_threshold
 
 
 class StockMovement(models.Model):

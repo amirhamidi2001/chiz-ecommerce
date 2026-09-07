@@ -760,6 +760,35 @@ class TestProductVariantModel:
         variant.full_clean()  # must not raise
         assert variant.batch_number == ""
 
+    # ── is_low_stock / low_stock_threshold ──────────────────────────────────
+
+    def test_is_low_stock_true_when_stock_below_threshold(self, db):
+        variant = ProductVariantFactory(stock=3, low_stock_threshold=5)
+        assert variant.is_low_stock is True
+
+    def test_is_low_stock_true_when_stock_exactly_equals_threshold(self, db):
+        variant = ProductVariantFactory(stock=5, low_stock_threshold=5)
+        assert variant.is_low_stock is True
+
+    def test_is_low_stock_false_when_stock_above_threshold(self, db):
+        variant = ProductVariantFactory(stock=6, low_stock_threshold=5)
+        assert variant.is_low_stock is False
+
+    def test_is_low_stock_false_when_stock_is_zero(self, db):
+        # Zero stock is "out of stock", a distinct state from "low
+        # stock" — is_low_stock must not also report True here.
+        variant = ProductVariantFactory(stock=0, low_stock_threshold=5)
+        assert variant.is_low_stock is False
+
+    def test_low_stock_threshold_defaults_to_five(self, db):
+        variant = ProductVariantFactory()
+        assert variant.low_stock_threshold == 5
+
+    def test_low_stock_threshold_is_overridable_per_variant(self, db):
+        variant = ProductVariantFactory(stock=8, low_stock_threshold=10)
+        assert variant.low_stock_threshold == 10
+        assert variant.is_low_stock is True
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # StockMovement
