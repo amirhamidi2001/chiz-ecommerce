@@ -6,7 +6,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.db.models import Sum
 from order.models import Order, OrderItem
 from rest_framework import serializers
-from shop.models import Brand, Category, Product, Review
+from shop.models import Brand, Category, Product, Review, StockMovement
 
 from .models import Address, Wishlist
 
@@ -735,3 +735,28 @@ class AdminCommentSerializer(serializers.ModelSerializer):
 
     def get_reply_count(self, obj):
         return obj.replies.count()
+
+
+# ─── Admin: Variant Stock Adjustment ───────────────────────────────────────────
+
+
+class AdjustStockSerializer(serializers.Serializer):
+    """
+    Validates a manual stock adjustment for a ProductVariant.
+
+    `reason` is deliberately restricted to MANUAL/RESTOCK — SALE,
+    CANCELLATION, and EXPIRY_SWEEP are exclusively system-triggered, and
+    letting an admin submit one of those through this endpoint would
+    corrupt the StockMovement audit trail's meaning.
+    """
+
+    quantity_delta = serializers.IntegerField()
+    reason = serializers.ChoiceField(
+        choices=[StockMovement.Reason.MANUAL, StockMovement.Reason.RESTOCK],
+    )
+    note = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+    def validate_quantity_delta(self, value):
+        if value == 0:
+            raise serializers.ValidationError("Adjustment cannot be zero.")
+        return value

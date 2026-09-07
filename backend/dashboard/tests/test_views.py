@@ -312,3 +312,124 @@ class TestUserOrderViewSet:
 
     def test_unauthenticated_returns_401(self, anon_client):
         assert anon_client.get(ORDERS_URL).status_code == status.HTTP_401_UNAUTHORIZED
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AdminVariantAdjustStockView
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def adjust_stock_url(pk):
+    return f"/api/dashboard/admin/variants/{pk}/adjust-stock/"
+
+
+@pytest.mark.django_db
+class TestAdminVariantAdjustStockView:
+
+    def test_restock_increases_stock_and_logs_movement(
+        self, admin_client, admin_user, make_variant
+    ):
+        from shop.models import StockMovement
+
+        variant = make_variant(stock=10)
+        res = admin_client.post(
+            adjust_stock_url(variant.pk),
+            {"quantity_delta": 5, "reason": "restock", "note": "New shipment"},
+        )
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["stock"] == 15
+
+        variant.refresh_from_db()
+        assert variant.stock == 15
+
+        movement = StockMovement.objects.get(variant=variant)
+        assert movement.reason == StockMovement.Reason.RESTOCK
+        assert movement.quantity_delta == 5
+        assert movement.stock_after == 15
+        assert movement.actor_id == admin_user.id
+        assert movement.note == "New shipment"
+
+    def test_manual_writeoff_decreases_stock_and_logs_movement(
+        self, admin_client, admin_user, make_variant
+    ):
+        from shop.models import StockMovement
+
+        variant = make_variant(stock=10)
+        res = admin_client.post(
+            adjust_stock_url(variant.pk),
+            {"quantity_delta": -3, "reason": "manual", "note": "Damaged in storage"},
+        )
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["stock"] == 7
+
+        variant.refresh_from_db()
+        assert variant.stock == 7
+
+        movement = StockMovement.objects.get(variant=variant)
+        assert movement.reason == StockMovement.Reason.MANUAL
+        assert movement.quantity_delta == -3
+        assert movement.stock_after == 7
+        assert movement.actor_id == admin_user.id
+
+    def test_adjustment_taking_stock_negative_is_rejected(
+        self, admin_client, make_variant
+    ):
+        from shop.models import StockMovement
+
+        variant = make_variant(stock=5)
+        res = admin_client.post(
+            adjust_stock_url(variant.pk),
+            {"quantity_delta": -10, "reason": "manual"},
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+
+        variant.refresh_from_db()
+        assert variant.stock == 5
+        assert not StockMovement.objects.filter(variant=variant).exists()
+
+    def test_zero_quantity_delta_rejected_by_serializer(
+        self, admin_client, make_variant
+    ):
+        variant = make_variant(stock=10)
+        res = admin_client.post(
+            adjust_stock_url(variant.pk),
+            {"quantity_delta": 0, "reason": "manual"},
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "quantity_delta" in res.data
+
+        variant.refresh_from_db()
+        assert variant.stock == 10
+
+    def test_disallowed_reason_is_rejected_by_serializer(
+        self, admin_client, make_variant
+    ):
+        """
+        An admin must not be able to forge a fake sale/cancellation/
+        expiry movement through this manual-adjustment endpoint — only
+        MANUAL/RESTOCK are valid here.
+        """
+        from shop.models import StockMovement
+
+        variant = make_variant(stock=10)
+        res = admin_client.post(
+            adjust_stock_url(variant.pk),
+            {"quantity_delta": 5, "reason": "sale"},
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "reason" in res.data
+
+        variant.refresh_from_db()
+        assert variant.stock == 10
+        assert not StockMovement.objects.filter(variant=variant).exists()
+
+    def test_non_admin_customer_gets_403(self, customer_client, make_variant):
+        variant = make_variant(stock=10)
+        res = customer_client.post(
+            adjust_stock_url(variant.pk),
+            {"quantity_delta": 5, "reason": "restock"},
+        )
+        assert res.status_code == status.HTTP_403_FORBIDDEN
+
+        variant.refresh_from_db()
+        assert variant.stock == 10

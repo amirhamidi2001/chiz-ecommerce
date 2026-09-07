@@ -148,6 +148,31 @@ def make_product(db, make_category, make_brand):
     return _make
 
 
+@pytest.fixture
+def make_variant(db, make_product):
+    from shop.models import ProductVariant
+
+    _counter = [0]
+
+    def _make(
+        product=None,
+        sku: str | None = None,
+        price: Decimal = Decimal("99.99"),
+        stock: int = 10,
+        is_active: bool = True,
+    ) -> "ProductVariant":
+        _counter[0] += 1
+        return ProductVariant.objects.create(
+            product=product or make_product(),
+            sku=sku or f"SKU-TEST-{_counter[0]:04d}",
+            price=price,
+            stock=stock,
+            is_active=is_active,
+        )
+
+    return _make
+
+
 # ── Order fixtures ────────────────────────────────────────────────────────────
 
 

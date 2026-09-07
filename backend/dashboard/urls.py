@@ -65,5 +65,10 @@ urlpatterns = [
         views.AdminProductStatsView.as_view(),
         name="admin-product-stats",
     ),
+    path(
+        "admin/variants/<int:pk>/adjust-stock/",
+        views.AdminVariantAdjustStockView.as_view(),
+        name="admin-variant-adjust-stock",
+    ),
     path("", include(router.urls)),
 ]

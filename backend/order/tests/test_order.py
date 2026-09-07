@@ -1652,6 +1652,114 @@ class OrderDetailAPITests(APITestCase):
         self.variant.refresh_from_db()
         self.assertEqual(self.variant.stock, stock_before)
 
+    # ── StockMovement audit trail (Task 4.1.1.3) ─────────────────────────────
+
+    def test_patch_cancel_creates_one_stock_movement_per_restored_variant(self):
+        """
+        Cancelling a pending order with variant-backed items creates
+        exactly one StockMovement per restored variant, with
+        reason="cancellation", a positive quantity_delta equal to the
+        restored quantity, correct stock_after, actor matching the
+        cancelling user, and related_order pointing at the cancelled
+        order.
+        """
+        # setUp() already placed self.order for 2 units of self.variant
+        # via checkout, which itself logged one SALE movement (Task
+        # 4.1.1.2) — that movement isn't relevant here, only the new
+        # CANCELLATION one this cancellation should create.
+        self.variant.refresh_from_db()
+        stock_before_cancel = self.variant.stock
+
+        res = self.client.patch(
+            self._detail_url(self.order.pk), {"status": "cancelled"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.variant.refresh_from_db()
+
+        cancellation_movements = StockMovement.objects.filter(
+            related_order=self.order, reason=StockMovement.Reason.CANCELLATION
+        )
+        self.assertEqual(cancellation_movements.count(), 1)
+
+        movement = cancellation_movements.get(variant=self.variant)
+        self.assertEqual(movement.quantity_delta, 2)
+        self.assertEqual(movement.stock_after, self.variant.stock)
+        self.assertEqual(movement.stock_after, stock_before_cancel + 2)
+        self.assertEqual(movement.actor_id, self.user.id)
+        self.assertEqual(movement.related_order_id, self.order.id)
+
+    def test_patch_cancel_with_deleted_variant_creates_no_movement_for_that_item(self):
+        """
+        Mirrors test_patch_cancel_with_deleted_variant_skips_gracefully:
+        when one order item's variant was deleted (variant=None), no
+        StockMovement can (or should) be logged for that item, but the
+        other valid item still gets its restoration movement.
+        """
+        second_variant = make_variant(
+            name="Backpack", slug="backpack", price="45.00", stock=10
+        )
+        make_cart_with_items(
+            self.user,
+            [
+                {"variant": self.variant, "quantity": 1},
+                {"variant": second_variant, "quantity": 3},
+            ],
+        )
+        res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        order = Order.objects.get(pk=res.data["id"])
+
+        second_variant_id = second_variant.id
+        second_variant.delete()
+
+        other_item = order.items.exclude(variant__isnull=True).first()
+        self.assertIsNotNone(other_item)
+        restored_variant = other_item.variant
+
+        res = self.client.patch(
+            self._detail_url(order.pk), {"status": "cancelled"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        movements = StockMovement.objects.filter(
+            related_order=order, reason=StockMovement.Reason.CANCELLATION
+        )
+        self.assertEqual(movements.count(), 1)
+
+        movement = movements.get()
+        self.assertEqual(movement.variant_id, restored_variant.id)
+        self.assertEqual(movement.quantity_delta, other_item.quantity)
+
+        # No movement can exist for the deleted variant's id — it no
+        # longer exists to be referenced at all.
+        self.assertFalse(
+            StockMovement.objects.filter(variant_id=second_variant_id).exists()
+        )
+
+    def test_patch_cancel_shipped_order_creates_no_stock_movements(self):
+        """
+        Attempting to cancel an already-shipped order (rejected with
+        400 by the existing guard clause) must create ZERO
+        StockMovement rows — nothing was actually restored, so nothing
+        should be logged.
+        """
+        self.order.status = Order.Status.SHIPPED
+        self.order.save()
+
+        movements_before = StockMovement.objects.count()
+
+        res = self.client.patch(
+            self._detail_url(self.order.pk), {"status": "cancelled"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.assertEqual(StockMovement.objects.count(), movements_before)
+        self.assertFalse(
+            StockMovement.objects.filter(
+                related_order=self.order, reason=StockMovement.Reason.CANCELLATION
+            ).exists()
+        )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 5. Authentication Guard Tests

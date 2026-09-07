@@ -4,6 +4,7 @@ from blog.models import Comment as BlogComment
 from blog.models import Post as BlogPost
 from contact.models import ContactMessage
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order
@@ -13,7 +14,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from shop.models import Brand, Category, Product, Review
+from shop.models import Brand, Category, Product, ProductVariant, Review, StockMovement
 
 from . import services
 from .filters import (
@@ -29,6 +30,7 @@ from .models import Address, Wishlist
 from .permissions import IsAdminOrSuperuser
 from .serializers import (
     AddressSerializer,
+    AdjustStockSerializer,
     AdminBrandSerializer,
     AdminCategorySerializer,
     AdminCommentSerializer,
@@ -312,6 +314,47 @@ class AdminProductStatsView(APIView):
 
     def get(self, request):
         return Response(services.get_product_stats())
+
+
+class AdminVariantAdjustStockView(APIView):
+    """POST /dashboard/admin/variants/{id}/adjust-stock/"""
+
+    permission_classes = [IsAdminOrSuperuser]
+
+    def post(self, request, pk):
+        variant = get_object_or_404(ProductVariant, pk=pk)
+        serializer = AdjustStockSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        delta = serializer.validated_data["quantity_delta"]
+        reason = serializer.validated_data["reason"]
+        note = serializer.validated_data.get("note", "")
+
+        with transaction.atomic():
+            locked_variant = ProductVariant.objects.select_for_update().get(
+                pk=variant.pk
+            )
+            new_stock = locked_variant.stock + delta
+            if new_stock < 0:
+                return Response(
+                    {
+                        "quantity_delta": "This adjustment would result in negative stock."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            locked_variant.stock = new_stock
+            locked_variant.save(update_fields=["stock"])
+            StockMovement.objects.create(
+                variant=locked_variant,
+                reason=reason,
+                quantity_delta=delta,
+                stock_after=locked_variant.stock,
+                actor=request.user,
+                note=note,
+            )
+        return Response(
+            {"id": locked_variant.id, "stock": locked_variant.stock},
+            status=status.HTTP_200_OK,
+        )
 
 
 class AdminUserViewSet(viewsets.ModelViewSet):

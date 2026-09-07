@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from shop.models import ProductVariant
+from shop.models import ProductVariant, StockMovement
 
 from .models import Order
 from .serializers import OrderCreateSerializer, OrderListSerializer, OrderSerializer
@@ -109,6 +109,20 @@ class OrderDetailView(APIView):
                 )
                 variant.stock += order_item.quantity
                 variant.save(update_fields=["stock"])
+
+                # Audit trail (Task 4.1.1.1/4.1.1.3): logged inside this
+                # same atomic block, and only inside this guard, since
+                # there's nothing to log a movement against for an
+                # order_item whose variant no longer exists.
+                StockMovement.objects.create(
+                    variant=variant,
+                    reason=StockMovement.Reason.CANCELLATION,
+                    quantity_delta=order_item.quantity,
+                    stock_after=variant.stock,
+                    actor=self.request.user,
+                    related_order=order,
+                    note=f"Cancellation of order {order.order_number}",
+                )
 
         serializer = OrderSerializer(order, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
