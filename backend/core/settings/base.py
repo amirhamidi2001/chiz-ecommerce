@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_filters",
     "channels",
+    "django_celery_beat",
     # Local
     "accounts.apps.AccountsConfig",
     "contact.apps.ContactConfig",

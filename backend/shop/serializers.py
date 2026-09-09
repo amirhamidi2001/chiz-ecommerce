@@ -9,6 +9,7 @@ from .models import (
     ProductImage,
     ProductVariant,
     Review,
+    StockAlertSubscription,
 )
 
 
@@ -284,3 +285,10 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         if obj.thumbnail and request:
             return request.build_absolute_uri(obj.thumbnail.url)
         return None
+
+
+class StockAlertSubscriptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockAlertSubscription
+        fields = ("id", "variant", "created_at")
+        read_only_fields = ("id", "created_at")

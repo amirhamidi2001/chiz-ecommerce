@@ -5,9 +5,17 @@ from order.models import Order, OrderItem
 from rest_framework import filters, generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .filters import ProductFilter
-from .models import Brand, Category, Color, Product
+from .models import (
+    Brand,
+    Category,
+    Color,
+    Product,
+    ProductVariant,
+    StockAlertSubscription,
+)
 from .pagination import StandardResultsPagination
 from .serializers import (
     BrandSerializer,
@@ -17,6 +25,7 @@ from .serializers import (
     ProductListSerializer,
     ReviewCreateSerializer,
     ReviewSerializer,
+    StockAlertSubscriptionSerializer,
 )
 
 
@@ -212,3 +221,44 @@ class ProductReviewCreateView(generics.CreateAPIView):
         response_data = ReviewSerializer(serializer.instance).data
         headers = self.get_success_headers(response_data)
         return Response(response_data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+# ─── Stock alert subscriptions ─────────────────────────────────────────────────
+class StockAlertSubscriptionView(APIView):
+    """
+    POST   /api/products/variants/<variant_id>/notify-me/  — subscribe
+    DELETE /api/products/variants/<variant_id>/notify-me/  — unsubscribe
+
+    Combined into a single view rather than two separate generics views
+    registered at the same URL: Django's URL resolver maps one path to
+    one view, so two distinct view classes can't share an identical
+    path()/re_path() entry — the second registration would simply never
+    be reached. A single APIView with both post() and delete() defined
+    (DRF's normal per-HTTP-method dispatch) is the correct way to serve
+    different actions at the same URL.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, variant_id):
+        variant = get_object_or_404(ProductVariant, pk=variant_id)
+        if variant.stock > 0:
+            return Response(
+                {"detail": "This item is currently in stock."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        subscription, created = StockAlertSubscription.objects.get_or_create(
+            user=request.user, variant=variant
+        )
+        serializer = StockAlertSubscriptionSerializer(subscription)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    def delete(self, request, variant_id):
+        subscription = get_object_or_404(
+            StockAlertSubscription, user=request.user, variant_id=variant_id
+        )
+        subscription.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

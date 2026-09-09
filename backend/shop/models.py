@@ -446,6 +446,28 @@ class StockMovement(models.Model):
         return f"{self.variant} {sign}{self.quantity_delta} ({self.reason})"
 
 
+class StockAlertSubscription(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="stock_alert_subscriptions",
+    )
+    variant = models.ForeignKey(
+        "shop.ProductVariant",
+        on_delete=models.CASCADE,
+        related_name="alert_subscriptions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("user", "variant")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.email} — alert for {self.variant}"
+
+
 class Review(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="reviews"

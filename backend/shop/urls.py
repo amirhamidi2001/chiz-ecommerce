@@ -8,6 +8,7 @@ from .views import (
     ProductListView,
     ProductReviewCreateView,
     RelatedProductsView,
+    StockAlertSubscriptionView,
 )
 
 urlpatterns = [
@@ -26,5 +27,11 @@ urlpatterns = [
         "products/<slug:slug>/reviews/",
         ProductReviewCreateView.as_view(),
         name="product-review-create",
+    ),
+    # POST to subscribe / DELETE to unsubscribe from a variant's restock alert
+    path(
+        "products/variants/<int:variant_id>/notify-me/",
+        StockAlertSubscriptionView.as_view(),
+        name="stock-alert-subscription",
     ),
 ]

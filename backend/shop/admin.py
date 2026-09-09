@@ -13,6 +13,7 @@ from .models import (
     ProductImage,
     ProductVariant,
     Review,
+    StockAlertSubscription,
     StockMovement,
 )
 
@@ -241,6 +242,17 @@ class StockMovementAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(StockAlertSubscription)
+class StockAlertSubscriptionAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "variant", "created_at", "notified_at")
+    list_filter = ("notified_at",)
+    search_fields = ("user__email", "variant__sku", "variant__product__name")
+    readonly_fields = ("user", "variant", "created_at", "notified_at")
+
+    def has_add_permission(self, request):
         return False
 
 

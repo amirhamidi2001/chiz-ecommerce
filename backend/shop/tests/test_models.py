@@ -17,6 +17,7 @@ from shop.models import (
     ProductVariant,
     Review,
     SkinType,
+    StockAlertSubscription,
     StockMovement,
 )
 from shop.tests.factories import (
@@ -891,6 +892,77 @@ class TestStockMovementModel:
         movement_id = movement.id
         variant.delete()
         assert not StockMovement.objects.filter(id=movement_id).exists()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# StockAlertSubscription
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestStockAlertSubscriptionModel:
+
+    def test_subscription_can_be_created(self, db):
+        user = UserFactory(email="jane@example.com")
+        variant = ProductVariantFactory(stock=0)
+        subscription = StockAlertSubscription.objects.create(user=user, variant=variant)
+
+        assert subscription.pk is not None
+        assert subscription.user_id == user.id
+        assert subscription.variant_id == variant.id
+        assert subscription in variant.alert_subscriptions.all()
+        assert subscription in user.stock_alert_subscriptions.all()
+
+    def test_notified_at_defaults_to_none(self, db):
+        user = UserFactory()
+        variant = ProductVariantFactory(stock=0)
+        subscription = StockAlertSubscription.objects.create(user=user, variant=variant)
+        assert subscription.notified_at is None
+
+    def test_str_representation_is_readable(self, db):
+        user = UserFactory(email="jane@example.com")
+        variant = ProductVariantFactory(sku="SERUM-50ML")
+        subscription = StockAlertSubscription.objects.create(user=user, variant=variant)
+        assert str(subscription) == f"jane@example.com — alert for {variant}"
+
+    def test_duplicate_subscription_raises_integrity_error(self, db):
+        """
+        Proves the (user, variant) uniqueness constraint exists at the
+        DB level. The graceful no-op handling of a repeat subscribe
+        attempt is tested at the endpoint layer (Task 4.1.2.2), not
+        here — this test only needs to confirm the constraint itself
+        would reject a raw duplicate .objects.create() call rather than
+        silently allowing it or erroring in some other way.
+        """
+        user = UserFactory()
+        variant = ProductVariantFactory(stock=0)
+        StockAlertSubscription.objects.create(user=user, variant=variant)
+
+        with transaction.atomic():
+            with pytest.raises(IntegrityError):
+                StockAlertSubscription.objects.create(user=user, variant=variant)
+
+    def test_same_variant_can_have_multiple_subscribers(self, db):
+        variant = ProductVariantFactory(stock=0)
+        user_a = UserFactory(email="a@example.com")
+        user_b = UserFactory(email="b@example.com")
+        StockAlertSubscription.objects.create(user=user_a, variant=variant)
+        StockAlertSubscription.objects.create(user=user_b, variant=variant)
+        assert variant.alert_subscriptions.count() == 2
+
+    def test_variant_deletion_cascades_to_subscriptions(self, db):
+        user = UserFactory()
+        variant = ProductVariantFactory(stock=0)
+        subscription = StockAlertSubscription.objects.create(user=user, variant=variant)
+        subscription_id = subscription.id
+        variant.delete()
+        assert not StockAlertSubscription.objects.filter(id=subscription_id).exists()
+
+    def test_user_deletion_cascades_to_subscriptions(self, db):
+        user = UserFactory()
+        variant = ProductVariantFactory(stock=0)
+        subscription = StockAlertSubscription.objects.create(user=user, variant=variant)
+        subscription_id = subscription.id
+        user.delete()
+        assert not StockAlertSubscription.objects.filter(id=subscription_id).exists()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

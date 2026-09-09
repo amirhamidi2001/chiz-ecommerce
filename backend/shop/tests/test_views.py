@@ -12,6 +12,7 @@ from shop.tests.factories import (
     ProductColorFactory,
     ProductFactory,
     ProductImageFactory,
+    ProductVariantFactory,
     ReviewFactory,
 )
 
@@ -421,3 +422,69 @@ class TestGeneralAnonThrottling:
         client = APIClient()
         statuses = [client.get("/api/products/").status_code for _ in range(5)]
         assert all(s == status.HTTP_200_OK for s in statuses)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST/DELETE /api/products/variants/<variant_id>/notify-me/
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestStockAlertSubscriptionView:
+
+    def _notify_url(self, variant):
+        return url("stock-alert-subscription", variant_id=variant.pk)
+
+    def test_subscribe_to_out_of_stock_variant_succeeds(self, auth_client):
+        from shop.models import StockAlertSubscription
+
+        variant = ProductVariantFactory(stock=0)
+        res = auth_client.post(self._notify_url(variant))
+
+        assert res.status_code == status.HTTP_201_CREATED
+        assert StockAlertSubscription.objects.filter(variant=variant).count() == 1
+
+    def test_subscribe_to_in_stock_variant_is_rejected(self, auth_client):
+        from shop.models import StockAlertSubscription
+
+        variant = ProductVariantFactory(stock=5)
+        res = auth_client.post(self._notify_url(variant))
+
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert not StockAlertSubscription.objects.filter(variant=variant).exists()
+
+    def test_subscribing_twice_returns_200_and_creates_only_one_row(self, auth_client):
+        from shop.models import StockAlertSubscription
+
+        variant = ProductVariantFactory(stock=0)
+
+        first = auth_client.post(self._notify_url(variant))
+        assert first.status_code == status.HTTP_201_CREATED
+
+        second = auth_client.post(self._notify_url(variant))
+        assert second.status_code == status.HTTP_200_OK
+
+        assert StockAlertSubscription.objects.filter(variant=variant).count() == 1
+
+    def test_unsubscribe_removes_subscription(self, auth_client):
+        from shop.models import StockAlertSubscription
+
+        variant = ProductVariantFactory(stock=0)
+        auth_client.post(self._notify_url(variant))
+
+        res = auth_client.delete(self._notify_url(variant))
+        assert res.status_code == status.HTTP_204_NO_CONTENT
+        assert not StockAlertSubscription.objects.filter(variant=variant).exists()
+
+    def test_unsubscribing_when_none_exists_returns_404(self, auth_client):
+        variant = ProductVariantFactory(stock=0)
+        res = auth_client.delete(self._notify_url(variant))
+        assert res.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_subscribe_unauthenticated_returns_401(self, api_client):
+        variant = ProductVariantFactory(stock=0)
+        res = api_client.post(self._notify_url(variant))
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_unsubscribe_unauthenticated_returns_401(self, api_client):
+        variant = ProductVariantFactory(stock=0)
+        res = api_client.delete(self._notify_url(variant))
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
