@@ -1,4 +1,5 @@
 import pytest
+from django.core.cache import cache
 from django.test import RequestFactory
 from rest_framework.test import APIClient
 from shop.tests.factories import (
@@ -11,6 +12,19 @@ from shop.tests.factories import (
     ReviewFactory,
     UserFactory,
 )
+
+
+# ─── Cache isolation ──────────────────────────────────────────────────────────
+# CACHES now points at a real Redis instance (see core/settings/base.py), which
+# does NOT reset automatically between test runs the way the test database
+# does. Clear it before and after every test in this app so cached state
+# (e.g. the category tree cache) never leaks between tests or test runs.
+@pytest.fixture(autouse=True)
+def clear_cache():
+    cache.clear()
+    yield
+    cache.clear()
+
 
 # ─── HTTP clients ────────────────────────────────────────────────────────────
 

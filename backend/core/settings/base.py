@@ -201,20 +201,55 @@ SIMPLE_JWT = {
 }
 
 
+# ─── Redis DB Allocation ───────────────────────────────────────────────────────
+# This project uses a SINGLE Redis instance for multiple purposes.
+# Each subsystem MUST use a distinct logical DB index to avoid key
+# collisions between unrelated systems:
+#   DB 0 — Django Channels (chat/notifications WebSocket layer)
+#   DB 1 — Celery broker/result backend (see Epic 22, if landed)
+#   DB 2 — Django cache framework (this task)
+# If/when Epic 22's Celery work lands, confirm its broker configuration
+# explicitly targets DB 1 rather than accepting Celery's own default,
+# so this documented scheme stays accurate and collision-free.
+REDIS_DB_CHANNELS = config("REDIS_DB_CHANNELS", default=0, cast=int)
+REDIS_DB_CACHE = config("REDIS_DB_CACHE", default=2, cast=int)
+
+
 # ─── Django Channels / Redis ──────────────────────────────────────────────────
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
             "hosts": [
-                (
-                    config("REDIS_HOST", default="127.0.0.1"),
-                    int(config("REDIS_PORT", default=6379)),
-                )
+                {
+                    # NOTE: channels_redis 4.3.0's decode_hosts() treats an
+                    # "address" key as a connection URL string, not a
+                    # (host, port) tuple. Passing host/port/db as separate
+                    # dict keys (rather than an "address" tuple) is the
+                    # verified-correct way to set an explicit db index on
+                    # this installed version.
+                    "host": config("REDIS_HOST", default="127.0.0.1"),
+                    "port": int(config("REDIS_PORT", default=6379)),
+                    "db": REDIS_DB_CHANNELS,  # explicit, matching the documented allocation scheme above
+                }
             ],
             "capacity": 1500,
             "expiry": 10,
         },
+    }
+}
+
+
+# ─── Cache (Redis) ──────────────────────────────────────────────────────────────
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": f"redis://{config('REDIS_HOST', default='127.0.0.1')}:{config('REDIS_PORT', default=6379)}/{REDIS_DB_CACHE}",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+        "KEY_PREFIX": "chiz",  # namespace cache keys, in case this Redis instance is ever shared with another project/environment
+        "TIMEOUT": 300,  # sensible default TTL (5 min) for any cache.set() call that doesn't specify its own explicit timeout
     }
 }
 

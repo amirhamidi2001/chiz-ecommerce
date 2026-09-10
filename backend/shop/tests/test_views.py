@@ -1,10 +1,12 @@
 import pytest
+import time
 from django.core.cache import cache
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework.throttling import AnonRateThrottle
 from unittest.mock import patch
+from shop.views import CATEGORY_TREE_CACHE_KEY
 from shop.tests.factories import (
     BrandFactory,
     CategoryFactory,
@@ -58,6 +60,72 @@ class TestCategoryListView:
         """Public endpoint — no auth header needed."""
         res = api_client.get(url("category-list"))
         assert res.status_code != status.HTTP_401_UNAUTHORIZED
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CategoryListView caching + signal-based invalidation
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestCategoryListViewCaching:
+
+    def test_first_request_populates_cache(self, api_client):
+        assert cache.get(CATEGORY_TREE_CACHE_KEY) is None
+        res = api_client.get(url("category-list"))
+        assert res.status_code == status.HTTP_200_OK
+        assert cache.get(CATEGORY_TREE_CACHE_KEY) is not None
+
+    def test_second_request_does_not_hit_db(
+        self, api_client, django_assert_num_queries
+    ):
+        CategoryFactory(name="Root", slug="root")
+        # Prime the cache.
+        api_client.get(url("category-list"))
+        # Second request should be served entirely from cache — no queries.
+        with django_assert_num_queries(0):
+            res = api_client.get(url("category-list"))
+        assert res.status_code == status.HTTP_200_OK
+
+    def test_second_request_returns_same_data_as_first(self, api_client):
+        CategoryFactory(name="Root", slug="root")
+        first = api_client.get(url("category-list"))
+        second = api_client.get(url("category-list"))
+        assert second.data == first.data
+
+    def test_creating_category_invalidates_cache(self, api_client):
+        api_client.get(url("category-list"))
+        assert cache.get(CATEGORY_TREE_CACHE_KEY) is not None
+
+        CategoryFactory(name="New Root", slug="new-root")
+        assert cache.get(CATEGORY_TREE_CACHE_KEY) is None
+
+        res = api_client.get(url("category-list"))
+        names = [c["name"] for c in res.data["results"]]
+        assert "New Root" in names
+
+    def test_updating_category_invalidates_cache(self, api_client):
+        root = CategoryFactory(name="Root", slug="root")
+        api_client.get(url("category-list"))
+        assert cache.get(CATEGORY_TREE_CACHE_KEY) is not None
+
+        root.name = "Renamed Root"
+        root.save()
+        assert cache.get(CATEGORY_TREE_CACHE_KEY) is None
+
+        res = api_client.get(url("category-list"))
+        names = [c["name"] for c in res.data["results"]]
+        assert "Renamed Root" in names
+        assert "Root" not in names
+
+    def test_deleting_category_invalidates_cache(self, api_client):
+        root = CategoryFactory(name="Root", slug="root")
+        api_client.get(url("category-list"))
+        assert cache.get(CATEGORY_TREE_CACHE_KEY) is not None
+
+        root.delete()
+        assert cache.get(CATEGORY_TREE_CACHE_KEY) is None
+
+        res = api_client.get(url("category-list"))
+        assert res.data["results"] == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -273,6 +341,100 @@ class TestProductListView:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ProductListView caching (query-param-aware, short TTL)
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestProductListViewCaching:
+
+    def test_same_params_different_order_hit_same_cache_and_query_once(
+        self, api_client, django_assert_num_queries
+    ):
+        cat = CategoryFactory(slug="electronics")
+        brand = BrandFactory(slug="nike")
+        ProductFactory.create_batch(3, category=cat, brand=brand)
+
+        # Prime the cache with one param order.
+        api_client.get(
+            url("product-list"), {"category": "electronics", "brand": "nike"}
+        )
+
+        # Same params, reversed order — must be a cache hit (0 queries).
+        with django_assert_num_queries(0):
+            res = api_client.get(
+                url("product-list"), {"brand": "nike", "category": "electronics"}
+            )
+        assert res.data["count"] == 3
+
+    def test_different_params_produce_different_cache_entries(self, api_client):
+        cat_a = CategoryFactory(slug="electronics")
+        cat_b = CategoryFactory(slug="clothing")
+        ProductFactory.create_batch(3, category=cat_a)
+        ProductFactory.create_batch(5, category=cat_b)
+
+        res_a = api_client.get(url("product-list"), {"category": "electronics"})
+        res_b = api_client.get(url("product-list"), {"category": "clothing"})
+
+        # The critical correctness check: neither response leaked into the
+        # other's cache slot.
+        assert res_a.data["count"] == 3
+        assert res_b.data["count"] == 5
+        ids_a = {p["id"] for p in res_a.data["results"]}
+        ids_b = {p["id"] for p in res_b.data["results"]}
+        assert ids_a.isdisjoint(ids_b)
+
+        # Re-requesting each still returns its OWN distinct data, not the
+        # other's cached entry.
+        res_a_again = api_client.get(url("product-list"), {"category": "electronics"})
+        assert res_a_again.data["count"] == 3
+        ids_a_again = {p["id"] for p in res_a_again.data["results"]}
+        assert ids_a_again == ids_a
+
+    def test_search_term_is_part_of_cache_key(self, api_client):
+        ProductFactory(name="Wireless Headphones")
+        ProductFactory(name="Running Shoes")
+
+        res_search = api_client.get(url("product-list"), {"search": "wireless"})
+        res_all = api_client.get(url("product-list"))
+
+        assert res_search.data["count"] == 1
+        assert res_all.data["count"] == 2
+
+    def test_cache_ttl_expires_and_requeries_db(self, api_client):
+        ProductFactory.create_batch(2)
+
+        with patch("shop.views.PRODUCT_LIST_CACHE_TTL", 1):
+            first = api_client.get(url("product-list"))
+            assert first.data["count"] == 2
+
+            # A new product created while the cached entry is still fresh
+            # must NOT show up yet — proves we're actually serving from cache.
+            ProductFactory()
+            still_cached = api_client.get(url("product-list"))
+            assert still_cached.data["count"] == 2
+
+            time.sleep(1.2)  # let the 1-second TTL genuinely expire
+
+            after_expiry = api_client.get(url("product-list"))
+            assert after_expiry.data["count"] == 3
+
+    def test_no_cross_user_data_leakage(self, api_client, auth_client):
+        """
+        ProductListSerializer carries no wishlist/personalized-pricing
+        fields (verified against serializers.py) — wishlist state is
+        fetched via the separate dashboard/wishlist/ endpoint. So an
+        anonymous and an authenticated request for the SAME query params
+        must get byte-for-byte the same cached response; there is no
+        per-user field to leak.
+        """
+        ProductFactory.create_batch(3)
+
+        anon_res = api_client.get(url("product-list"))
+        auth_res = auth_client.get(url("product-list"))
+
+        assert anon_res.data == auth_res.data
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # GET /api/products/<slug>/
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.django_db
@@ -392,9 +554,12 @@ class TestGeneralAnonThrottling:
 
     @pytest.fixture(autouse=True)
     def clear_throttle_cache(self):
-        # Throttle history lives in Django's cache (LocMemCache, no
-        # CACHES override anywhere in this project) — clear it before
-        # and after so state never leaks between tests.
+        # Throttle history lives in Django's cache (a real Redis-backed
+        # cache — see core/settings/base.py's CACHES — which does not
+        # reset automatically between tests). Redundant with conftest's
+        # autouse clear_cache fixture, but kept explicit here since this
+        # class predates it and the throttling behavior specifically
+        # depends on it.
         cache.clear()
         yield
         cache.clear()
