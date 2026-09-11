@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 from rest_framework.throttling import AnonRateThrottle
 from unittest.mock import patch
 from shop.views import CATEGORY_TREE_CACHE_KEY
+from shop.models import Product
 from shop.tests.factories import (
     BrandFactory,
     CategoryFactory,
@@ -400,22 +401,41 @@ class TestProductListViewCaching:
         assert res_all.data["count"] == 2
 
     def test_cache_ttl_expires_and_requeries_db(self, api_client):
-        ProductFactory.create_batch(2)
+        """
+        Uses a bulk .update() (not .save()) to change underlying data,
+        since Task 21.1.1.4's signal-based invalidation now fires on any
+        Product.save() — a plain ProductFactory() create/save would
+        invalidate the cache on its own and no longer isolate pure
+        TTL-based expiry. QuerySet.update() deliberately bypasses
+        save()/signals entirely, so this exercises the TTL path alone.
+        """
+        Product.objects.create(
+            name="Original Name",
+            slug="ttl-test-product",
+            category=CategoryFactory(),
+            brand=BrandFactory(),
+            short_description="x",
+            description="x",
+            price=10,
+            stock=5,
+        )
 
         with patch("shop.views.PRODUCT_LIST_CACHE_TTL", 1):
             first = api_client.get(url("product-list"))
-            assert first.data["count"] == 2
+            assert first.data["results"][0]["name"] == "Original Name"
 
-            # A new product created while the cached entry is still fresh
-            # must NOT show up yet — proves we're actually serving from cache.
-            ProductFactory()
+            # Bypasses save()/signals entirely — proves staleness is due
+            # to the TTL/cache, not signal-based invalidation.
+            Product.objects.filter(slug="ttl-test-product").update(
+                name="Changed While Cached"
+            )
             still_cached = api_client.get(url("product-list"))
-            assert still_cached.data["count"] == 2
+            assert still_cached.data["results"][0]["name"] == "Original Name"
 
             time.sleep(1.2)  # let the 1-second TTL genuinely expire
 
             after_expiry = api_client.get(url("product-list"))
-            assert after_expiry.data["count"] == 3
+            assert after_expiry.data["results"][0]["name"] == "Changed While Cached"
 
     def test_no_cross_user_data_leakage(self, api_client, auth_client):
         """

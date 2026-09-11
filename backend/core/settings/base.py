@@ -207,12 +207,21 @@ SIMPLE_JWT = {
 # collisions between unrelated systems:
 #   DB 0 — Django Channels (chat/notifications WebSocket layer)
 #   DB 1 — Celery broker/result backend (see Epic 22, if landed)
-#   DB 2 — Django cache framework (this task)
+#   DB 2 — Django cache framework (general-purpose, disposable entries —
+#          category/product-list caching, Tasks 21.1.1.2/21.1.1.3)
+#   DB 3 — Django sessions (this task) — deliberately SEPARATE from DB 2:
+#          sessions need to persist reliably for their configured
+#          lifetime, while the general cache's entries are disposable
+#          by design. Mixing them in one DB risks eviction under memory
+#          pressure hitting the wrong kind of data. A separate DB index
+#          also gives clean operational visibility (redis-cli -n 3 KEYS
+#          "*" shows ONLY session data).
 # If/when Epic 22's Celery work lands, confirm its broker configuration
 # explicitly targets DB 1 rather than accepting Celery's own default,
 # so this documented scheme stays accurate and collision-free.
 REDIS_DB_CHANNELS = config("REDIS_DB_CHANNELS", default=0, cast=int)
 REDIS_DB_CACHE = config("REDIS_DB_CACHE", default=2, cast=int)
+REDIS_DB_SESSIONS = config("REDIS_DB_SESSIONS", default=3, cast=int)
 
 
 # ─── Django Channels / Redis ──────────────────────────────────────────────────
@@ -250,8 +259,40 @@ CACHES = {
         },
         "KEY_PREFIX": "chiz",  # namespace cache keys, in case this Redis instance is ever shared with another project/environment
         "TIMEOUT": 300,  # sensible default TTL (5 min) for any cache.set() call that doesn't specify its own explicit timeout
-    }
+    },
+    "sessions": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": f"redis://{config('REDIS_HOST', default='127.0.0.1')}:{config('REDIS_PORT', default=6379)}/{REDIS_DB_SESSIONS}",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+        "KEY_PREFIX": "chiz_session",
+        # No blanket TIMEOUT override here — session expiry is governed
+        # by SESSION_COOKIE_AGE below, not this cache backend's generic
+        # default timeout.
+    },
 }
+
+
+# ─── Sessions ───────────────────────────────────────────────────────────────────
+# cached_db (not the pure "cache" backend) deliberately: sessions were
+# ALREADY exclusively database-backed before this task (SESSION_ENGINE was
+# unset everywhere, so Django used its db-backed default), so moving to
+# cached_db is a pure improvement — Redis becomes a fast read-through
+# layer in front of the existing sessions table, and a Redis restart or
+# eviction can never silently log out an active session, since the DB
+# row is still there as a fallback. The pure "cache" backend would have
+# been faster but would regress reliability versus what this project had
+# before. No new migration is needed either way — django.contrib.sessions
+# and its table already exist and continue to be used as the fallback.
+SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
+SESSION_CACHE_ALIAS = "sessions"
+# Confirmed no existing SESSION_COOKIE_AGE (or SESSION_ENGINE) anywhere in
+# core/settings/*.py before adding this — production.py only sets
+# SESSION_COOKIE_SECURE/HTTPONLY/SAMESITE, which don't conflict.
+SESSION_COOKIE_AGE = config(
+    "SESSION_COOKIE_AGE", default=1209600, cast=int
+)  # 2 weeks (Django's own default)
 
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
