@@ -206,19 +206,16 @@ SIMPLE_JWT = {
 # Each subsystem MUST use a distinct logical DB index to avoid key
 # collisions between unrelated systems:
 #   DB 0 — Django Channels (chat/notifications WebSocket layer)
-#   DB 1 — Celery broker/result backend (see Epic 22, if landed)
+#   DB 1 — Celery broker/result backend (this task — now landed)
 #   DB 2 — Django cache framework (general-purpose, disposable entries —
 #          category/product-list caching, Tasks 21.1.1.2/21.1.1.3)
-#   DB 3 — Django sessions (this task) — deliberately SEPARATE from DB 2:
+#   DB 3 — Django sessions — deliberately SEPARATE from DB 2:
 #          sessions need to persist reliably for their configured
 #          lifetime, while the general cache's entries are disposable
 #          by design. Mixing them in one DB risks eviction under memory
 #          pressure hitting the wrong kind of data. A separate DB index
 #          also gives clean operational visibility (redis-cli -n 3 KEYS
 #          "*" shows ONLY session data).
-# If/when Epic 22's Celery work lands, confirm its broker configuration
-# explicitly targets DB 1 rather than accepting Celery's own default,
-# so this documented scheme stays accurate and collision-free.
 REDIS_DB_CHANNELS = config("REDIS_DB_CHANNELS", default=0, cast=int)
 REDIS_DB_CACHE = config("REDIS_DB_CACHE", default=2, cast=int)
 REDIS_DB_SESSIONS = config("REDIS_DB_SESSIONS", default=3, cast=int)
@@ -293,6 +290,22 @@ SESSION_CACHE_ALIAS = "sessions"
 SESSION_COOKIE_AGE = config(
     "SESSION_COOKIE_AGE", default=1209600, cast=int
 )  # 2 weeks (Django's own default)
+
+
+# ─── Celery ─────────────────────────────────────────────────────────────────────
+REDIS_DB_CELERY = config("REDIS_DB_CELERY", default=1, cast=int)
+CELERY_BROKER_URL = f"redis://{config('REDIS_HOST', default='127.0.0.1')}:{config('REDIS_PORT', default=6379)}/{REDIS_DB_CELERY}"
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL  # same Redis instance/DB serves as both broker and result store — acceptable for this project's scale; revisit if result-storage volume ever becomes a real operational concern
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+# Reuses whatever TIME_ZONE is actually configured above (currently "UTC" —
+# NOTE: no "Asia/Tehran" setting exists anywhere in this project despite the
+# Iran-market regulatory-compliance settings further below; if that ever
+# changes, CELERY_TIMEZONE tracks it automatically since it references the
+# variable rather than a hardcoded string).
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers.DatabaseScheduler"
 
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
