@@ -16,6 +16,7 @@ Including another URLconf
 """
 
 from blog.sitemaps import BlogSitemap
+from core.views import HealthCheckView
 from decouple import config
 from django.conf import settings
 from django.conf.urls.static import static
@@ -40,6 +41,8 @@ ADMIN_URL = config("ADMIN_URL", default="admin/")
 urlpatterns = [
     # Admin
     path(ADMIN_URL, admin.site.urls),
+    # Health check
+    path("api/health/", HealthCheckView.as_view(), name="health-check"),
     # Apps
     path("api/auth/", include("accounts.urls")),
     path("api/contact/", include("contact.urls")),
