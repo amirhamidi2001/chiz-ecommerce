@@ -62,6 +62,60 @@ services:
       redis:
         condition: service_healthy
 
+  # ── Celery worker — processes queued background tasks ──────────────────────
+  # NOTE: mounts media_volume_dev like the backend service, since some
+  # queued tasks may need to read/write media files. (No such task exists
+  # in this codebase yet as of this task — there is currently no
+  # tasks.py anywhere in the project, so nothing is actually queued —
+  # but this is a low-cost, forward-looking inclusion for whenever one
+  # is added.)
+  celery_worker:
+    build:
+      context: ./backend
+      target: development
+    container_name: backend_celery_worker_dev
+    restart: unless-stopped
+    command: celery -A core worker --loglevel=info
+    volumes:
+      - ./backend:/app
+      - media_volume_dev:/app/media
+    env_file:
+      - .env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  # ── Celery beat — schedules periodic tasks ──────────────────────────────────
+  # depends_on backend (service_started, not service_healthy — backend has
+  # no healthcheck defined in this file) so migrations have at least been
+  # INITIATED before beat starts looking for PeriodicTask rows. NOTE: as of
+  # this task, no periodic-task-seeding migration exists in this codebase
+  # (no payments/shipping/notifications apps or tasks.py exist yet to seed
+  # tasks for) — this dependency ordering is still the correct structural
+  # choice for whenever seeded schedules are added.
+  celery_beat:
+    build:
+      context: ./backend
+      target: development
+    container_name: backend_celery_beat_dev
+    restart: unless-stopped
+    command: celery -A core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env.dev
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
   # ── React / Vite frontend — Vite dev server with HMR ───────────────────────
   frontend:
     build:

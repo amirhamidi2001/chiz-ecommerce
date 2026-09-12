@@ -71,6 +71,47 @@ services:
       redis:
         condition: service_healthy
 
+  # ── Celery worker — processes queued background tasks ──────────────────────
+  # --concurrency=4 is a reasonable starting point, not a permanently-correct
+  # value — tune based on actual task volume/server resources once this
+  # project has real production traffic to observe.
+  celery_worker:
+    build:
+      context: ./backend
+      target: production
+    container_name: backend_celery_worker_prod
+    restart: unless-stopped
+    command: celery -A core worker --loglevel=info --concurrency=4
+    volumes:
+      - media_volume_prod:/app/media
+    env_file:
+      - .env.prod
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  # ── Celery beat — schedules periodic tasks ──────────────────────────────────
+  celery_beat:
+    build:
+      context: ./backend
+      target: production
+    container_name: backend_celery_beat_prod
+    restart: unless-stopped
+    command: celery -A core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    env_file:
+      - .env.prod
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
   # ── React / Nginx — pre-built static assets ─────────────────────────────────
   frontend:
     build:
