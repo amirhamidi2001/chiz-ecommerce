@@ -16,8 +16,8 @@ import datetime
 import pytest
 from django.utils import timezone
 
-from shop.tasks import deactivate_expired_variants
-from shop.tests.factories import ProductVariantFactory
+from shop.tasks import deactivate_expired_variants, notify_stock_alert_subscribers
+from shop.tests.factories import ProductVariantFactory, UserFactory
 
 
 @pytest.mark.django_db
@@ -87,3 +87,39 @@ class TestDeactivateExpiredVariants:
         assert future.is_active is True
         assert no_expiry.is_active is True
         assert already_inactive.is_active is False
+
+
+@pytest.mark.django_db
+class TestNotifyStockAlertSubscribers:
+    def test_marks_only_unnotified_subscriptions_and_returns_correct_count(self):
+        from shop.models import StockAlertSubscription
+
+        variant = ProductVariantFactory(stock=10)
+        user_a = UserFactory()
+        user_b = UserFactory()
+        user_c = UserFactory()
+
+        already_notified_time = timezone.now() - datetime.timedelta(days=1)
+        sub_a = StockAlertSubscription.objects.create(user=user_a, variant=variant)
+        sub_b = StockAlertSubscription.objects.create(user=user_b, variant=variant)
+        sub_c = StockAlertSubscription.objects.create(
+            user=user_c, variant=variant, notified_at=already_notified_time
+        )
+
+        result = notify_stock_alert_subscribers(variant.id)
+
+        sub_a.refresh_from_db()
+        sub_b.refresh_from_db()
+        sub_c.refresh_from_db()
+
+        assert sub_a.notified_at is not None
+        assert sub_b.notified_at is not None
+        # Already-notified subscription's original timestamp is left
+        # untouched, not overwritten with a new one.
+        assert sub_c.notified_at == already_notified_time
+
+        assert result == f"Notified 2 subscriber(s) for variant {variant.id}."
+
+    def test_nonexistent_variant_returns_gracefully(self):
+        result = notify_stock_alert_subscribers(999999)
+        assert result == "Variant no longer exists."

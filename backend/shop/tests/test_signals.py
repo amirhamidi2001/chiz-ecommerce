@@ -25,8 +25,14 @@ fires unconditionally).
 import pytest
 from django.urls import reverse
 from django_redis import get_redis_connection
+from unittest.mock import patch
 
-from shop.tests.factories import ProductFactory, ProductVariantFactory
+from shop.tests.factories import (
+    ProductFactory,
+    ProductVariantFactory,
+    StockMovementFactory,
+)
+from shop.models import StockMovement
 
 
 def url(name, **kwargs):
@@ -115,3 +121,50 @@ class TestProductListCacheInvalidation:
         ProductVariantFactory(product=product, price=15, stock=3)
 
         assert _product_list_cache_keys() == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stock-alert notification on 0→positive transitions (Task 4.1.2.3)
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestHandleStockIncreaseSignal:
+    """
+    Mocks notify_stock_alert_subscribers.delay directly — no real
+    Celery worker/broker needed, per the acceptance criteria. These
+    tests exercise the real StockMovement model (via the factory), so
+    they genuinely test the post_save receiver's own detection logic,
+    not just a hand-written call to it.
+    """
+
+    def test_restock_from_zero_triggers_notification(self):
+        variant = ProductVariantFactory(stock=0)
+        with patch("shop.signals.notify_stock_alert_subscribers.delay") as mock_delay:
+            StockMovementFactory(
+                variant=variant,
+                reason=StockMovement.Reason.RESTOCK,
+                quantity_delta=5,
+                stock_after=5,
+            )
+        mock_delay.assert_called_once_with(variant.id)
+
+    def test_restock_from_nonzero_does_not_trigger_notification(self):
+        variant = ProductVariantFactory(stock=3)
+        with patch("shop.signals.notify_stock_alert_subscribers.delay") as mock_delay:
+            StockMovementFactory(
+                variant=variant,
+                reason=StockMovement.Reason.RESTOCK,
+                quantity_delta=5,
+                stock_after=8,  # 3 -> 8, never actually hit zero
+            )
+        mock_delay.assert_not_called()
+
+    def test_sale_negative_delta_never_triggers_notification(self):
+        variant = ProductVariantFactory(stock=5)
+        with patch("shop.signals.notify_stock_alert_subscribers.delay") as mock_delay:
+            StockMovementFactory(
+                variant=variant,
+                reason=StockMovement.Reason.SALE,
+                quantity_delta=-5,
+                stock_after=0,  # went TO zero, not FROM zero — not a restock
+            )
+        mock_delay.assert_not_called()

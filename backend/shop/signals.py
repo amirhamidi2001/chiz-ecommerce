@@ -10,7 +10,8 @@ from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django_redis import get_redis_connection
 
-from .models import Category, Product, ProductVariant
+from .models import Category, Product, ProductVariant, StockMovement
+from .tasks import notify_stock_alert_subscribers
 from .views import CATEGORY_TREE_CACHE_KEY
 
 
@@ -111,3 +112,38 @@ def invalidate_cache_on_variant_delete(sender, **kwargs):
     it was the last active variant) or change displayed price/stock —
     always invalidate."""
     invalidate_product_list_cache()
+
+
+# ─── Stock-alert notifications ─────────────────────────────────────────────────
+@receiver(post_save, sender=StockMovement)
+def handle_stock_increase(sender, instance, created, **kwargs):
+    """
+    Detect a variant's stock going from 0 (or less) to positive, and
+    queue notify_stock_alert_subscribers for it.
+
+    Hooks into StockMovement creation rather than adding ad-hoc
+    "was this a restock" checks separately into both real code paths
+    that increase stock (order-cancellation restoration in
+    order/views.py, and admin manual adjustment in
+    dashboard/views.py's AdminVariantAdjustStockView) — both already
+    create a StockMovement with a positive quantity_delta (verified
+    against both call sites), so this single handler catches both
+    without touching either view again.
+
+    Uses the StockMovement's own recorded stock_after/quantity_delta
+    to compute stock_before, rather than re-querying the variant's
+    current stock — the variant's live value could have changed again
+    by the time this handler runs, so the movement's own snapshot is
+    the correct source of truth for "what was stock immediately before
+    THIS movement".
+    """
+    if not created or instance.quantity_delta <= 0:
+        return
+    variant = instance.variant
+    stock_before = instance.stock_after - instance.quantity_delta
+    # Only notify if the variant actually WENT FROM zero (or negative,
+    # though stock shouldn't go negative in practice) — a restock from
+    # e.g. 3 to 8 units was never "out of stock" from the subscriber's
+    # perspective and shouldn't spam anyone.
+    if stock_before <= 0 and instance.stock_after > 0:
+        notify_stock_alert_subscribers.delay(variant.id)

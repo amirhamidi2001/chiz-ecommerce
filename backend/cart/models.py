@@ -4,12 +4,27 @@ from django.db import models
 
 
 class Cart(models.Model):
-    """One cart per authenticated user."""
+    """
+    One cart per authenticated user, OR one cart per anonymous session —
+    never both, never neither (enforced by the CheckConstraint below).
+    Anonymous session-based carts are schema groundwork only as of this
+    task; cart/views.py's get_or_create_cart() still only creates
+    user-owned carts (that's Task 5.1.1.2's job).
+    """
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="cart",
+        null=True,
+        blank=True,
+    )
+    session_key = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -18,9 +33,19 @@ class Cart(models.Model):
         ordering = ["-updated_at"]
         verbose_name = "Cart"
         verbose_name_plural = "Carts"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(user__isnull=False, session_key__isnull=True)
+                    | models.Q(user__isnull=True, session_key__isnull=False)
+                ),
+                name="cart_has_exactly_one_owner",
+            )
+        ]
 
     def __str__(self):
-        return f"Cart of {self.user.email}"
+        owner = self.user.email if self.user_id else f"session {self.session_key}"
+        return f"Cart of {owner}"
 
     @property
     def subtotal(self):

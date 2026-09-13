@@ -224,6 +224,25 @@ export const getBrands = (search = '') =>
 export const getColors = () =>
   api.get('/colors/');
 
+/**
+ * POST /products/variants/<variantId>/notify-me/
+ * Requires authentication. Subscribes the current user to a "back in
+ * stock" alert for this variant. Returns 400 with { detail } if the
+ * variant is actually back in stock by the time the request lands
+ * (idempotent otherwise: re-subscribing an existing subscription
+ * returns 200 rather than erroring).
+ */
+export const subscribeStockAlert = (variantId) =>
+  api.post(`/products/variants/${variantId}/notify-me/`);
+
+/**
+ * DELETE /products/variants/<variantId>/notify-me/
+ * Requires authentication. Unsubscribes the current user from a
+ * variant's "back in stock" alert.
+ */
+export const unsubscribeStockAlert = (variantId) =>
+  api.delete(`/products/variants/${variantId}/notify-me/`);
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CART
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,7 +1,7 @@
 // src/pages/ProductDetails.jsx
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { getProductDetails, getRelatedProducts, createReview, parseErrors, isAuthenticated } from '../services/api';
+import { getProductDetails, getRelatedProducts, createReview, subscribeStockAlert, parseErrors, isAuthenticated } from '../services/api';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 
@@ -328,6 +328,91 @@ const AddReviewForm = ({ productSlug, onSuccess }) => {
   );
 };
 
+// ─── Notify Me When Available ───────────────────────────────────────────────────
+/**
+ * Self-contained "back in stock" subscribe button for a single variant.
+ * Kept as its own small component (rather than inlined into the PDP) so
+ * it can be unit-tested in isolation, independent of the PDP's
+ * in-progress variant-selection UI.
+ *
+ * Props:
+ *   variantId {number} – the ProductVariant to subscribe to
+ *
+ * State resets whenever a different variant is selected because the
+ * caller keys this component by variantId (see render site) — a key
+ * change unmounts/remounts the component, which is the idiomatic React
+ * way to reset all local state on an identity change, rather than an
+ * effect that calls setState synchronously on mount.
+ */
+const NotifyMeButton = ({ variantId }) => {
+  const [status, setStatus] = useState('idle'); // idle | submitting | subscribed | back_in_stock | error
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const handleClick = async () => {
+    // Mirrors WishlistContext.toggleWishlist's auth-gating: redirect to
+    // login rather than letting the request 401 silently.
+    if (!isAuthenticated()) {
+      window.location.href = '/login';
+      return;
+    }
+
+    setStatus('submitting');
+    try {
+      await subscribeStockAlert(variantId);
+      setStatus('subscribed');
+    } catch (err) {
+      // Genuine possible race: the variant went back in stock between
+      // this page rendering and the click landing. The backend reports
+      // this as a 400 with { detail }.
+      if (err.response?.status === 400) {
+        setStatus('back_in_stock');
+      } else {
+        setErrorMessage(parseErrors(err).detail || parseErrors(err).non_field_errors || 'Something went wrong. Please try again.');
+        setStatus('error');
+      }
+    }
+  };
+
+  if (status === 'subscribed') {
+    return (
+      <button
+        disabled
+        className="flex-1 bg-teal-50 border border-teal-200 text-teal-700 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 cursor-default"
+      >
+        <i className="bi bi-check-circle-fill" /> We&apos;ll notify you!
+      </button>
+    );
+  }
+
+  if (status === 'back_in_stock') {
+    return (
+      <div className="flex-1 bg-teal-50 border border-teal-200 text-teal-700 py-3 px-4 rounded-lg font-medium text-sm flex items-center justify-center gap-2 text-center">
+        <i className="bi bi-info-circle-fill flex-shrink-0" />
+        Good news — this item is back in stock! Refresh the page to add it to your cart.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1">
+      <button
+        onClick={handleClick}
+        disabled={status === 'submitting'}
+        className="w-full bg-amber-500 text-white py-3 rounded-lg font-semibold hover:bg-amber-600 transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {status === 'submitting' ? (
+          <><i className="bi bi-arrow-clockwise animate-spin" /> Subscribing…</>
+        ) : (
+          <><i className="bi bi-bell" /> Notify Me When Available</>
+        )}
+      </button>
+      {status === 'error' && (
+        <p className="text-red-500 text-xs mt-1.5">{errorMessage}</p>
+      )}
+    </div>
+  );
+};
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 const ProductDetails = () => {
   const { slug } = useParams();
@@ -456,6 +541,27 @@ const ProductDetails = () => {
     ? (Number(product.original_price) - Number(product.price)).toFixed(2)
     : null;
   const discountPercent = product.discount_percent || 0;
+
+  // ── Variant-aware stock check (minimal, scoped to this task) ────────────────
+  // NOTE: the PDP as a whole is NOT variant-aware yet — Add to Cart / Buy Now
+  // still operate at the product level (addToCart(product.id, ...) has no
+  // variant concept at all, matching the cart API), and price/quantity-limit
+  // display throughout this page still use the legacy product.price/stock
+  // fields. That's Epic 3's still-in-progress frontend variant migration and
+  // is out of scope here. This block ONLY resolves which variant is
+  // "selected" well enough to know whether ITS specific stock is zero, so
+  // the Notify Me feature (which is inherently per-variant on the backend)
+  // knows which variant to subscribe to and whether to show itself at all.
+  // If a specific variant can't be confidently resolved (e.g. no colors/
+  // variants on this product, or an ambiguous selection), this falls back
+  // to the legacy product.stock field so the page still behaves reasonably.
+  const variants = product.variants || [];
+  const selectedVariant =
+    (selectedColor && variants.find((v) => v.color?.id === selectedColor.id)) ||
+    (variants.length === 1 ? variants[0] : null);
+  const isSelectedVariantOutOfStock = selectedVariant
+    ? selectedVariant.stock === 0
+    : product.stock === 0;
 
   // Gallery handlers
   const handleThumbnail = (img, idx) => { setSelectedImage(img); setCurrentIndex(idx); };
@@ -740,17 +846,21 @@ const ProductDetails = () => {
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap gap-3">
-                  <button
-                    onClick={handleAddToCart}
-                    disabled={product.stock === 0 || addingToCart}
-                    className="flex-1 bg-teal-600 text-white py-3 rounded-lg font-semibold hover:bg-teal-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {addingToCart ? (
-                      <><i className="bi bi-arrow-clockwise animate-spin" /> Adding…</>
-                    ) : (
-                      <><i className="bi bi-bag-plus" /> Add to Cart</>
-                    )}
-                  </button>
+                  {isSelectedVariantOutOfStock && selectedVariant ? (
+                    <NotifyMeButton key={selectedVariant.id} variantId={selectedVariant.id} />
+                  ) : (
+                    <button
+                      onClick={handleAddToCart}
+                      disabled={product.stock === 0 || addingToCart}
+                      className="flex-1 bg-teal-600 text-white py-3 rounded-lg font-semibold hover:bg-teal-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {addingToCart ? (
+                        <><i className="bi bi-arrow-clockwise animate-spin" /> Adding…</>
+                      ) : (
+                        <><i className="bi bi-bag-plus" /> Add to Cart</>
+                      )}
+                    </button>
+                  )}
                   <button
                     onClick={handleBuyNow}
                     disabled={product.stock === 0 || buyingNow}

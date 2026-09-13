@@ -14,6 +14,8 @@ vi.mock('../services/api', () => ({
   getProductDetails: vi.fn(),
   getRelatedProducts: vi.fn(),
   createReview: vi.fn(),
+  subscribeStockAlert: vi.fn(),
+  isAuthenticated: vi.fn(() => true),
   parseErrors: vi.fn((err) => ({ non_field_errors: err?.message || 'Unknown error' })),
 }));
 
@@ -469,6 +471,112 @@ describe('ProductDetails', () => {
       // The breadcrumb renders product.name as plain text in a <li>
       const nav = await screen.findByRole('navigation', { name: /breadcrumb/i });
       expect(within(nav).getByText('Test Widget Pro')).toBeInTheDocument();
+    });
+  });
+
+  // ── Stock alert: Notify Me When Available ────────────────────────────────────
+  // NotifyMeButton isn't exported separately from ProductDetails.jsx, and its
+  // behavior depends on the color→variant resolution living in the main
+  // component (see ProductDetails.jsx's "Variant-aware stock check" comment),
+  // so these are integration-style tests through the full page rather than
+  // an isolated unit test of the button component.
+  describe('stock alert notify me', () => {
+    const RED = { id: 1, name: 'Red', hex_code: '#ff0000' };
+    const BLUE = { id: 2, name: 'Blue', hex_code: '#0000ff' };
+
+    const OUT_OF_STOCK_VARIANT_PRODUCT = {
+      ...MOCK_PRODUCT,
+      stock: 5, // legacy aggregate field still shows stock from OTHER variants
+      colors: [{ color: RED }, { color: BLUE }],
+      variants: [
+        { id: 501, color: RED, stock: 0, price: '49.99', is_active: true },
+        { id: 502, color: BLUE, stock: 5, price: '49.99', is_active: true },
+      ],
+    };
+
+    it('shows "Notify Me When Available" instead of "Add to Cart" when the selected variant is out of stock', async () => {
+      api.getProductDetails.mockReturnValue(resolveWith(OUT_OF_STOCK_VARIANT_PRODUCT));
+      renderProductDetails();
+
+      // The first color (Red) is auto-selected on load, and its variant has stock: 0
+      expect(await screen.findByRole('button', { name: /notify me when available/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^add to cart$/i })).not.toBeInTheDocument();
+    });
+
+    it('shows "Add to Cart" normally when the selected variant has stock', async () => {
+      api.getProductDetails.mockReturnValue(
+        resolveWith({
+          ...OUT_OF_STOCK_VARIANT_PRODUCT,
+          variants: [
+            { id: 501, color: RED, stock: 8, price: '49.99', is_active: true },
+            { id: 502, color: BLUE, stock: 5, price: '49.99', is_active: true },
+          ],
+        }),
+      );
+      renderProductDetails();
+
+      expect(await screen.findByRole('button', { name: /^add to cart$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /notify me/i })).not.toBeInTheDocument();
+    });
+
+    it('switching to a color whose variant is back in stock swaps the button back to Add to Cart', async () => {
+      const user = userEvent.setup();
+      api.getProductDetails.mockReturnValue(resolveWith(OUT_OF_STOCK_VARIANT_PRODUCT));
+      renderProductDetails();
+
+      expect(await screen.findByRole('button', { name: /notify me when available/i })).toBeInTheDocument();
+
+      const blueSwatch = screen.getByTitle('Blue');
+      await user.click(blueSwatch);
+
+      expect(await screen.findByRole('button', { name: /^add to cart$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /notify me/i })).not.toBeInTheDocument();
+    });
+
+    it('redirects to /login when clicked while logged out, without calling the subscribe API', async () => {
+      const user = userEvent.setup();
+      api.isAuthenticated.mockReturnValue(false);
+      api.getProductDetails.mockReturnValue(resolveWith(OUT_OF_STOCK_VARIANT_PRODUCT));
+
+      // jsdom doesn't implement real navigation; spy on the setter instead.
+      delete window.location;
+      window.location = { href: '' };
+
+      renderProductDetails();
+      const notifyBtn = await screen.findByRole('button', { name: /notify me when available/i });
+      await user.click(notifyBtn);
+
+      expect(window.location.href).toBe('/login');
+      expect(api.subscribeStockAlert).not.toHaveBeenCalled();
+    });
+
+    it('shows a confirmed/disabled state after a successful subscribe', async () => {
+      const user = userEvent.setup();
+      api.isAuthenticated.mockReturnValue(true);
+      api.subscribeStockAlert.mockReturnValue(resolveWith({ id: 1 }));
+      api.getProductDetails.mockReturnValue(resolveWith(OUT_OF_STOCK_VARIANT_PRODUCT));
+
+      renderProductDetails();
+      const notifyBtn = await screen.findByRole('button', { name: /notify me when available/i });
+      await user.click(notifyBtn);
+
+      expect(api.subscribeStockAlert).toHaveBeenCalledWith(501);
+      expect(await screen.findByText(/we'll notify you!/i)).toBeInTheDocument();
+      // Confirmed state renders as a disabled button, not the active one anymore
+      expect(screen.queryByRole('button', { name: /notify me when available/i })).not.toBeInTheDocument();
+    });
+
+    it('shows a "back in stock" message instead of a generic error on a 400 race-condition response', async () => {
+      const user = userEvent.setup();
+      api.isAuthenticated.mockReturnValue(true);
+      api.subscribeStockAlert.mockImplementation(() => rejectWith(400, 'This item is currently in stock.'));
+      api.getProductDetails.mockReturnValue(resolveWith(OUT_OF_STOCK_VARIANT_PRODUCT));
+
+      renderProductDetails();
+      const notifyBtn = await screen.findByRole('button', { name: /notify me when available/i });
+      await user.click(notifyBtn);
+
+      expect(await screen.findByText(/back in stock/i)).toBeInTheDocument();
     });
   });
 });

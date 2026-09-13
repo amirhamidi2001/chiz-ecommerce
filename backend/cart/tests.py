@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from cart.models import Cart, CartItem
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
@@ -143,6 +144,33 @@ class CartModelTests(TestCase):
         Cart.objects.create(user=self.user)
         with self.assertRaises(Exception):
             Cart.objects.create(user=self.user)
+
+    # ── Nullable user / session_key (anonymous cart schema groundwork) ─────────
+
+    def test_cart_with_only_user_saves_successfully(self):
+        cart = Cart.objects.create(user=self.user)
+        self.assertIsNone(cart.session_key)
+        self.assertEqual(cart.user, self.user)
+
+    def test_cart_with_only_session_key_saves_successfully(self):
+        cart = Cart.objects.create(session_key="anon-session-abc123")
+        self.assertIsNone(cart.user)
+        self.assertEqual(cart.session_key, "anon-session-abc123")
+
+    def test_cart_with_both_user_and_session_key_fails(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Cart.objects.create(user=self.user, session_key="anon-session-abc123")
+
+    def test_cart_with_neither_user_nor_session_key_fails(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Cart.objects.create()
+
+    def test_cart_str_for_session_only_cart_does_not_crash(self):
+        """__str__ must handle a null user (previously assumed non-null)."""
+        cart = Cart.objects.create(session_key="anon-session-abc123")
+        self.assertIn("anon-session-abc123", str(cart))
 
     # ── CartItem ──────────────────────────────────────────────────────────────
 
