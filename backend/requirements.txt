@@ -73,6 +73,8 @@ pytz==2025.2
 PyYAML==6.0.3
 redis==6.4.0
 referencing==0.37.0
+requests==2.34.2
+responses==0.26.3
 rpds-py==0.30.0
 service-identity==24.2.0
 six==1.17.0

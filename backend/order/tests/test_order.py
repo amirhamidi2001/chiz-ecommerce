@@ -1056,11 +1056,11 @@ class OrderCreateSerializerTests(TestCase):
         cart = Cart.objects.get(user=self.user)
         self.assertEqual(cart.items.count(), 0)
 
-    def test_order_status_is_processing_after_creation(self):
+    def test_order_status_is_pending_after_creation(self):
         s = self._serialize()
         s.is_valid()
         order = s.save()
-        self.assertEqual(order.status, Order.Status.PROCESSING)
+        self.assertEqual(order.status, Order.Status.PENDING)
 
     def test_order_linked_to_correct_user(self):
         s = self._serialize()

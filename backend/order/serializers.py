@@ -383,7 +383,7 @@ class OrderCreateSerializer(serializers.Serializer):
                 discount=totals["discount"],
                 total=totals["total"],
                 notes=validated_data.get("notes", ""),
-                status=Order.Status.PROCESSING,
+                status=Order.Status.PENDING,
             )
 
             # ── Snapshot each cart item, decrement stock ────────────────────

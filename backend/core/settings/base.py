@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "shop.apps.ShopConfig",
     "cart.apps.CartConfig",
     "order.apps.OrderConfig",
+    "payments.apps.PaymentsConfig",
     "dashboard.apps.DashboardConfig",
     "chat.apps.ChatConfig",
     "blog.apps.BlogConfig",
@@ -327,6 +328,28 @@ OTP_MAX_VERIFICATION_ATTEMPTS = config(
 SMS_PROVIDER_CLASS = config(
     "SMS_PROVIDER_CLASS", default="accounts.sms.console.ConsoleSMSProvider"
 )
+
+
+# ─── Payment gateways (Feature 6.1.1) ───────────────────────────────────────────
+# Unlike SMS_PROVIDER_CLASS above (a single active provider), gateways are
+# looked up by name since Phase 6.3 supports multiple simultaneously-available
+# gateways with admin-configurable selection/fallback. Zibal/IDPay stay
+# commented out until their classes exist (Tasks 6.3.1.1 / 6.3.1.2) — pointing
+# PAYMENT_GATEWAY_CLASSES at a class that doesn't exist yet would only break
+# at first actual use of get_payment_gateway(), but there's no reason to leave
+# a dangling entry in the meantime.
+DEFAULT_PAYMENT_GATEWAY = config("DEFAULT_PAYMENT_GATEWAY", default="zarinpal")
+PAYMENT_GATEWAY_CLASSES = {
+    "zarinpal": "payments.gateways.zarinpal.ZarinPalGateway",
+    # "zibal": "payments.gateways.zibal.ZibalGateway",       # added in Task 6.3.1.1
+    # "idpay": "payments.gateways.idpay.IDPayGateway",       # added in Task 6.3.1.2
+}
+
+# ZarinPal credentials/mode (Task 6.2.1.1). ZARINPAL_SANDBOX defaults to True so
+# a fresh checkout (dev/CI, no .env override) never accidentally talks to the
+# live gateway with real money before a merchant ID has been configured.
+ZARINPAL_MERCHANT_ID = config("ZARINPAL_MERCHANT_ID", default="")
+ZARINPAL_SANDBOX = config("ZARINPAL_SANDBOX", default=True, cast=bool)
 
 
 # ─── Regulatory compliance (Iran cosmetics IRC registration) ───────────────────
