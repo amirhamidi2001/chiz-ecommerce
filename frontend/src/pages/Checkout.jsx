@@ -2,7 +2,10 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { createOrder, isAuthenticated } from '../services/api';
+import { createOrder, isAuthenticated, dashboardAPI } from '../services/api';
+import AddressPicker from '../components/AddressPicker';
+import { NEW_ADDRESS } from '../utils/address';
+import { IRAN_PROVINCES, isValidPostalCode } from '../constants/provinces';
 
 const TAX_RATE = 0.10;
 const SHIPPING_COST = 9.99;
@@ -64,12 +67,49 @@ const Checkout = () => {
     city: '',
     state: '',
     zip: '',
-    country: 'US',
+    country: 'IR',
     billingSame: true,
     saveAddress: false,
     terms: false,
     notes: '',
   });
+
+  // ── Saved address book (Task 5.2.1.3/5.2.1.5) ──────────────────────────────
+  // Checkout is authenticated-only (the effect above redirects anonymous
+  // visitors, and the backend's POST /api/orders/ is IsAuthenticated), so
+  // there's no guest branch here: every shopper who reaches this page can
+  // have saved addresses. Anonymous users get as far as a guest CART, but
+  // not to order placement.
+  const [addresses, setAddresses] = useState([]);
+  // Initialised from auth state rather than defaulting to true and
+  // immediately setting it false in the effect — that synchronous
+  // setState triggers a cascading re-render (and React's lint rule).
+  const [addressesLoading, setAddressesLoading] = useState(() => isAuthenticated());
+  // Which saved address is selected, or NEW_ADDRESS for the manual form.
+  const [selectedAddressId, setSelectedAddressId] = useState(NEW_ADDRESS);
+
+  useEffect(() => {
+    if (!isAuthenticated()) return;
+    dashboardAPI
+      .getAddresses()
+      .then(({ data }) => {
+        const list = data?.results ?? data ?? [];
+        setAddresses(list);
+        // Preselect the user's default address if they have one — the
+        // common case is shipping to the same place as last time.
+        const preferred = list.find((a) => a.is_default) ?? list[0];
+        if (preferred) setSelectedAddressId(preferred.id);
+      })
+      .catch(() => {
+        // A failure here is non-fatal: fall back to the manual form
+        // rather than blocking checkout entirely.
+        setAddresses([]);
+      })
+      .finally(() => setAddressesLoading(false));
+  }, []);
+
+  const usingSavedAddress =
+    selectedAddressId !== NEW_ADDRESS && selectedAddressId != null;
 
   const [paymentMethod, setPaymentMethod] = useState('credit_card');
   const [card, setCard] = useState({ number: '', expiry: '', cvv: '', name: '' });
@@ -114,16 +154,27 @@ const Checkout = () => {
   // ── Validation ──────────────────────────────────────────────────────────────
   const validate = () => {
     const e = {};
-    if (!form.firstName.trim()) e.firstName = 'Required';
-    if (!form.lastName.trim()) e.lastName = 'Required';
     if (!form.email.trim()) e.email = 'Required';
-    if (!form.phone.trim()) e.phone = 'Required';
-    if (!form.address.trim()) e.address = 'Required';
-    if (!form.city.trim()) e.city = 'Required';
-    if (!form.state.trim()) e.state = 'Required';
-    if (!form.zip.trim()) e.zip = 'Required';
-    if (!form.country) e.country = 'Required';
     if (!form.terms) e.terms = 'You must agree to the Terms and Conditions.';
+
+    // Address fields are only required when the shopper is typing a new
+    // address — with a saved address selected, the server resolves every
+    // one of these from the stored Address (and ignores anything typed
+    // here), so demanding them would block a perfectly valid checkout.
+    if (!usingSavedAddress) {
+      if (!form.firstName.trim()) e.firstName = 'Required';
+      if (!form.lastName.trim()) e.lastName = 'Required';
+      if (!form.phone.trim()) e.phone = 'Required';
+      if (!form.address.trim()) e.address = 'Required';
+      if (!form.city.trim()) e.city = 'Required';
+      if (!form.state) e.state = 'Required';
+      if (!form.zip.trim()) e.zip = 'Required';
+      else if (!isValidPostalCode(form.zip)) {
+        // Mirrors the backend's 10-digit Iranian postal code validator.
+        e.zip = 'Enter a valid 10-digit Iranian postal code.';
+      }
+      if (!form.country) e.country = 'Required';
+    }
 
     if (paymentMethod === 'credit_card') {
       if (card.number.length < 16) e.cardNumber = 'Enter a valid 16-digit card number.';
@@ -156,22 +207,35 @@ const Checkout = () => {
 
     setSubmitting(true);
     try {
+      // Two mutually exclusive shapes, matching the backend contract
+      // (Task 5.2.1.3): either address_id referencing a saved Address, or
+      // the full set of manual fields. The server treats address_id as
+      // authoritative when both are present, but sending only what's
+      // actually in use keeps the request honest about intent.
       const payload = {
-        first_name: form.firstName,
-        last_name: form.lastName,
         email: form.email,
-        phone: form.phone,
-        address: form.address,
-        apartment: form.apartment,
-        city: form.city,
-        state: form.state,
-        zip: form.zip,
-        country: form.country,
         billing_same: form.billingSame,
         payment_method: paymentMethod,
         card_last_four: paymentMethod === 'credit_card' ? card.number.slice(-4) : '',
         notes: form.notes,
       };
+
+      if (usingSavedAddress) {
+        payload.address_id = selectedAddressId;
+      } else {
+        Object.assign(payload, {
+          first_name: form.firstName,
+          last_name: form.lastName,
+          phone: form.phone,
+          address: form.address,
+          apartment: form.apartment,
+          city: form.city,
+          state: form.state,
+          zip: form.zip,
+          country: form.country,
+          save_address: form.saveAddress,
+        });
+      }
 
       const { data } = await createOrder(payload);
       navigate(`/order-confirmation/${data.id}`);
@@ -248,22 +312,28 @@ const Checkout = () => {
                 <div className="bg-white border border-gray-100 rounded-xl shadow-sm mb-6 overflow-hidden">
                   <StepHeader num="1" title="Customer Information" />
                   <div className="p-6 space-y-4">
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <Field label="First Name" required error={errors.firstName}>
-                        <input
-                          type="text" name="firstName" value={form.firstName}
-                          onChange={handleChange} className={inputCls(errors.firstName)}
-                          data-error={!!errors.firstName} required
-                        />
-                      </Field>
-                      <Field label="Last Name" required error={errors.lastName}>
-                        <input
-                          type="text" name="lastName" value={form.lastName}
-                          onChange={handleChange} className={inputCls(errors.lastName)}
-                          data-error={!!errors.lastName} required
-                        />
-                      </Field>
-                    </div>
+                    {/* Name and phone come from the saved Address when one
+                        is selected (the server resolves them from it), so
+                        they're only collected for a new address. Email is
+                        always needed — it isn't part of an Address. */}
+                    {!usingSavedAddress && (
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <Field label="First Name" required error={errors.firstName}>
+                          <input
+                            type="text" name="firstName" value={form.firstName}
+                            onChange={handleChange} className={inputCls(errors.firstName)}
+                            data-error={!!errors.firstName} required
+                          />
+                        </Field>
+                        <Field label="Last Name" required error={errors.lastName}>
+                          <input
+                            type="text" name="lastName" value={form.lastName}
+                            onChange={handleChange} className={inputCls(errors.lastName)}
+                            data-error={!!errors.lastName} required
+                          />
+                        </Field>
+                      </div>
+                    )}
                     <Field label="Email Address" required error={errors.email}>
                       <input
                         type="email" name="email" value={form.email}
@@ -271,79 +341,112 @@ const Checkout = () => {
                         data-error={!!errors.email} required
                       />
                     </Field>
-                    <Field label="Phone Number" required error={errors.phone}>
-                      <input
-                        type="tel" name="phone" value={form.phone}
-                        onChange={handleChange} className={inputCls(errors.phone)}
-                        data-error={!!errors.phone} required
-                      />
-                    </Field>
+                    {!usingSavedAddress && (
+                      <Field label="Phone Number" required error={errors.phone}>
+                        <input
+                          type="tel" name="phone" value={form.phone}
+                          onChange={handleChange} className={inputCls(errors.phone)}
+                          data-error={!!errors.phone} required
+                        />
+                      </Field>
+                    )}
                   </div>
                 </div>
 
                 {/* 2 — Shipping Address */}
                 <div className="bg-white border border-gray-100 rounded-xl shadow-sm mb-6 overflow-hidden">
                   <StepHeader num="2" title="Shipping Address" />
-                  <div className="p-6 space-y-4">
-                    <Field label="Street Address" required error={errors.address}>
-                      <input
-                        type="text" name="address" value={form.address}
-                        onChange={handleChange} className={inputCls(errors.address)}
-                        data-error={!!errors.address} required
-                      />
-                    </Field>
-                    <Field label="Apartment, Suite, etc." error={errors.apartment}>
-                      <input
-                        type="text" name="apartment" value={form.apartment}
-                        onChange={handleChange} className={inputCls(false)}
-                      />
-                    </Field>
-                    <div className="grid md:grid-cols-3 gap-4">
-                      <Field label="City" required error={errors.city}>
+
+                  {/* Saved-address picker. Renders nothing at all when the
+                      shopper has no saved addresses, leaving just the
+                      manual form below. */}
+                  <AddressPicker
+                    addresses={addresses}
+                    selectedId={selectedAddressId}
+                    onSelect={setSelectedAddressId}
+                    loading={addressesLoading}
+                  />
+
+                  {usingSavedAddress ? null : (
+                    <div className="p-6 space-y-4">
+                      <Field label="Street Address" required error={errors.address}>
                         <input
-                          type="text" name="city" value={form.city}
-                          onChange={handleChange} className={inputCls(errors.city)}
-                          data-error={!!errors.city} required
+                          type="text" name="address" value={form.address}
+                          onChange={handleChange} className={inputCls(errors.address)}
+                          data-error={!!errors.address} required
                         />
                       </Field>
-                      <Field label="State" required error={errors.state}>
+                      <Field label="Apartment, Suite, etc." error={errors.apartment}>
                         <input
-                          type="text" name="state" value={form.state}
-                          onChange={handleChange} className={inputCls(errors.state)}
-                          data-error={!!errors.state} required
+                          type="text" name="apartment" value={form.apartment}
+                          onChange={handleChange} className={inputCls(false)}
                         />
                       </Field>
-                      <Field label="ZIP Code" required error={errors.zip}>
-                        <input
-                          type="text" name="zip" value={form.zip}
-                          onChange={handleChange} className={inputCls(errors.zip)}
-                          data-error={!!errors.zip} required
-                        />
+                      <div className="grid md:grid-cols-3 gap-4">
+                        <Field label="City" required error={errors.city}>
+                          <input
+                            type="text" name="city" value={form.city}
+                            onChange={handleChange} className={inputCls(errors.city)}
+                            data-error={!!errors.city} required
+                          />
+                        </Field>
+                        {/* Province choices mirror the backend's IranProvince
+                            enum via the shared constant — see
+                            src/constants/provinces.js. */}
+                        <Field label="Province" required error={errors.state}>
+                          <select
+                            name="state" value={form.state}
+                            onChange={handleChange} className={inputCls(errors.state)}
+                            data-error={!!errors.state} required
+                          >
+                            <option value="">Select Province</option>
+                            {IRAN_PROVINCES.map((p) => (
+                              <option key={p.value} value={p.value}>{p.label}</option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Postal Code" required error={errors.zip}>
+                          <input
+                            type="text" name="zip" value={form.zip}
+                            onChange={handleChange} className={inputCls(errors.zip)}
+                            data-error={!!errors.zip} required
+                            inputMode="numeric" maxLength={10}
+                            placeholder="10 digits"
+                          />
+                        </Field>
+                      </div>
+                      <Field label="Country" required error={errors.country}>
+                        <select
+                          name="country" value={form.country}
+                          onChange={handleChange} className={inputCls(errors.country)} required
+                        >
+                          <option value="">Select Country</option>
+                          <option value="IR">Iran</option>
+                        </select>
                       </Field>
+                      <div className="space-y-2 pt-1">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox" name="saveAddress"
+                            checked={form.saveAddress} onChange={handleChange}
+                            className="rounded text-teal-600"
+                          />
+                          <span className="text-sm">Save this address for future orders</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox" name="billingSame"
+                            checked={form.billingSame} onChange={handleChange}
+                            className="rounded text-teal-600"
+                          />
+                          <span className="text-sm">Billing address same as shipping</span>
+                        </label>
+                      </div>
                     </div>
-                    <Field label="Country" required error={errors.country}>
-                      <select
-                        name="country" value={form.country}
-                        onChange={handleChange} className={inputCls(errors.country)} required
-                      >
-                        <option value="">Select Country</option>
-                        <option value="US">United States</option>
-                        <option value="CA">Canada</option>
-                        <option value="GB">United Kingdom</option>
-                        <option value="AU">Australia</option>
-                        <option value="DE">Germany</option>
-                        <option value="FR">France</option>
-                      </select>
-                    </Field>
-                    <div className="space-y-2 pt-1">
-                      <label className="flex items-center gap-2 cursor-pointer select-none">
-                        <input
-                          type="checkbox" name="saveAddress"
-                          checked={form.saveAddress} onChange={handleChange}
-                          className="rounded text-teal-600"
-                        />
-                        <span className="text-sm">Save this address for future orders</span>
-                      </label>
+                  )}
+
+                  {usingSavedAddress && (
+                    <div className="p-6 pt-0">
                       <label className="flex items-center gap-2 cursor-pointer select-none">
                         <input
                           type="checkbox" name="billingSame"
@@ -353,7 +456,7 @@ const Checkout = () => {
                         <span className="text-sm">Billing address same as shipping</span>
                       </label>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* 3 — Payment Method */}

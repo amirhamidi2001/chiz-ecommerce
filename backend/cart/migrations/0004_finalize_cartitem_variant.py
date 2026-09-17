@@ -17,8 +17,8 @@
 # populate/depopulate it via RunPython around the RemoveField, so that
 # reversing this migration all the way down actually restores working
 # `product_id` values instead of just failing or leaving nulls.
-from django.db import migrations, models
 import django.db.models.deletion
+from django.db import migrations, models
 
 
 def repopulate_product_from_variant(apps, schema_editor):

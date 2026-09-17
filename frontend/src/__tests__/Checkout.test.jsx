@@ -23,10 +23,15 @@ vi.mock('../context/CartContext', () => ({
 vi.mock('../services/api', () => ({
   createOrder: vi.fn(),
   isAuthenticated: vi.fn(),
+  // Checkout fetches the shopper's saved address book on mount (Task
+  // 5.2.1.5) to decide whether to show the saved-address picker.
+  dashboardAPI: {
+    getAddresses: vi.fn(),
+  },
 }));
 
 import { useCart } from '../context/CartContext';
-import { createOrder, isAuthenticated } from '../services/api';
+import { createOrder, isAuthenticated, dashboardAPI } from '../services/api';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -105,8 +110,10 @@ const fillValidForm = async (user) => {
   // ── Shipping Address ──────────────────────────────────────────────────────
   await user.type(byName('address'), '123 Main St');
   await user.type(byName('city'), 'Springfield');
-  await user.type(byName('state'), 'IL');
-  await user.type(byName('zip'), '62701');
+  // Province is a <select> of Iran's 31 provinces (Task 5.2.1.4), not a
+  // free-text field, and the postal code must be exactly 10 digits.
+  await user.selectOptions(byName('state'), 'tehran');
+  await user.type(byName('zip'), '1234567890');
 
   // ── Credit card ───────────────────────────────────────────────────────────
   // Card number uses a custom handler (no name attr); query by placeholder.
@@ -137,6 +144,9 @@ describe('Checkout', () => {
     vi.clearAllMocks();
     isAuthenticated.mockReturnValue(true);
     useCart.mockReturnValue(CART_READY_STATE);
+    // Default: no saved addresses, so the picker stays hidden and these
+    // pre-existing tests exercise the manual form exactly as before.
+    dashboardAPI.getAddresses.mockResolvedValue({ data: [] });
   });
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -324,10 +334,13 @@ describe('Checkout', () => {
       const user = userEvent.setup();
       renderCheckout();
 
-      // Country is a <select> (combobox role), also queryable by name attr
+      // Country is a <select> (combobox role), also queryable by name attr.
+      // This platform ships within Iran only, so "IR" is the sole option
+      // (and the default) — see the backend's "IR" default on
+      // Address.country.
       const countrySelect = byName('country');
-      await user.selectOptions(countrySelect, 'CA');
-      expect(countrySelect).toHaveValue('CA');
+      await user.selectOptions(countrySelect, 'IR');
+      expect(countrySelect).toHaveValue('IR');
     });
 
     it('switches payment method when a different option is clicked', async () => {
@@ -401,11 +414,16 @@ describe('Checkout', () => {
         phone: '555-0100',
         address: '123 Main St',
         city: 'Springfield',
-        state: 'IL',
-        zip: '62701',
+        state: 'tehran',
+        zip: '1234567890',
+        country: 'IR',
         payment_method: 'credit_card',
         card_last_four: '3456',
+        // Manual-address checkouts carry save_address and NOT address_id
+        // (Task 5.2.1.5) — the two payload shapes are mutually exclusive.
+        save_address: false,
       });
+      expect(payload).not.toHaveProperty('address_id');
     });
 
     it('navigates to /order-confirmation/:id on success', async () => {

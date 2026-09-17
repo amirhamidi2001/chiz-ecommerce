@@ -1,3 +1,4 @@
+from cart.services import merge_session_cart_into_user_cart
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
@@ -8,6 +9,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -104,6 +106,7 @@ class RegisterView(APIView):
         user = serializer.save()
 
         _send_welcome_email(user)
+        merge_session_cart_into_user_cart(request, user)
 
         refresh = RefreshToken.for_user(user)
         return Response(
@@ -135,6 +138,25 @@ class LoginView(TokenObtainPairView):
     # accounts/tests/test_views.py), so setting this here works exactly
     # like it does on a plain APIView.
     throttle_classes = [AuthSensitiveRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        # Mirrors rest_framework_simplejwt.views.TokenViewBase.post()
+        # exactly (including its TokenError → InvalidToken handling) —
+        # TokenObtainPairView doesn't expose the authenticated user in
+        # the same way a plain APIView would (there's no request.user
+        # set by the time post() runs; auth happens INSIDE the
+        # serializer's validate()), so the user has to come from
+        # serializer.user after is_valid() succeeds, which SimpleJWT's
+        # TokenObtainSerializer sets internally.
+        serializer = self.get_serializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0]) from e
+
+        merge_session_cart_into_user_cart(request, serializer.user)
+
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
 # ─── Current user  ←  NEW  ───────────────────────────────────────────────────
@@ -371,6 +393,8 @@ class OTPVerifyView(APIView):
         elif not user.is_verified:
             user.is_verified = True
             user.save(update_fields=["is_verified"])
+
+        merge_session_cart_into_user_cart(request, user)
 
         refresh = RefreshToken.for_user(user)
         return Response(

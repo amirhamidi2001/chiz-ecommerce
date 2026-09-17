@@ -22,17 +22,17 @@ a brand-new Product is ITSELF an invalidating event (Product post_save
 fires unconditionally).
 """
 
+from unittest.mock import patch
+
 import pytest
 from django.urls import reverse
 from django_redis import get_redis_connection
-from unittest.mock import patch
-
+from shop.models import StockMovement
 from shop.tests.factories import (
     ProductFactory,
     ProductVariantFactory,
     StockMovementFactory,
 )
-from shop.models import StockMovement
 
 
 def url(name, **kwargs):

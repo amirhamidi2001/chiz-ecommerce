@@ -41,6 +41,7 @@ export const AuthProvider = ({ children }) => {
     setTokens({ access: data.access, refresh: data.refresh });
     const { data: profile } = await authAPI.getUser();
     setUser(profile);
+    window.dispatchEvent(new Event("auth-change"));
     return profile;
   }, []);
 
@@ -59,6 +60,7 @@ export const AuthProvider = ({ children }) => {
     setTokens({ access: data.access, refresh: data.refresh });
     const { data: profile } = await authAPI.getUser();
     setUser(profile);
+    window.dispatchEvent(new Event("auth-change"));
     return { profile, isNewUser: data.is_new_user };
   }, []);
 
@@ -70,6 +72,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const { data } = await authAPI.getUser();
       setUser(data);
+      window.dispatchEvent(new Event("auth-change"));
       return data;
     } catch {
       return null;
@@ -86,6 +89,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       clearTokens();
       setUser(null);
+      window.dispatchEvent(new Event("auth-change"));
     }
   }, []);
 

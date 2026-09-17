@@ -15,7 +15,6 @@ import datetime
 
 import pytest
 from django.utils import timezone
-
 from shop.tasks import deactivate_expired_variants, notify_stock_alert_subscribers
 from shop.tests.factories import ProductVariantFactory, UserFactory
 

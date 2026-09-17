@@ -39,9 +39,9 @@ def _addr_payload(**override):
         "phone": "5550001111",
         "address_line": "1 Test Lane",
         "city": "Testville",
-        "state": "CA",
-        "zip_code": "90001",
-        "country": "US",
+        "province": "tehran",
+        "postal_code": "9000112345",
+        "country": "IR",
         "is_default": False,
         **override,
     }

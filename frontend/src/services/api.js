@@ -1,9 +1,20 @@
 import axios from 'axios';
 
 // ─── Base instance ─────────────────────────────────────────────────────────
+// withCredentials is required for the anonymous/session-based cart
+// (Task 5.1.1.2): the frontend (Vite dev server, a different origin/port
+// than Django) needs the browser to actually send and store the Django
+// session cookie on cross-origin requests. Without this, the cookie is
+// silently dropped and every anonymous visitor gets a fresh session (and
+// therefore a fresh empty cart) on every request. Backend-side CORS is
+// already correctly configured for this (CORS_ALLOW_CREDENTIALS = True
+// plus specific, non-wildcard CORS_ALLOWED_ORIGINS in both
+// core/settings/development.py and production.py — verified, not
+// assumed) — this was the one missing half.
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api',
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
 
 // ─── Token helpers ─────────────────────────────────────────────────────────
@@ -250,8 +261,24 @@ export const unsubscribeStockAlert = (variantId) =>
 export const getCart = () =>
   api.get('/cart/');
 
-export const addToCart = (productId, quantity = 1) =>
-  api.post('/cart/', { product_id: productId, quantity });
+/**
+ * POST /cart/
+ * Body: { variant_id, quantity }
+ *
+ * NOTE: previously sent { product_id, quantity } here, which the real
+ * backend endpoint (Task 5.1.1.1) has never accepted — it requires
+ * variant_id and 400s otherwise. This was a pre-existing bug
+ * independent of anonymous-cart auth gating (every existing call site
+ * across the frontend — ProductDetails, Category, SearchResults,
+ * WishlistTab — still passes a product id, not a variant id, since
+ * none of them are variant-aware yet; that's Epic 3's larger,
+ * still-in-progress frontend migration). Fixed the contract here so
+ * this function is at least correct going forward, but callers must
+ * pass a real ProductVariant id for this to actually succeed against
+ * the live backend.
+ */
+export const addToCart = (variantId, quantity = 1) =>
+  api.post('/cart/', { variant_id: variantId, quantity });
 
 export const updateCartItem = (itemId, quantity) =>
   api.patch(`/cart/item/${itemId}/`, { quantity });

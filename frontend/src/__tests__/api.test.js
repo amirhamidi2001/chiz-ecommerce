@@ -89,10 +89,36 @@ const _responseInterceptorCalls = mockAxiosInstance.interceptors.response.use.mo
 const getRequestFulfilled = () => _requestInterceptorCalls[0]?.[0];
 const getResponseRejected = () => _responseInterceptorCalls[0]?.[1];
 
+// api.js's own axios.create({...}) call (the one that configures baseURL/
+// withCredentials) also happens at module load time, before any test's
+// beforeEach/vi.clearAllMocks() runs — same reasoning as above, so it must
+// be snapshotted here too, not read lazily inside a test body.
+const _axiosCreateCalls = axios.create.mock.calls.slice();
+const getApiInstanceConfig = () =>
+  _axiosCreateCalls.find((call) => call[0]?.baseURL !== undefined)?.[0];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const resolvedWith = (data) => Promise.resolve({ data });
 const rejectedWith = (status, data = {}) =>
   Promise.reject({ response: { status, data }, config: {} });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 0. BASE AXIOS INSTANCE CONFIG
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Base axios instance configuration', () => {
+  it('creates the instance with withCredentials: true', () => {
+    // Required for the anonymous/session-based cart (Task 5.1.1.2): the
+    // Django session cookie must actually be sent/stored on cross-origin
+    // requests (frontend dev server vs backend on different ports),
+    // which needs withCredentials on the axios instance PLUS matching
+    // CORS_ALLOW_CREDENTIALS + non-wildcard CORS_ALLOWED_ORIGINS on the
+    // Django side (already correctly configured — verified directly in
+    // backend/core/settings/base.py and development.py).
+    const config = getApiInstanceConfig();
+    expect(config).toBeDefined();
+    expect(config.withCredentials).toBe(true);
+  });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. TOKEN HELPERS
@@ -595,11 +621,11 @@ describe('cartAPI', () => {
     expect(mockAxiosInstance.get).toHaveBeenCalledWith('/cart/');
   });
 
-  it('addToCart() — POSTs with productId and default quantity 1', async () => {
+  it('addToCart() — POSTs with variantId and default quantity 1', async () => {
     mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith({}));
     await cartAPI.addToCart(42);
     expect(mockAxiosInstance.post).toHaveBeenCalledWith('/cart/', {
-      product_id: 42,
+      variant_id: 42,
       quantity: 1,
     });
   });
@@ -608,7 +634,7 @@ describe('cartAPI', () => {
     mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith({}));
     await addToCart(7, 3);
     expect(mockAxiosInstance.post).toHaveBeenCalledWith('/cart/', {
-      product_id: 7,
+      variant_id: 7,
       quantity: 3,
     });
   });

@@ -1,20 +1,39 @@
 import { useEffect, useState } from "react";
 import { dashboardAPI } from "../services/api";
+import {
+  IRAN_PROVINCES,
+  provinceLabel,
+  isValidPostalCode,
+} from "../constants/provinces";
 
-const COUNTRIES = [
-  { code: "US", name: "United States" },
-  { code: "GB", name: "United Kingdom" },
-  { code: "CA", name: "Canada" },
-  { code: "AU", name: "Australia" },
-  { code: "DE", name: "Germany" },
-  { code: "FR", name: "France" },
-];
+// This platform ships within Iran only (see the backend's "IR" default on
+// Address.country). The field is left as a select rather than a hidden
+// constant so the UI doesn't have to change if international shipping is
+// ever added — matching the backend, which deliberately kept country a
+// plain CharField rather than locking it to a single choice.
+const COUNTRIES = [{ code: "IR", name: "Iran" }];
 
 const EMPTY_FORM = {
   label: "home", first_name: "", last_name: "", phone: "",
-  address_line: "", apartment: "", city: "", state: "",
-  zip_code: "", country: "US", is_default: false,
+  address_line: "", apartment: "", city: "", province: "",
+  postal_code: "", country: "IR", is_default: false,
 };
+
+// NOTE: defined at module scope, NOT inside AddressModal. When it lived in
+// the component body it was a brand-new component type on every render, so
+// React unmounted/remounted each input on every keystroke and the field lost
+// focus after a single character.
+const Field = ({ name, label, type = "text", half, form, errors, onChange }) => (
+  <div className={half ? "col-span-1" : "col-span-2"}>
+    <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+    <input
+      type={type} name={name} value={form[name]} onChange={onChange}
+      className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500 ${errors[name] ? "border-red-400 bg-red-50" : "border-gray-200"
+        }`}
+    />
+    {errors[name] && <p className="text-red-500 text-xs mt-0.5">{errors[name]}</p>}
+  </div>
+);
 
 const AddressModal = ({ address, onClose, onSave }) => {
   const [form, setForm] = useState(address || EMPTY_FORM);
@@ -29,9 +48,14 @@ const AddressModal = ({ address, onClose, onSave }) => {
 
   const validate = () => {
     const errs = {};
-    ["first_name", "last_name", "phone", "address_line", "city", "state", "zip_code"].forEach(
+    ["first_name", "last_name", "phone", "address_line", "city", "province", "postal_code"].forEach(
       (f) => { if (!form[f]?.trim()) errs[f] = "Required"; }
     );
+    // Mirror the backend's 10-digit Iranian postal code validator so the
+    // user gets the error inline instead of via a round-trip 400.
+    if (form.postal_code?.trim() && !isValidPostalCode(form.postal_code)) {
+      errs.postal_code = "Enter a valid 10-digit Iranian postal code.";
+    }
     return errs;
   };
 
@@ -51,17 +75,7 @@ const AddressModal = ({ address, onClose, onSave }) => {
     }
   };
 
-  const Field = ({ name, label, type = "text", half }) => (
-    <div className={half ? "col-span-1" : "col-span-2"}>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-      <input
-        type={type} name={name} value={form[name]} onChange={handleChange}
-        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500 ${errors[name] ? "border-red-400 bg-red-50" : "border-gray-200"
-          }`}
-      />
-      {errors[name] && <p className="text-red-500 text-xs mt-0.5">{errors[name]}</p>}
-    </div>
-  );
+  const fieldProps = { form, errors, onChange: handleChange };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" onClick={onClose}>
@@ -84,9 +98,9 @@ const AddressModal = ({ address, onClose, onSave }) => {
                 <option value="other">Other</option>
               </select>
             </div>
-            <Field name="first_name" label="First Name" half />
-            <Field name="last_name" label="Last Name" half />
-            <Field name="phone" label="Phone" half />
+            <Field name="first_name" label="First Name" half {...fieldProps} />
+            <Field name="last_name" label="Last Name" half {...fieldProps} />
+            <Field name="phone" label="Phone" half {...fieldProps} />
             <div className="col-span-1">
               <label className="block text-xs font-semibold text-gray-600 mb-1">Country</label>
               <select name="country" value={form.country} onChange={handleChange}
@@ -96,11 +110,28 @@ const AddressModal = ({ address, onClose, onSave }) => {
                 ))}
               </select>
             </div>
-            <Field name="address_line" label="Address Line" />
-            <Field name="apartment" label="Apartment / Suite (optional)" />
-            <Field name="city" label="City" half />
-            <Field name="state" label="State / Province" half />
-            <Field name="zip_code" label="ZIP / Postal Code" half />
+            <Field name="address_line" label="Address Line" {...fieldProps} />
+            <Field name="apartment" label="Apartment / Suite (optional)" {...fieldProps} />
+            <Field name="city" label="City" half {...fieldProps} />
+
+            {/* Province — choices must match the backend's IranProvince enum */}
+            <div className="col-span-1">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Province</label>
+              <select
+                name="province" value={form.province} onChange={handleChange}
+                aria-label="Province"
+                className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500 ${errors.province ? "border-red-400 bg-red-50" : "border-gray-200"
+                  }`}
+              >
+                <option value="">Select a province…</option>
+                {IRAN_PROVINCES.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+              {errors.province && <p className="text-red-500 text-xs mt-0.5">{errors.province}</p>}
+            </div>
+
+            <Field name="postal_code" label="Postal Code (10 digits)" half {...fieldProps} />
 
             {/* Default */}
             <div className="col-span-2 flex items-center gap-2 mt-1">
@@ -244,7 +275,7 @@ const AddressesTab = () => {
               <div className="text-sm text-gray-600 leading-relaxed space-y-0.5">
                 <p className="font-medium">{addr.full_name}</p>
                 <p>{addr.address_line}{addr.apartment && `, ${addr.apartment}`}</p>
-                <p>{addr.city}, {addr.state} {addr.zip_code}</p>
+                <p>{addr.city}, {provinceLabel(addr.province)} {addr.postal_code}</p>
                 <p>{addr.country}</p>
                 <p className="mt-1 text-gray-500">
                   <i className="bi bi-telephone mr-1"></i>{addr.phone}

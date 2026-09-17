@@ -20,9 +20,9 @@ class TestAddressModel:
             phone="5550001111",
             address_line="1 Test Lane",
             city="Testville",
-            state="CA",
-            zip_code="90001",
-            country="US",
+            province="tehran",
+            postal_code="9000112345",
+            country="IR",
             is_default=is_default,
         )
 
@@ -77,6 +77,42 @@ class TestAddressModel:
         default = self._make_addr(customer, is_default=True)
         addrs = list(Address.objects.filter(user=customer))
         assert addrs[0].id == default.id
+
+    # ── Iran province / postal code validation (Task 5.2.1.4) ────────────────
+
+    def test_valid_province_and_postal_code_passes_full_clean(self, customer):
+        addr = self._make_addr(customer)
+        addr.full_clean()  # should not raise
+
+    def test_invalid_province_fails_full_clean(self, customer):
+        from django.core.exceptions import ValidationError
+
+        addr = self._make_addr(customer)
+        addr.province = "california"  # not a real IranProvince choice
+        with pytest.raises(ValidationError):
+            addr.full_clean()
+
+    @pytest.mark.parametrize(
+        "bad_postal_code",
+        [
+            "123456789",  # 9 digits — too short
+            "12345678901",  # 11 digits — too long
+            "123456789a",  # contains a letter
+            "abcdefghij",  # all letters
+        ],
+    )
+    def test_invalid_postal_code_fails_full_clean(self, customer, bad_postal_code):
+        from django.core.exceptions import ValidationError
+
+        addr = self._make_addr(customer)
+        addr.postal_code = bad_postal_code
+        with pytest.raises(ValidationError):
+            addr.full_clean()
+
+    def test_valid_10_digit_postal_code_passes_full_clean(self, customer):
+        addr = self._make_addr(customer)
+        addr.postal_code = "1234567890"
+        addr.full_clean()  # should not raise
 
 
 # ══════════════════════════════════════════════════════════════════════════════

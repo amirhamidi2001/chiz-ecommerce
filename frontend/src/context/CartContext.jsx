@@ -1,7 +1,6 @@
 // src/context/CartContext.jsx
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { getCart, addToCart, updateCartItem, removeCartItem, clearCart } from '../services/api';
-import { isAuthenticated } from '../services/api';
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 const CartContext = createContext(null);
@@ -17,10 +16,9 @@ export const CartProvider = ({ children }) => {
 
     // ── Fetch full cart from API ───────────────────────────────────────────────
     const fetchCart = useCallback(async () => {
-        if (!isAuthenticated()) {
-            setCart(null);
-            return;
-        }
+        // No auth gate: the backend returns a valid (possibly empty) cart
+        // for anonymous sessions too (Task 5.1.1.2), so this runs
+        // unconditionally for every visitor.
         setLoading(true);
         setError(null);
         try {
@@ -50,18 +48,17 @@ export const CartProvider = ({ children }) => {
     }, [fetchCart]);
 
     // ── Add item ──────────────────────────────────────────────────────────────
-    const handleAddToCart = async (productId, quantity = 1) => {
-        if (!isAuthenticated()) {
-            window.location.href = '/login';
-            return { success: false, message: 'Please log in to add items to your cart.' };
-        }
+    // Anonymous add-to-cart works now (Task 5.1.1.2) — no auth gate, no
+    // redirect to /login. Hits the same API call as an authenticated user;
+    // the backend resolves the correct cart (user- or session-based) itself.
+    const handleAddToCart = async (variantId, quantity = 1) => {
         try {
-            const { data } = await addToCart(productId, quantity);
+            const { data } = await addToCart(variantId, quantity);
             setCart(data);
             return { success: true, message: 'Item added to cart!' };
         } catch (err) {
             const msg =
-                err.response?.data?.product_id ||
+                err.response?.data?.variant_id ||
                 err.response?.data?.quantity ||
                 err.response?.data?.detail ||
                 'Failed to add item to cart.';

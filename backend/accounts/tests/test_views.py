@@ -1,6 +1,8 @@
+from unittest.mock import patch
+
 import pytest
-from accounts.tokens import password_reset_token
 from accounts.throttles import AuthSensitiveRateThrottle
+from accounts.tokens import password_reset_token
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
@@ -8,7 +10,6 @@ from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.test import APIClient
-from unittest.mock import patch
 
 User = get_user_model()
 
@@ -112,6 +113,43 @@ class TestRegisterView:
         assert "first_name" in res.data
 
 
+@pytest.mark.django_db
+class TestRegisterViewCartMerge:
+    """
+    Task 5.1.1.3: a visitor may build an anonymous session cart, then
+    register a brand-new account rather than logging into an existing
+    one — the merge must apply here too.
+    """
+
+    def test_session_cart_merges_into_newly_registered_users_cart(self, api_client):
+        from cart.models import Cart
+        from shop.tests.factories import ProductVariantFactory
+
+        variant = ProductVariantFactory(price=10, stock=5)
+
+        add_res = api_client.post(
+            "/api/cart/", {"variant_id": variant.id, "quantity": 2}
+        )
+        assert add_res.status_code == status.HTTP_201_CREATED
+
+        register_res = api_client.post(
+            REGISTER_URL,
+            {
+                "email": "newshopper@example.com",
+                "first_name": "New",
+                "last_name": "Shopper",
+                "password": "SecurePass123!",
+            },
+            format="json",
+        )
+        assert register_res.status_code == status.HTTP_201_CREATED
+
+        user = User.objects.get(email="newshopper@example.com")
+        user_cart = Cart.objects.get(user=user)
+        assert user_cart.items.count() == 1
+        assert user_cart.items.first().quantity == 2
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Login
 # ──────────────────────────────────────────────────────────────────────────
@@ -171,6 +209,105 @@ class TestLoginView:
     def test_missing_password_field_returns_400(self, api_client, user):
         res = api_client.post(LOGIN_URL, {"email": user.email}, format="json")
         assert res.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.django_db
+class TestLoginViewCartMerge:
+    """Task 5.1.1.3: session cart -> user's persistent cart, on login."""
+
+    def _login(self, api_client, user):
+        return api_client.post(
+            LOGIN_URL,
+            {"email": user.email, "password": "SecurePass123!"},
+            format="json",
+        )
+
+    def test_merges_session_cart_into_empty_user_cart_on_login(self, api_client, user):
+        from cart.models import Cart
+        from shop.tests.factories import ProductVariantFactory
+
+        variant_a = ProductVariantFactory(price=10, stock=5)
+        variant_b = ProductVariantFactory(price=20, stock=5)
+
+        assert (
+            api_client.post(
+                "/api/cart/", {"variant_id": variant_a.id, "quantity": 1}
+            ).status_code
+            == status.HTTP_201_CREATED
+        )
+        assert (
+            api_client.post(
+                "/api/cart/", {"variant_id": variant_b.id, "quantity": 3}
+            ).status_code
+            == status.HTTP_201_CREATED
+        )
+
+        session_key = api_client.session.session_key
+        assert Cart.objects.filter(session_key=session_key).exists()
+
+        login_res = self._login(api_client, user)
+        assert login_res.status_code == status.HTTP_200_OK
+
+        user_cart = Cart.objects.get(user=user)
+        assert user_cart.items.count() == 2
+        assert user_cart.items.get(variant=variant_a).quantity == 1
+        assert user_cart.items.get(variant=variant_b).quantity == 3
+        assert not Cart.objects.filter(session_key=session_key).exists()
+
+    def test_merges_and_sums_quantity_when_user_already_has_the_variant(
+        self, api_client, user
+    ):
+        from cart.models import Cart, CartItem
+        from shop.tests.factories import ProductVariantFactory
+
+        shared_variant = ProductVariantFactory(price=10, stock=20)
+        session_only_variant = ProductVariantFactory(price=15, stock=20)
+
+        existing_cart = Cart.objects.create(user=user)
+        CartItem.objects.create(cart=existing_cart, variant=shared_variant, quantity=2)
+
+        api_client.post("/api/cart/", {"variant_id": shared_variant.id, "quantity": 4})
+        api_client.post(
+            "/api/cart/", {"variant_id": session_only_variant.id, "quantity": 1}
+        )
+
+        login_res = self._login(api_client, user)
+        assert login_res.status_code == status.HTTP_200_OK
+
+        existing_cart.refresh_from_db()
+        assert existing_cart.items.count() == 2
+        assert existing_cart.items.get(variant=shared_variant).quantity == 6
+        assert existing_cart.items.get(variant=session_only_variant).quantity == 1
+
+    def test_login_with_no_session_cart_does_not_error_or_create_artifacts(
+        self, api_client, user
+    ):
+        from cart.models import Cart
+
+        res = self._login(api_client, user)
+        assert res.status_code == status.HTTP_200_OK
+        # No cart should be spuriously created just from logging in with
+        # nothing to merge.
+        assert not Cart.objects.filter(user=user).exists()
+
+    def test_logging_in_twice_in_a_row_does_not_error_on_second_login(
+        self, api_client, user
+    ):
+        from cart.models import Cart
+        from shop.tests.factories import ProductVariantFactory
+
+        variant = ProductVariantFactory(price=10, stock=5)
+        api_client.post("/api/cart/", {"variant_id": variant.id, "quantity": 1})
+
+        first_login = self._login(api_client, user)
+        assert first_login.status_code == status.HTTP_200_OK
+
+        second_login = self._login(api_client, user)
+        assert second_login.status_code == status.HTTP_200_OK
+
+        user_cart = Cart.objects.get(user=user)
+        assert user_cart.items.count() == 1
+        assert user_cart.items.get(variant=variant).quantity == 1
 
 
 # ──────────────────────────────────────────────────────────────────────────

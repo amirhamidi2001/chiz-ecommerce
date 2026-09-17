@@ -16,7 +16,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --upgrade pip \
+RUN pip config --user set global.index https://mirror-pypi.runflare.com/simple \
+    && pip config --user set global.index-url https://mirror-pypi.runflare.com/simple \
+    && pip config --user set global.trusted-host repo.hmirror.ir \
+    && pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY . .

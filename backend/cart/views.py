@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from shop.models import ProductVariant
@@ -8,24 +8,35 @@ from .models import Cart, CartItem
 from .serializers import CartItemSerializer, CartSerializer
 
 
-def get_or_create_cart(user):
-    """Return the user's cart, creating it if it doesn't exist yet."""
-    cart, _ = Cart.objects.get_or_create(user=user)
+def get_or_create_cart(request):
+    """
+    Resolve the cart for this request: the authenticated user's cart if
+    logged in, otherwise a session-based anonymous cart.
+    """
+    if request.user.is_authenticated:
+        cart, _ = Cart.objects.get_or_create(user=request.user)
+        return cart
+
+    if not request.session.session_key:
+        request.session.create()
+    session_key = request.session.session_key
+    cart, _ = Cart.objects.get_or_create(session_key=session_key)
     return cart
 
 
 class CartView(APIView):
     """
-    GET  /api/cart/        → return the authenticated user's cart
+    GET  /api/cart/        → return the requesting user's (or anonymous
+                              session's) cart
     POST /api/cart/        → add a variant to the cart (or increment qty)
     DELETE /api/cart/clear/ → empty the entire cart
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     # ── GET: retrieve full cart ───────────────────────────────────────────────
     def get(self, request):
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart(request)
         serializer = CartSerializer(cart, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -48,7 +59,7 @@ class CartView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart(request)
 
         try:
             variant = ProductVariant.objects.get(pk=variant_id)
@@ -82,14 +93,22 @@ class CartItemView(APIView):
     DELETE    /api/cart/item/<item_id>/  → remove a specific item from the cart
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def _get_item(self, request, item_id):
-        """Helper: fetch a CartItem that belongs to the requesting user."""
+        """
+        Helper: fetch a CartItem that belongs to the requesting cart.
+        Resolves the requesting cart first via get_or_create_cart(request)
+        rather than filtering CartItem by cart__user=request.user directly
+        — the latter only works for authenticated users and would either
+        match nothing or (worse) ambiguously match cart__user=None rows
+        across DIFFERENT anonymous sessions for an AnonymousUser. Scoping
+        to one resolved cart's own pk is correct for both auth states and
+        is a single clear lookup rather than a cross-table filter.
+        """
+        cart = get_or_create_cart(request)
         try:
-            return CartItem.objects.select_related("cart__user").get(
-                pk=item_id, cart__user=request.user
-            )
+            return CartItem.objects.select_related("cart").get(pk=item_id, cart=cart)
         except CartItem.DoesNotExist:
             return None
 
@@ -153,13 +172,13 @@ class CartItemView(APIView):
 
 class CartClearView(APIView):
     """
-    DELETE /api/cart/clear/ → delete all items from the user's cart
+    DELETE /api/cart/clear/ → delete all items from the requesting cart
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def delete(self, request):
-        cart = get_or_create_cart(request.user)
+        cart = get_or_create_cart(request)
         cart.items.all().delete()
         cart_serializer = CartSerializer(cart, context={"request": request})
         return Response(cart_serializer.data, status=status.HTTP_200_OK)

@@ -24,10 +24,9 @@ whatever TIME_ZONE is actually configured — a regression guard that
 holds regardless of what that value is.
 """
 
+from core.celery import app as celery_app
 from django.conf import settings
 from django.test import TestCase
-
-from core.celery import app as celery_app
 
 
 class CeleryBootstrapTests(TestCase):

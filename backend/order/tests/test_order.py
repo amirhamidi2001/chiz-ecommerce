@@ -1,7 +1,8 @@
-from decimal import Decimal
 from datetime import timedelta
+from decimal import Decimal
 
 from cart.models import Cart, CartItem
+from dashboard.models import Address
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
@@ -315,6 +316,29 @@ class OrderCreateSerializerTests(TestCase):
         s = OrderCreateSerializer(data=payload, context={"request": self.request})
         return s
 
+    def _create_bypassing_stock_precheck(self, cart, data=None):
+        """
+        Build validated_data via to_internal_value() (real per-field
+        coercion, same as is_valid() uses internally) WITHOUT invoking
+        the object-level validate() method — i.e. without this task's
+        stock pre-check. Used by tests that specifically exercise
+        create()'s OWN atomic, select_for_update()-locked stock check
+        (Epic 1/3), which — for a genuinely out-of-stock variant in a
+        single, non-concurrent request — this task's earlier pre-check
+        would now otherwise catch first, since both layers legitimately
+        cover the same non-concurrent scenario by design (the pre-check
+        is fast UX feedback; create()'s check is the actual race-safe
+        guarantee for genuine concurrent races, which is what these
+        tests are proxies for).
+        """
+        from order.serializers import OrderCreateSerializer
+
+        payload = {**VALID_PAYLOAD, **(data or {})}
+        s = OrderCreateSerializer(data=payload, context={"request": self.request})
+        validated_data = s.to_internal_value(payload)
+        validated_data["cart"] = cart
+        return s, validated_data
+
     # ── Field validation ──────────────────────────────────────────────────────
 
     def test_valid_payload_passes(self):
@@ -379,6 +403,442 @@ class OrderCreateSerializerTests(TestCase):
         s = self._serialize()
         self.assertFalse(s.is_valid())
         self.assertIn("cart", s.errors)
+
+    # ── Stock/availability pre-check (this task) ────────────────────────────────
+
+    def test_out_of_stock_variant_fails_with_400_identifying_the_item(self):
+        self.variant.stock = 1  # cart wants 2
+        self.variant.save(update_fields=["stock"])
+
+        s = self._serialize()
+        self.assertFalse(s.is_valid())
+        self.assertIn("cart", s.errors)
+        errors = [str(e) for e in s.errors["cart"]]
+        self.assertTrue(
+            any(self.product.name in e and self.variant.sku in e for e in errors),
+            errors,
+        )
+
+    def test_deactivated_variant_fails_with_clear_message(self):
+        self.variant.is_active = False
+        self.variant.save(update_fields=["is_active"])
+
+        s = self._serialize()
+        self.assertFalse(s.is_valid())
+        self.assertIn("cart", s.errors)
+        errors = [str(e) for e in s.errors["cart"]]
+        self.assertTrue(
+            any(self.product.name in e and self.variant.sku in e for e in errors),
+            errors,
+        )
+
+    def test_multiple_problem_items_all_surfaced_in_one_response(self):
+        out_of_stock_variant = make_variant(
+            name="OOS Item", slug="oos-item", price="50.00", stock=0
+        )
+        inactive_variant = make_variant(
+            name="Inactive Item",
+            slug="inactive-item",
+            price="30.00",
+            stock=10,
+            is_active=False,
+        )
+        cart = Cart.objects.get(user=self.user)
+        CartItem.objects.create(cart=cart, variant=out_of_stock_variant, quantity=1)
+        CartItem.objects.create(cart=cart, variant=inactive_variant, quantity=1)
+        # self.variant (from setUp) still has sufficient stock and is
+        # active, so it should NOT appear in the errors.
+
+        s = self._serialize()
+        self.assertFalse(s.is_valid())
+        errors = [str(e) for e in s.errors["cart"]]
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(any(out_of_stock_variant.sku in e for e in errors))
+        self.assertTrue(any(inactive_variant.sku in e for e in errors))
+        self.assertFalse(any(self.variant.sku in e for e in errors))
+
+    def test_no_problems_passes_validate_and_proceeds_to_create(self):
+        """Regression check: the happy path must still work exactly as before."""
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+        self.assertIsNotNone(order.pk)
+
+    def test_stock_precheck_does_not_use_select_for_update(self):
+        """
+        This check is explicitly non-locking — only create()'s existing
+        logic should ever take row locks. Confirmed by inspecting the
+        actual SQL Django issues for the pre-check's queryset.
+        """
+        self.variant.stock = 0
+        self.variant.save(update_fields=["stock"])
+
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as ctx:
+            s = self._serialize()
+            s.is_valid()
+
+        cart_queries = [
+            q["sql"]
+            for q in ctx.captured_queries
+            if "cart_cartitem" in q["sql"].lower()
+        ]
+        self.assertTrue(
+            cart_queries, "Expected at least one query against cart_cartitem"
+        )
+        self.assertFalse(
+            any("FOR UPDATE" in q.upper() for q in cart_queries),
+            "Stock pre-check must not use select_for_update()",
+        )
+
+    # ── Iran province / postal code validation at checkout (Task 5.2.1.4) ────
+
+    def test_checkout_with_invalid_province_is_rejected(self):
+        """
+        The manual (non-saved-address) checkout path must apply the same
+        validation rigor as the now-constrained Address model — a
+        customer typing a free-text address at checkout shouldn't be
+        able to submit a province that no saved address could hold.
+        """
+        s = self._serialize({"state": "california"})
+        self.assertFalse(s.is_valid())
+        self.assertIn("state", s.errors)
+
+    def test_checkout_with_valid_iran_province_is_accepted(self):
+        s = self._serialize({"state": "isfahan"})
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+        self.assertEqual(order.shipping_state, "isfahan")
+
+    def test_checkout_rejects_postal_code_that_is_too_short(self):
+        s = self._serialize({"zip": "123456789"})  # 9 digits
+        self.assertFalse(s.is_valid())
+        self.assertIn("zip", s.errors)
+
+    def test_checkout_rejects_postal_code_that_is_too_long(self):
+        s = self._serialize({"zip": "12345678901"})  # 11 digits
+        self.assertFalse(s.is_valid())
+        self.assertIn("zip", s.errors)
+
+    def test_checkout_rejects_postal_code_containing_letters(self):
+        s = self._serialize({"zip": "12345678ab"})
+        self.assertFalse(s.is_valid())
+        self.assertIn("zip", s.errors)
+
+    def test_checkout_accepts_valid_10_digit_postal_code(self):
+        s = self._serialize({"zip": "9876543210"})
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+        self.assertEqual(order.shipping_zip, "9876543210")
+
+    def test_save_address_from_checkout_produces_a_model_valid_address(self):
+        """
+        End-to-end consistency: an Address created via checkout's
+        save_address path must itself pass the Address model's own
+        full_clean() — i.e. the checkout-layer validation genuinely
+        matches the model-layer constraints rather than merely
+        resembling them.
+        """
+        s = self._serialize({"save_address": True})
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        saved = Address.objects.filter(user=self.user).latest("id")
+        saved.full_clean()  # must not raise
+
+    # ── Checkout via saved address (address_id / save_address) ──────────────
+
+    def test_checkout_with_valid_address_id_uses_saved_address_fields(self):
+        address = Address.objects.create(
+            user=self.user,
+            first_name="Saved",
+            last_name="Recipient",
+            phone="555-9999",
+            address_line="99 Saved Ave",
+            apartment="Unit 5",
+            city="Saved City",
+            province="tehran",
+            postal_code="0000000000",
+            country="US",
+        )
+        # _serialize() merges its argument ON TOP OF VALID_PAYLOAD, so this
+        # payload actually still contains VALID_PAYLOAD's manual address
+        # fields underneath address_id — this deliberately tests the
+        # "address_id overrides manual fields when both are present"
+        # precedence rule. See the next test for the "manual fields
+        # omitted entirely" case.
+        payload = {"address_id": address.id}
+        s = self._serialize(payload)
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        self.assertEqual(order.first_name, "Saved")
+        self.assertEqual(order.last_name, "Recipient")
+        self.assertEqual(order.phone, "555-9999")
+        self.assertEqual(order.shipping_address, "99 Saved Ave")
+        self.assertEqual(order.shipping_apartment, "Unit 5")
+        self.assertEqual(order.shipping_city, "Saved City")
+        self.assertEqual(order.shipping_state, "tehran")
+        self.assertEqual(order.shipping_zip, "0000000000")
+        self.assertEqual(order.shipping_country, "US")
+
+    def test_checkout_with_address_id_and_manual_fields_entirely_omitted(self):
+        """
+        Unlike the previous test (which goes through _serialize()'s
+        merge-with-VALID_PAYLOAD), this constructs the payload directly
+        to prove manual address fields can be OMITTED ENTIRELY when
+        checking out via address_id — the actual real-world shape of an
+        address_id-based checkout request.
+        """
+        from order.serializers import OrderCreateSerializer
+
+        address = Address.objects.create(
+            user=self.user,
+            first_name="Saved",
+            last_name="Recipient",
+            phone="555-9999",
+            address_line="99 Saved Ave",
+            city="Saved City",
+            province="tehran",
+            postal_code="0000000000",
+            country="US",
+        )
+        payload = {
+            "email": VALID_PAYLOAD["email"],
+            "billing_same": True,
+            "payment_method": VALID_PAYLOAD["payment_method"],
+            "card_last_four": VALID_PAYLOAD["card_last_four"],
+            "address_id": address.id,
+        }
+        s = OrderCreateSerializer(data=payload, context={"request": self.request})
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        self.assertEqual(order.first_name, "Saved")
+        self.assertEqual(order.shipping_address, "99 Saved Ave")
+        self.assertEqual(order.shipping_city, "Saved City")
+
+    def test_checkout_with_another_users_address_id_is_rejected(self):
+        """The most important test in this task: the ownership check."""
+        other_user = make_user(email="someone-else@example.com")
+        other_users_address = Address.objects.create(
+            user=other_user,
+            first_name="Not",
+            last_name="Yours",
+            phone="555-0000",
+            address_line="1 Private Lane",
+            city="Nowhere",
+            province="fars",
+            postal_code="1111111111",
+            country="US",
+        )
+
+        s = self._serialize({"address_id": other_users_address.id})
+        self.assertFalse(s.is_valid())
+        self.assertIn("address_id", s.errors)
+
+        # Confirm nothing about the other user's address leaked into an
+        # order at all.
+        self.assertFalse(
+            Order.objects.filter(shipping_address="1 Private Lane").exists()
+        )
+
+    def test_checkout_with_no_address_id_and_full_manual_fields_still_works(self):
+        """Regression check: the pre-existing manual-fields path is untouched."""
+        s = self._serialize()  # VALID_PAYLOAD has no address_id
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        self.assertEqual(order.first_name, VALID_PAYLOAD["first_name"])
+        self.assertEqual(order.shipping_address, VALID_PAYLOAD["address"])
+        self.assertEqual(order.shipping_city, VALID_PAYLOAD["city"])
+
+    def test_checkout_with_neither_address_id_nor_complete_manual_fields_fails(self):
+        from order.serializers import OrderCreateSerializer
+
+        # Built directly (not via self._serialize(), which MERGES its
+        # argument ON TOP OF VALID_PAYLOAD — so passing a dict with a key
+        # removed wouldn't actually unset it; a real client request
+        # simply omitting "city" is a genuinely different payload shape).
+        payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "city"}
+        s = OrderCreateSerializer(data=payload, context={"request": self.request})
+        self.assertFalse(s.is_valid())
+        self.assertIn("city", s.errors)
+
+    def test_checkout_with_manual_fields_and_save_address_creates_new_address(self):
+        addresses_before = Address.objects.filter(user=self.user).count()
+
+        payload = {**VALID_PAYLOAD, "save_address": True}
+        s = self._serialize(payload)
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        self.assertEqual(
+            Address.objects.filter(user=self.user).count(), addresses_before + 1
+        )
+        saved = Address.objects.filter(user=self.user).latest("id")
+        self.assertEqual(saved.first_name, VALID_PAYLOAD["first_name"])
+        self.assertEqual(saved.last_name, VALID_PAYLOAD["last_name"])
+        self.assertEqual(saved.phone, VALID_PAYLOAD["phone"])
+        self.assertEqual(saved.address_line, VALID_PAYLOAD["address"])
+        self.assertEqual(saved.apartment, VALID_PAYLOAD["apartment"])
+        self.assertEqual(saved.city, VALID_PAYLOAD["city"])
+        self.assertEqual(saved.province, VALID_PAYLOAD["state"])
+        self.assertEqual(saved.postal_code, VALID_PAYLOAD["zip"])
+        self.assertEqual(saved.country, VALID_PAYLOAD["country"])
+
+    def test_checkout_with_address_id_and_save_address_does_not_duplicate(self):
+        """
+        save_address is only meaningful for the manual-fields path — an
+        address_id-based checkout references an address that's already
+        saved by definition, so save_address=True there should not
+        create a second, duplicate Address row.
+        """
+        address = Address.objects.create(
+            user=self.user,
+            first_name="Saved",
+            last_name="Recipient",
+            phone="555-9999",
+            address_line="99 Saved Ave",
+            city="Saved City",
+            province="tehran",
+            postal_code="0000000000",
+            country="US",
+        )
+        addresses_before = Address.objects.filter(user=self.user).count()
+
+        payload = {
+            "email": VALID_PAYLOAD["email"],
+            "payment_method": VALID_PAYLOAD["payment_method"],
+            "card_last_four": VALID_PAYLOAD["card_last_four"],
+            "address_id": address.id,
+            "save_address": True,
+        }
+        s = self._serialize(payload)
+        self.assertTrue(s.is_valid(), s.errors)
+        s.save()
+
+        self.assertEqual(
+            Address.objects.filter(user=self.user).count(), addresses_before
+        )
+
+    # ── Price integrity (this task) ──────────────────────────────────────────
+
+    def test_serializer_has_no_client_writable_price_fields(self):
+        """
+        Structural guard, mirroring Epic 1 Task 1.2.1.2's discount
+        regression test but at the schema level: OrderCreateSerializer
+        must never declare a price/subtotal/unit_price field a client
+        could populate. All monetary values are derived server-side from
+        the cart, never trusted from the request body.
+        """
+        from order.serializers import OrderCreateSerializer
+
+        fields = OrderCreateSerializer().fields
+        self.assertNotIn("price", fields)
+        self.assertNotIn("subtotal", fields)
+        self.assertNotIn("unit_price", fields)
+        self.assertNotIn("total", fields)
+
+    def test_price_change_between_cart_add_and_checkout_uses_current_price(self):
+        """
+        The variant's price is updated via the ORM AFTER the item is
+        already in the cart (simulating an admin price change landing
+        mid-flight) — the resulting Order's subtotal/total AND the
+        OrderItem's unit_price must reflect the NEW price, proving
+        there's no stale/cached pricing anywhere in the flow (cart
+        subtotal, order subtotal, and the per-item snapshot are all
+        derived from the same single, freshly-read value — see this
+        task's create() restructuring).
+        """
+        self.variant.price = Decimal("150.00")
+        self.variant.save(update_fields=["price"])
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        # setUp's cart has quantity=2 of self.variant.
+        expected_subtotal = Decimal("150.00") * 2
+        self.assertEqual(order.subtotal, expected_subtotal)
+
+        order_item = order.items.get(variant=self.variant)
+        self.assertEqual(order_item.unit_price, Decimal("150.00"))
+
+        expected_tax = (expected_subtotal * TAX_RATE).quantize(Decimal("0.01"))
+        self.assertEqual(order.tax, expected_tax)
+
+    def test_order_subtotal_and_orderitem_unit_prices_are_internally_consistent(self):
+        """
+        Order.subtotal must equal sum(OrderItem.unit_price × quantity)
+        for every item — the exact property this task's restructuring
+        (deriving both from one captured per-item price, read after the
+        row lock is acquired) exists to guarantee.
+        """
+        second_variant = make_variant(
+            name="Second Item", slug="second-item", price="75.00", stock=10
+        )
+        cart = Cart.objects.get(user=self.user)
+        CartItem.objects.create(cart=cart, variant=second_variant, quantity=3)
+
+        s = self._serialize()
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        computed_subtotal = sum(
+            item.unit_price * item.quantity for item in order.items.all()
+        )
+        self.assertEqual(order.subtotal, computed_subtotal)
+
+    def test_price_change_in_the_narrow_window_between_lock_acquisition_uses_locked_value(
+        self,
+    ):
+        """
+        Deterministically simulates the specific TOCTOU gap this task's
+        restructuring closes: a price change landing in the narrow
+        window AFTER cart_items is fetched (unlocked) but BEFORE
+        locked_variants is fetched (select_for_update()) — the exact
+        scenario a real concurrent request could produce, reproduced
+        here without needing actual threads (unlike
+        test_stock_concurrency.py's approach for stock, since triggering
+        it via genuine concurrency for a single ORM call is harder to
+        pin down deterministically for this narrower gap).
+
+        Before this task, OrderItem.unit_price came from
+        cart_item.unit_price (the UNLOCKED, earlier-queried object) —
+        so this exact scenario would have produced an OrderItem
+        reflecting the STALE pre-race price, inconsistent with
+        Order.subtotal if that had instead been computed fresh. After
+        this task, both are derived solely from locked_variant.price,
+        so the LOCKED, later value must win.
+        """
+        from unittest.mock import patch
+
+        from shop.models import ProductVariant
+
+        original_select_for_update = ProductVariant.objects.select_for_update
+
+        def side_effect(*args, **kwargs):
+            # Fires exactly once cart_items has already been fetched
+            # (with the OLD price still attached to that queryset's
+            # objects) but before the locked variants query runs.
+            ProductVariant.objects.filter(pk=self.variant.pk).update(
+                price=Decimal("999.00")
+            )
+            return original_select_for_update(*args, **kwargs)
+
+        with patch.object(
+            ProductVariant.objects, "select_for_update", side_effect=side_effect
+        ):
+            s = self._serialize()
+            self.assertTrue(s.is_valid(), s.errors)
+            order = s.save()
+
+        order_item = order.items.get(variant=self.variant)
+        self.assertEqual(order_item.unit_price, Decimal("999.00"))
+        self.assertEqual(order.subtotal, Decimal("999.00") * 2)  # setUp's quantity=2
 
     # ── Financial calculations ────────────────────────────────────────────────
 
@@ -768,17 +1228,18 @@ class OrderCreateSerializerTests(TestCase):
             name="Scarce Item", slug="scarce-item", price="40.00", stock=1
         )
         Cart.objects.filter(user=self.user).delete()
-        make_cart_with_items(self.user, [{"variant": low_stock_variant, "quantity": 3}])
+        cart = make_cart_with_items(
+            self.user, [{"variant": low_stock_variant, "quantity": 3}]
+        )
 
         orders_before = Order.objects.count()
         items_before = OrderItem.objects.count()
         stock_before = low_stock_variant.stock
 
-        s = self._serialize()
-        self.assertTrue(s.is_valid(), s.errors)
+        s, validated_data = self._create_bypassing_stock_precheck(cart)
 
         with self.assertRaises(serializers.ValidationError) as ctx:
-            s.save()
+            s.create(validated_data)
         self.assertIn("stock", ctx.exception.detail)
 
         self.assertEqual(Order.objects.count(), orders_before)
@@ -798,13 +1259,14 @@ class OrderCreateSerializerTests(TestCase):
             product=self.product, sku="FOUND-320", color=color, stock=1
         )
         Cart.objects.filter(user=self.user).delete()
-        make_cart_with_items(self.user, [{"variant": low_stock_variant, "quantity": 3}])
+        cart = make_cart_with_items(
+            self.user, [{"variant": low_stock_variant, "quantity": 3}]
+        )
 
-        s = self._serialize()
-        self.assertTrue(s.is_valid(), s.errors)
+        s, validated_data = self._create_bypassing_stock_precheck(cart)
 
         with self.assertRaises(serializers.ValidationError) as ctx:
-            s.save()
+            s.create(validated_data)
         message = str(ctx.exception.detail["stock"])
         self.assertIn(self.product.name, message)
         self.assertIn("Shade 320 - Warm Beige", message)
@@ -815,13 +1277,14 @@ class OrderCreateSerializerTests(TestCase):
             product=self.product, sku="COLORLESS-SKU", color=None, stock=1
         )
         Cart.objects.filter(user=self.user).delete()
-        make_cart_with_items(self.user, [{"variant": colorless_variant, "quantity": 3}])
+        cart = make_cart_with_items(
+            self.user, [{"variant": colorless_variant, "quantity": 3}]
+        )
 
-        s = self._serialize()
-        self.assertTrue(s.is_valid(), s.errors)
+        s, validated_data = self._create_bypassing_stock_precheck(cart)
 
         with self.assertRaises(serializers.ValidationError) as ctx:
-            s.save()
+            s.create(validated_data)
         message = str(ctx.exception.detail["stock"])
         self.assertIn("COLORLESS-SKU", message)
 
@@ -838,7 +1301,7 @@ class OrderCreateSerializerTests(TestCase):
             name="Scarce Two", slug="scarce-two", price="20.00", stock=1
         )
         Cart.objects.filter(user=self.user).delete()
-        make_cart_with_items(
+        cart = make_cart_with_items(
             self.user,
             [
                 {"variant": healthy_variant, "quantity": 2},
@@ -850,11 +1313,10 @@ class OrderCreateSerializerTests(TestCase):
         healthy_stock_before = healthy_variant.stock
         scarce_stock_before = scarce_variant.stock
 
-        s = self._serialize()
-        self.assertTrue(s.is_valid(), s.errors)
+        s, validated_data = self._create_bypassing_stock_precheck(cart)
 
         with self.assertRaises(serializers.ValidationError):
-            s.save()
+            s.create(validated_data)
 
         self.assertEqual(Order.objects.count(), orders_before)
 
@@ -947,15 +1409,16 @@ class OrderCreateSerializerTests(TestCase):
             name="Scarce Item", slug="scarce-item", price="40.00", stock=1
         )
         Cart.objects.filter(user=self.user).delete()
-        make_cart_with_items(self.user, [{"variant": low_stock_variant, "quantity": 3}])
+        cart = make_cart_with_items(
+            self.user, [{"variant": low_stock_variant, "quantity": 3}]
+        )
 
         movements_before = StockMovement.objects.count()
 
-        s = self._serialize()
-        self.assertTrue(s.is_valid(), s.errors)
+        s, validated_data = self._create_bypassing_stock_precheck(cart)
 
         with self.assertRaises(serializers.ValidationError):
-            s.save()
+            s.create(validated_data)
 
         self.assertEqual(StockMovement.objects.count(), movements_before)
         self.assertFalse(
@@ -1294,7 +1757,14 @@ class OrderListCreateAPITests(APITestCase):
         res = self._post_order()
 
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("stock", res.data)
+        # This exact scenario (insufficient stock, no real concurrency) is
+        # now caught by validate()'s non-locking pre-check (this task)
+        # rather than reaching create()'s atomic path — surfaced under
+        # "cart" per that check's error shape, not "stock" (create()'s
+        # own key, still exercised directly in
+        # OrderCreateSerializerTests via _create_bypassing_stock_precheck
+        # for the genuine-concurrent-race scenario that check exists for).
+        self.assertIn("cart", res.data)
         self.assertEqual(Order.objects.count(), orders_before)
 
         low_stock_variant.refresh_from_db()

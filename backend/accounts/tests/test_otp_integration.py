@@ -309,3 +309,65 @@ class TestOTPFullFlowIntegration:
 
         # Still exactly one user — replay didn't create a second account.
         assert User.objects.filter(phone_number=phone).count() == 1
+
+
+@pytest.mark.django_db
+class TestOTPVerifyCartMerge:
+    """
+    Task 5.1.1.3: session cart -> user's persistent cart, via the OTP
+    login path — a more straightforward call site than LoginView since
+    OTPVerifyView is a plain APIView already directly resolving `user`.
+    """
+
+    def test_merges_session_cart_into_existing_users_cart_on_otp_login(self):
+        from cart.models import Cart
+        from shop.tests.factories import ProductVariantFactory
+
+        phone = "09121110099"
+        existing_user = User.objects.create_user(
+            email=None, phone_number=phone, is_verified=True
+        )
+        variant = ProductVariantFactory(price=10, stock=5)
+
+        client = APIClient()
+        add_res = client.post("/api/cart/", {"variant_id": variant.id, "quantity": 2})
+        assert add_res.status_code == status.HTTP_201_CREATED
+
+        client.post(OTP_REQUEST_URL, {"phone_number": phone}, format="json")
+        OTPCode.objects.filter(phone_number=phone).delete()
+        code = generate_otp(phone, "login")
+
+        verify_res = client.post(
+            OTP_VERIFY_URL, {"phone_number": phone, "code": code}, format="json"
+        )
+        assert verify_res.status_code == status.HTTP_200_OK
+        assert verify_res.data["is_new_user"] is False
+
+        user_cart = Cart.objects.get(user=existing_user)
+        assert user_cart.items.count() == 1
+        assert user_cart.items.first().quantity == 2
+
+    def test_merges_session_cart_into_brand_new_users_cart_on_otp_signup(self):
+        """The is_new_user=True branch gets the same merge treatment."""
+        from cart.models import Cart
+        from shop.tests.factories import ProductVariantFactory
+
+        phone = "09121110088"
+        variant = ProductVariantFactory(price=10, stock=5)
+
+        client = APIClient()
+        client.post("/api/cart/", {"variant_id": variant.id, "quantity": 1})
+
+        client.post(OTP_REQUEST_URL, {"phone_number": phone}, format="json")
+        OTPCode.objects.filter(phone_number=phone).delete()
+        code = generate_otp(phone, "login")
+
+        verify_res = client.post(
+            OTP_VERIFY_URL, {"phone_number": phone, "code": code}, format="json"
+        )
+        assert verify_res.status_code == status.HTTP_201_CREATED
+        assert verify_res.data["is_new_user"] is True
+
+        new_user = User.objects.get(phone_number=phone)
+        user_cart = Cart.objects.get(user=new_user)
+        assert user_cart.items.count() == 1

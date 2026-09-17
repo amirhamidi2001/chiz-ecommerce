@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from dashboard.models import Address, IranProvince, iran_postal_code_validator
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
@@ -93,18 +94,32 @@ class OrderCreateSerializer(serializers.Serializer):
     """
 
     # Customer info
-    first_name = serializers.CharField(max_length=100)
-    last_name = serializers.CharField(max_length=100)
+    first_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
     email = serializers.EmailField()
-    phone = serializers.CharField(max_length=30)
+    phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
 
-    # Shipping address
-    address = serializers.CharField(max_length=255)
+    # Shipping address — either supply address_id (a saved Address) OR
+    # all of these manually; enforced in validate(), see there for why
+    # these can't simply stay required=True at the field level.
+    address_id = serializers.IntegerField(required=False, allow_null=True)
+    address = serializers.CharField(max_length=255, required=False, allow_blank=True)
     apartment = serializers.CharField(max_length=100, allow_blank=True, default="")
-    city = serializers.CharField(max_length=100)
-    state = serializers.CharField(max_length=100)
-    zip = serializers.CharField(max_length=20)
-    country = serializers.CharField(max_length=10)
+    city = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    state = serializers.ChoiceField(
+        choices=IranProvince.choices, required=False, allow_blank=True
+    )
+    zip = serializers.CharField(
+        max_length=10,
+        required=False,
+        allow_blank=True,
+        validators=[iran_postal_code_validator],
+    )
+    country = serializers.CharField(max_length=10, required=False, allow_blank=True)
+
+    # If checking out with manually-typed fields (not address_id), save
+    # them as a new Address for next time.
+    save_address = serializers.BooleanField(default=False)
 
     # Billing
     billing_same = serializers.BooleanField(default=True)
@@ -125,12 +140,99 @@ class OrderCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         user = self.context["request"].user
+
+        # ── Resolve shipping address: saved address_id OR manual fields ────────
+        address_id = attrs.get("address_id")
+        if address_id is not None:
+            # SECURITY: scoped to user=user — without this filter, any
+            # authenticated user could submit ANY OTHER user's numeric
+            # address_id and have their order shipped using (and their
+            # own account able to see) someone else's saved address.
+            try:
+                address = Address.objects.get(pk=address_id, user=user)
+            except Address.DoesNotExist:
+                raise serializers.ValidationError({"address_id": "Address not found."})
+
+            # A saved address_id takes precedence over any manually-typed
+            # fields also present in the same payload — the saved address
+            # is the more trustworthy source, and this avoids a confusing
+            # "which one actually applies" ambiguity.
+            attrs["first_name"] = address.first_name
+            attrs["last_name"] = address.last_name
+            attrs["phone"] = address.phone
+            attrs["address"] = address.address_line
+            attrs["apartment"] = address.apartment
+            attrs["city"] = address.city
+            attrs["state"] = address.province
+            attrs["zip"] = address.postal_code
+            attrs["country"] = address.country
+        else:
+            # No saved address referenced — every one of these fields is
+            # required=False at the field-declaration level (so that an
+            # address_id-based checkout doesn't have to also supply them),
+            # but at least one complete path must fully supply an address,
+            # so enforce that here instead.
+            required_manual_fields = (
+                "first_name",
+                "last_name",
+                "phone",
+                "address",
+                "city",
+                "state",
+                "zip",
+                "country",
+            )
+            missing = {
+                field: "This field is required when no address_id is provided."
+                for field in required_manual_fields
+                if not attrs.get(field)
+            }
+            if missing:
+                raise serializers.ValidationError(missing)
+
         try:
             cart = user.cart
         except Exception:
             raise serializers.ValidationError({"cart": "No cart found for this user."})
         if not cart.items.exists():
             raise serializers.ValidationError({"cart": "Your cart is empty."})
+
+        # Non-locking, best-effort availability pre-check. This is a UX
+        # improvement layered on top of create()'s existing atomic,
+        # select_for_update()-locked stock decrement (Epic 1 Task 1.1.1.3
+        # / Epic 3 Task 3.1.1.5), which remains the actual race-safe
+        # guarantee — deliberately does NOT lock rows here, since this
+        # check's only job is a clearer, itemized error message, not a
+        # meaningfully earlier point in time (DRF calls validate() and
+        # create() back-to-back within the same request when a view does
+        # is_valid() then save(), so there's no real time gap between the
+        # two checks in practice).
+        problems = []
+        for item in cart.items.select_related("variant").all():
+            if (
+                item.variant is None
+                or not item.variant.is_active
+                or item.variant.stock < item.quantity
+            ):
+                problems.append(item)
+
+        if problems:
+            raise serializers.ValidationError(
+                {
+                    "cart": [
+                        (
+                            (
+                                f"{item.variant.product.name} ({item.variant.sku}) is no "
+                                "longer available in the requested quantity."
+                            )
+                            if item.variant is not None
+                            else "One of the items in your cart is no longer available."
+                        )
+                        for item in problems
+                    ]
+                }
+            )
+
         attrs["cart"] = cart
         return attrs
 
@@ -138,53 +240,14 @@ class OrderCreateSerializer(serializers.Serializer):
         request = self.context["request"]
         cart = validated_data["cart"]
 
-        # SECURITY: discount is intentionally NOT read from client input.
-        # There is no coupon/promo system yet (tracked separately as
-        # Epic 9), so discount is hardcoded to zero here rather than
-        # trusted from the checkout payload — previously a client could
-        # submit an arbitrary `discount` value directly in the POST body
-        # and have it applied at checkout with no server-side validation.
-        # TODO: Epic 9 — replace with server-validated coupon discount
-        try:
-            totals = calculate_order_totals(
-                subtotal=Decimal(str(cart.subtotal)), discount=Decimal("0")
-            )
-        except (PricingError, ValueError) as e:
-            raise serializers.ValidationError({"discount": str(e)})
-
         with transaction.atomic():
-            order = Order.objects.create(
-                user=request.user,
-                first_name=validated_data["first_name"],
-                last_name=validated_data["last_name"],
-                email=validated_data["email"],
-                phone=validated_data["phone"],
-                shipping_address=validated_data["address"],
-                shipping_apartment=validated_data.get("apartment", ""),
-                shipping_city=validated_data["city"],
-                shipping_state=validated_data["state"],
-                shipping_zip=validated_data["zip"],
-                shipping_country=validated_data["country"],
-                billing_same_as_shipping=validated_data.get("billing_same", True),
-                payment_method=validated_data["payment_method"],
-                card_last_four=validated_data.get("card_last_four", ""),
-                subtotal=totals["subtotal"],
-                shipping_cost=totals["shipping_cost"],
-                tax=totals["tax"],
-                discount=totals["discount"],
-                total=totals["total"],
-                notes=validated_data.get("notes", ""),
-                status=Order.Status.PROCESSING,
-            )
-
-            # ── Lock the referenced ProductVariant rows ─────────────────────
+            # ── Lock the referenced ProductVariant rows FIRST ───────────────
             # Row-level lock so concurrent checkouts against the same
-            # variant(s) serialize instead of racing on stock.
-            # ProductVariant.stock is the real, authoritative per-shade/
-            # size inventory count (Tasks 3.1.1.1–3.1.1.4); locking is
-            # scoped to the variant, not the product, so two customers
-            # ordering the LAST unit of two DIFFERENT variants of the
-            # SAME product don't spuriously contend with each other.
+            # variant(s) serialize instead of racing on stock — AND, as of
+            # this task, on price too. Locking is scoped to the variant,
+            # not the product, so two customers ordering the LAST unit of
+            # two DIFFERENT variants of the SAME product don't spuriously
+            # contend with each other.
             cart_items = list(
                 cart.items.select_related("variant__product", "variant__color")
                 .prefetch_related("variant__product__images")
@@ -199,10 +262,28 @@ class OrderCreateSerializer(serializers.Serializer):
                 .filter(id__in=variant_ids)
             }
 
-            # ── Snapshot each cart item ────────────────────────────────────
+            # ── Validate + capture each item's price ONCE, from the LOCKED
+            # variant ──────────────────────────────────────────────────────
+            # Previously, cart.subtotal (used for Order.subtotal/total) and
+            # cart_item.unit_price (used for each OrderItem.unit_price)
+            # were two SEPARATE, independent reads of variant.price — the
+            # former computed before this atomic block even started, the
+            # latter from cart_item.variant (the UNLOCKED object fetched
+            # just above), and NEITHER used locked_variant.price at all,
+            # despite locked_variant being the one row-locked, guaranteed-
+            # fresh-as-of-lock-acquisition source available. A price
+            # change landing between any of those independent reads could
+            # have made Order.subtotal internally inconsistent with
+            # sum(OrderItem.unit_price × quantity) for the SAME order —
+            # a real, if narrow, TOCTOU-style gap. Capturing
+            # locked_variant.price ONCE per item here, then deriving BOTH
+            # the subtotal AND every OrderItem snapshot from this single
+            # captured list, closes it: every price used anywhere in this
+            # order is the same value, read after the lock was acquired.
+            priced_items = []
+            subtotal = Decimal("0")
             for cart_item in cart_items:
                 locked_variant = locked_variants[cart_item.variant_id]
-                product = locked_variant.product
 
                 # Defense in depth: re-validate expiration at checkout,
                 # mirroring the existing "re-validate stock at checkout,
@@ -244,9 +325,9 @@ class OrderCreateSerializer(serializers.Serializer):
                         }
                     )
 
-                # Validate stock, then decrement it. Raising here inside the
-                # atomic block rolls back the Order (and any earlier
-                # OrderItem/stock writes from this same loop) as a unit.
+                # Validate stock. Raising here inside the atomic block
+                # rolls back the Order (and any earlier OrderItem/stock
+                # writes from this same loop) as a unit.
                 if locked_variant.stock < cart_item.quantity:
                     variant_detail = (
                         locked_variant.color.name
@@ -262,6 +343,53 @@ class OrderCreateSerializer(serializers.Serializer):
                             )
                         }
                     )
+
+                unit_price = locked_variant.price
+                priced_items.append((cart_item, locked_variant, unit_price))
+                subtotal += unit_price * cart_item.quantity
+
+            # SECURITY: discount is intentionally NOT read from client input.
+            # There is no coupon/promo system yet (tracked separately as
+            # Epic 9), so discount is hardcoded to zero here rather than
+            # trusted from the checkout payload — previously a client could
+            # submit an arbitrary `discount` value directly in the POST body
+            # and have it applied at checkout with no server-side validation.
+            # TODO: Epic 9 — replace with server-validated coupon discount
+            try:
+                totals = calculate_order_totals(
+                    subtotal=subtotal, discount=Decimal("0")
+                )
+            except (PricingError, ValueError) as e:
+                raise serializers.ValidationError({"discount": str(e)})
+
+            order = Order.objects.create(
+                user=request.user,
+                first_name=validated_data["first_name"],
+                last_name=validated_data["last_name"],
+                email=validated_data["email"],
+                phone=validated_data["phone"],
+                shipping_address=validated_data["address"],
+                shipping_apartment=validated_data.get("apartment", ""),
+                shipping_city=validated_data["city"],
+                shipping_state=validated_data["state"],
+                shipping_zip=validated_data["zip"],
+                shipping_country=validated_data["country"],
+                billing_same_as_shipping=validated_data.get("billing_same", True),
+                payment_method=validated_data["payment_method"],
+                card_last_four=validated_data.get("card_last_four", ""),
+                subtotal=totals["subtotal"],
+                shipping_cost=totals["shipping_cost"],
+                tax=totals["tax"],
+                discount=totals["discount"],
+                total=totals["total"],
+                notes=validated_data.get("notes", ""),
+                status=Order.Status.PROCESSING,
+            )
+
+            # ── Snapshot each cart item, decrement stock ────────────────────
+            for cart_item, locked_variant, unit_price in priced_items:
+                product = locked_variant.product
+
                 locked_variant.stock -= cart_item.quantity
                 locked_variant.save(update_fields=["stock"])
                 # Product.stock is now superseded by ProductVariant.stock and
@@ -308,12 +436,32 @@ class OrderCreateSerializer(serializers.Serializer):
                             locked_variant.color.name if locked_variant.color else None
                         )
                     },
-                    unit_price=cart_item.unit_price,
+                    unit_price=unit_price,
                     quantity=cart_item.quantity,
                 )
 
             # ── Clear the cart ───────────────────────────────────────────────
             cart.items.all().delete()
+
+            # ── Save this address for next time ──────────────────────────────
+            # Only when checkout used manually-typed fields (not an
+            # existing address_id — that address is already saved by
+            # definition) and the customer explicitly opted in.
+            if validated_data.get("save_address") and not validated_data.get(
+                "address_id"
+            ):
+                Address.objects.create(
+                    user=request.user,
+                    first_name=validated_data["first_name"],
+                    last_name=validated_data["last_name"],
+                    phone=validated_data["phone"],
+                    address_line=validated_data["address"],
+                    apartment=validated_data.get("apartment", ""),
+                    city=validated_data["city"],
+                    province=validated_data["state"],
+                    postal_code=validated_data["zip"],
+                    country=validated_data["country"],
+                )
 
         return order
 

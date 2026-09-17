@@ -27,8 +27,8 @@ core/tests/test_redis_cache.py), and are skipped if Redis isn't
 reachable.
 """
 
-import redis as redis_py
 import pytest
+import redis as redis_py
 from django.conf import settings
 from django.core.cache import caches
 from django.test import TestCase

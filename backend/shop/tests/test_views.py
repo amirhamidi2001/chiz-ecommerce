@@ -1,12 +1,12 @@
-import pytest
 import time
+from unittest.mock import patch
+
+import pytest
 from django.core.cache import cache
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework.throttling import AnonRateThrottle
-from unittest.mock import patch
-from shop.views import CATEGORY_TREE_CACHE_KEY
 from shop.models import Product
 from shop.tests.factories import (
     BrandFactory,
@@ -18,6 +18,7 @@ from shop.tests.factories import (
     ProductVariantFactory,
     ReviewFactory,
 )
+from shop.views import CATEGORY_TREE_CACHE_KEY
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────

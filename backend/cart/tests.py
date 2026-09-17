@@ -2,12 +2,17 @@ from datetime import timedelta
 from decimal import Decimal
 
 from cart.models import Cart, CartItem
+from cart.services import merge_session_cart_into_user_cart
+from cart.views import get_or_create_cart
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
+from django.contrib.sessions.middleware import SessionMiddleware
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 from shop.models import Category, Color, Product, ProductVariant
 
 User = get_user_model()
@@ -714,41 +719,250 @@ class CartClearAPITests(APITestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class CartAuthTests(APITestCase):
-    """Every cart endpoint must return 401 for unauthenticated callers."""
+class CartAnonymousAccessTests(APITestCase):
+    """
+    Cart endpoints are now AllowAny — anonymous visitors get their own
+    session-based cart instead of a 401. This class replaces the old
+    CartAuthTests, whose entire premise ("every cart endpoint must
+    return 401 for unauthenticated callers") is the exact behavior
+    Task 5.1.1.2 deliberately removes.
+    """
+
+    def setUp(self):
+        # This class's several genuinely-anonymous requests per test are
+        # exactly what the project-wide AnonRateThrottle (100/min,
+        # cache-backed) accumulates against across a full test-suite
+        # run — clear it before/after so these tests don't flake under
+        # CI's full-suite throttle accumulation, mirroring the same
+        # precedent in shop/tests/test_views.py's
+        # TestGeneralAnonThrottling.
+        from django.core.cache import cache
+
+        cache.clear()
+
+        self.user = make_user()
+        self.variant = make_variant(stock=5)
+        # A cart belonging to a DIFFERENT (authenticated) owner — used to
+        # prove an anonymous session can't reach into someone else's cart.
+        self.other_users_cart = Cart.objects.create(user=self.user)
+        self.other_users_item = CartItem.objects.create(
+            cart=self.other_users_cart, variant=self.variant, quantity=1
+        )
+
+    def tearDown(self):
+        from django.core.cache import cache
+
+        cache.clear()
+
+    def test_get_cart_unauthenticated_returns_200_with_empty_cart(self):
+        res = self.client.get("/api/cart/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["items"], [])
+        self.assertEqual(res.data["total_items"], 0)
+
+    def test_get_cart_unauthenticated_sets_a_session_cookie(self):
+        res = self.client.get("/api/cart/")
+        self.assertIn(settings.SESSION_COOKIE_NAME, res.cookies)
+        self.assertTrue(res.cookies[settings.SESSION_COOKIE_NAME].value)
+
+    def test_post_cart_unauthenticated_creates_item_in_own_session_cart(self):
+        res = self.client.post("/api/cart/", {"variant_id": self.variant.id})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data["total_items"], 1)
+
+    def test_anonymous_session_persists_across_requests_on_same_client(self):
+        """Same APIClient instance = same session cookie is reused."""
+        self.client.post("/api/cart/", {"variant_id": self.variant.id, "quantity": 2})
+
+        res = self.client.get("/api/cart/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["total_items"], 2)
+        self.assertEqual(len(res.data["items"]), 1)
+        self.assertEqual(res.data["items"][0]["variant"]["id"], self.variant.id)
+
+    def test_two_different_anonymous_clients_get_independent_carts(self):
+        client_a = APIClient()
+        client_b = APIClient()
+
+        add_res = client_a.post(
+            "/api/cart/", {"variant_id": self.variant.id, "quantity": 3}
+        )
+        self.assertEqual(add_res.status_code, status.HTTP_201_CREATED)
+
+        cart_a = client_a.get("/api/cart/")
+        cart_b = client_b.get("/api/cart/")
+
+        self.assertEqual(cart_a.data["total_items"], 3)
+        self.assertEqual(cart_b.data["total_items"], 0)
+        self.assertEqual(cart_b.data["items"], [])
+        # Different sessions must resolve to genuinely different Cart rows.
+        self.assertNotEqual(cart_a.data["id"], cart_b.data["id"])
+
+    def test_anonymous_client_cannot_reach_another_carts_item(self):
+        """
+        An anonymous session's resolved cart is its OWN — it must not be
+        able to touch an item belonging to a different (authenticated
+        user's) cart, even by guessing the item id.
+        """
+        res = self.client.put(
+            f"/api/cart/item/{self.other_users_item.id}/", {"quantity": 3}
+        )
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_anonymous_client_delete_item_not_in_own_cart_returns_404(self):
+        res = self.client.delete(f"/api/cart/item/{self.other_users_item.id}/")
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_clear_cart_unauthenticated_returns_200_on_own_empty_cart(self):
+        res = self.client.delete("/api/cart/clear/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["items"], [])
+
+    def test_anonymous_add_then_clear_empties_own_session_cart_only(self):
+        self.client.post("/api/cart/", {"variant_id": self.variant.id})
+        res = self.client.delete("/api/cart/clear/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["items"], [])
+
+        # The other user's cart/item must be untouched.
+        self.other_users_item.refresh_from_db()
+        self.assertEqual(self.other_users_item.quantity, 1)
+
+
+class GetOrCreateCartResolutionTests(APITestCase):
+    """Unit-level tests for get_or_create_cart()'s resolution logic itself."""
 
     def setUp(self):
         self.user = make_user()
-        self.variant = make_variant(stock=5)
-        self.cart = Cart.objects.create(user=self.user)
-        self.item = CartItem.objects.create(
-            cart=self.cart, variant=self.variant, quantity=1
+        self.factory = RequestFactory()
+        self.session_middleware = SessionMiddleware(lambda r: None)
+
+    def _build_request(self, user=None):
+        request = self.factory.get("/api/cart/")
+        self.session_middleware.process_request(request)
+        request.session.save()
+        request.user = user or AnonymousUser()
+        return request
+
+    def test_authenticated_request_resolves_to_users_cart(self):
+        request = self._build_request(user=self.user)
+        cart = get_or_create_cart(request)
+        self.assertEqual(cart.user, self.user)
+        self.assertIsNone(cart.session_key)
+
+    def test_authenticated_request_reuses_existing_cart_not_a_new_one(self):
+        existing = Cart.objects.create(user=self.user)
+        request = self._build_request(user=self.user)
+        cart = get_or_create_cart(request)
+        self.assertEqual(cart.id, existing.id)
+
+    def test_anonymous_request_creates_a_session_key_if_none_exists(self):
+        request = self.factory.get("/api/cart/")
+        self.session_middleware.process_request(request)
+        # Deliberately do NOT call request.session.save() here — this is
+        # the "brand-new anonymous visitor" case: Django doesn't
+        # populate session_key until the session has been explicitly
+        # created/saved. get_or_create_cart() itself must handle this.
+        request.user = AnonymousUser()
+        self.assertIsNone(request.session.session_key)
+
+        cart = get_or_create_cart(request)
+
+        self.assertIsNone(cart.user)
+        self.assertIsNotNone(cart.session_key)
+        self.assertEqual(cart.session_key, request.session.session_key)
+
+    def test_anonymous_request_reuses_existing_session_cart(self):
+        request = self._build_request()
+        session_key = request.session.session_key
+        existing = Cart.objects.create(session_key=session_key)
+
+        cart = get_or_create_cart(request)
+        self.assertEqual(cart.id, existing.id)
+
+
+class MergeSessionCartIntoUserCartTests(APITestCase):
+    """
+    Direct unit tests for cart/services.py's
+    merge_session_cart_into_user_cart(), independent of any particular
+    login/registration endpoint (those are covered as integration
+    tests in accounts/tests/test_views.py).
+    """
+
+    def setUp(self):
+        self.user = make_user()
+        self.variant_a = make_variant(stock=10, slug="merge-variant-a")
+        self.variant_b = make_variant(stock=10, slug="merge-variant-b")
+        self.factory = RequestFactory()
+        self.session_middleware = SessionMiddleware(lambda r: None)
+
+    def _build_request_with_session(self):
+        request = self.factory.get("/api/cart/")
+        self.session_middleware.process_request(request)
+        request.session.save()
+        return request
+
+    def test_merges_two_items_into_empty_user_cart(self):
+        request = self._build_request_with_session()
+        session_cart = Cart.objects.create(session_key=request.session.session_key)
+        CartItem.objects.create(cart=session_cart, variant=self.variant_a, quantity=2)
+        CartItem.objects.create(cart=session_cart, variant=self.variant_b, quantity=1)
+
+        merge_session_cart_into_user_cart(request, self.user)
+
+        user_cart = Cart.objects.get(user=self.user)
+        self.assertEqual(user_cart.items.count(), 2)
+        self.assertEqual(user_cart.items.get(variant=self.variant_a).quantity, 2)
+        self.assertEqual(user_cart.items.get(variant=self.variant_b).quantity, 1)
+        self.assertFalse(
+            Cart.objects.filter(session_key=request.session.session_key).exists()
         )
 
-    def test_get_cart_unauthenticated(self):
-        res = self.client.get("/api/cart/")
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+    def test_sums_quantity_for_overlapping_variant(self):
+        request = self._build_request_with_session()
+        session_cart = Cart.objects.create(session_key=request.session.session_key)
+        CartItem.objects.create(cart=session_cart, variant=self.variant_a, quantity=3)
 
-    def test_post_cart_unauthenticated(self):
-        res = self.client.post("/api/cart/", {"variant_id": self.variant.id})
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        user_cart = Cart.objects.create(user=self.user)
+        CartItem.objects.create(cart=user_cart, variant=self.variant_a, quantity=2)
 
-    def test_put_item_unauthenticated(self):
-        res = self.client.put(f"/api/cart/item/{self.item.id}/", {"quantity": 3})
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        merge_session_cart_into_user_cart(request, self.user)
 
-    def test_patch_item_unauthenticated(self):
-        res = self.client.patch(f"/api/cart/item/{self.item.id}/", {"quantity": 3})
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        user_cart.refresh_from_db()
+        self.assertEqual(user_cart.items.count(), 1)
+        self.assertEqual(user_cart.items.get(variant=self.variant_a).quantity, 5)
 
-    def test_delete_item_unauthenticated(self):
-        res = self.client.delete(f"/api/cart/item/{self.item.id}/")
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+    def test_no_session_cart_does_not_error_or_create_artifacts(self):
+        request = self._build_request_with_session()
+        merge_session_cart_into_user_cart(request, self.user)  # should not raise
+        self.assertFalse(Cart.objects.filter(user=self.user).exists())
 
-    def test_clear_cart_unauthenticated(self):
-        res = self.client.delete("/api/cart/clear/")
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+    def test_no_session_key_at_all_does_not_error(self):
+        request = self.factory.get("/api/cart/")
+        self.session_middleware.process_request(request)
+        # No .save() called — session_key is None.
+        merge_session_cart_into_user_cart(request, self.user)  # should not raise
+        self.assertFalse(Cart.objects.filter(user=self.user).exists())
 
-    def test_unauthenticated_cannot_read_cart_data(self):
-        res = self.client.get("/api/cart/")
-        self.assertNotIn("items", res.data if isinstance(res.data, dict) else {})
+    def test_calling_twice_in_a_row_does_not_error_on_second_call(self):
+        request = self._build_request_with_session()
+        session_cart = Cart.objects.create(session_key=request.session.session_key)
+        CartItem.objects.create(cart=session_cart, variant=self.variant_a, quantity=1)
+
+        merge_session_cart_into_user_cart(request, self.user)
+        merge_session_cart_into_user_cart(request, self.user)  # should not raise
+
+        user_cart = Cart.objects.get(user=self.user)
+        self.assertEqual(user_cart.items.count(), 1)
+        self.assertEqual(user_cart.items.get(variant=self.variant_a).quantity, 1)
+
+    def test_empty_session_cart_is_deleted_without_creating_user_cart(self):
+        request = self._build_request_with_session()
+        Cart.objects.create(session_key=request.session.session_key)  # no items
+
+        merge_session_cart_into_user_cart(request, self.user)
+
+        self.assertFalse(
+            Cart.objects.filter(session_key=request.session.session_key).exists()
+        )
+        self.assertFalse(Cart.objects.filter(user=self.user).exists())
