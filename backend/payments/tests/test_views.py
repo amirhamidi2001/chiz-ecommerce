@@ -2,12 +2,13 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from order.models import Order
+from order.models import Order, OrderItem
+from order.tests.factories import make_variant
+from payments.gateways.base import PaymentRequestResult, PaymentVerifyResult
+from payments.models import PaymentTransaction
 from rest_framework import status
 from rest_framework.test import APITestCase
-
-from payments.gateways.base import PaymentRequestResult
-from payments.models import PaymentTransaction
+from shop.models import StockMovement
 
 User = get_user_model()
 
@@ -40,17 +41,20 @@ def make_order(user, **kwargs):
     return Order.objects.create(user=user, **defaults)
 
 
-class PaymentInitiateViewTests(APITestCase):
-    """
-    Note: `payments.views.reverse` is patched in the two tests below that
-    actually reach the gateway call — the view builds a callback_url via
-    reverse("payments:callback", ...), and that URL name isn't registered
-    until Task 6.2.1.4. Patching it here isolates this task's behavior
-    (initiate → call gateway → create PaymentTransaction) from a URL that
-    doesn't exist yet, per this task's own note that the view isn't
-    expected to fully work end-to-end until 6.2.1.4 lands too.
-    """
+def make_order_item(order, variant, quantity=2):
+    return OrderItem.objects.create(
+        order=order,
+        product=variant.product,
+        variant=variant,
+        product_name=variant.product.name,
+        product_slug=variant.product.slug,
+        variant_sku=variant.sku,
+        unit_price=variant.price,
+        quantity=quantity,
+    )
 
+
+class PaymentInitiateViewTests(APITestCase):
     URL = "/api/payments/initiate/"
 
     def setUp(self):
@@ -59,10 +63,9 @@ class PaymentInitiateViewTests(APITestCase):
         self.order = make_order(self.user)
         self.client.force_authenticate(user=self.user)
 
-    @patch("payments.views.reverse", return_value="/api/payments/callback/zarinpal/")
     @patch("payments.views.get_payment_gateway")
     def test_successful_initiation_returns_redirect_url_and_creates_transaction(
-        self, mock_get_gateway, mock_reverse
+        self, mock_get_gateway
     ):
         mock_gateway = mock_get_gateway.return_value
         mock_gateway.request_payment.return_value = PaymentRequestResult(
@@ -125,10 +128,9 @@ class PaymentInitiateViewTests(APITestCase):
         mock_get_gateway.assert_not_called()
         self.assertEqual(PaymentTransaction.objects.count(), 0)
 
-    @patch("payments.views.reverse", return_value="/api/payments/callback/zarinpal/")
     @patch("payments.views.get_payment_gateway")
     def test_gateway_failure_returns_502_and_creates_no_transaction(
-        self, mock_get_gateway, mock_reverse
+        self, mock_get_gateway
     ):
         mock_gateway = mock_get_gateway.return_value
         mock_gateway.request_payment.return_value = PaymentRequestResult(
@@ -142,3 +144,159 @@ class PaymentInitiateViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
         self.assertIn("detail", response.data)
         self.assertEqual(PaymentTransaction.objects.count(), 0)
+
+
+class PaymentCallbackViewTests(APITestCase):
+    def url(self, gateway="zarinpal"):
+        return f"/api/payments/callback/{gateway}/"
+
+    def setUp(self):
+        self.user = make_user()
+        self.order = make_order(self.user, total=Decimal("100.00"))
+        self.variant = make_variant(stock=5)
+        self.order_item = make_order_item(self.order, self.variant, quantity=2)
+        self.authority = "A00000000000000000000000000000000wOGYpd"
+        self.txn = PaymentTransaction.objects.create(
+            order=self.order,
+            gateway="zarinpal",
+            authority=self.authority,
+            amount=self.order.total,
+            status=PaymentTransaction.Status.PENDING,
+        )
+        # Stock was already decremented at order-creation time (Epic
+        # 1/3's flow) — simulate that here since these tests create the
+        # order directly rather than going through OrderCreateSerializer.
+        self.stock_after_order_creation = self.variant.stock
+
+    @patch("payments.views.get_payment_gateway")
+    def test_successful_callback_marks_success_and_processing_without_touching_stock(
+        self, mock_get_gateway
+    ):
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.verify_payment.return_value = PaymentVerifyResult(
+            success=True, ref_id="201202070", raw_response={"data": {"code": 100}}
+        )
+
+        response = self.client.get(
+            self.url(), {"Authority": self.authority, "Status": "OK"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertIn(f"/order-confirmation/{self.order.id}", response.url)
+
+        self.txn.refresh_from_db()
+        self.order.refresh_from_db()
+        self.variant.refresh_from_db()
+
+        self.assertEqual(self.txn.status, PaymentTransaction.Status.SUCCESS)
+        self.assertEqual(self.txn.ref_id, "201202070")
+        self.assertEqual(self.order.status, Order.Status.PROCESSING)
+        # No double-decrement, no restoration — stock is untouched.
+        self.assertEqual(self.variant.stock, self.stock_after_order_creation)
+        self.assertEqual(
+            StockMovement.objects.filter(related_order=self.order).count(), 0
+        )
+
+    @patch("payments.views.get_payment_gateway")
+    def test_failed_verification_marks_failed_cancels_order_and_restores_stock(
+        self, mock_get_gateway
+    ):
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.verify_payment.return_value = PaymentVerifyResult(
+            success=False, error_message="Transaction not found or unsuccessful."
+        )
+
+        response = self.client.get(
+            self.url(), {"Authority": self.authority, "Status": "OK"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertIn("/checkout/failed", response.url)
+        self.assertIn("reason=verification_failed", response.url)
+
+        self.txn.refresh_from_db()
+        self.order.refresh_from_db()
+        self.variant.refresh_from_db()
+
+        self.assertEqual(self.txn.status, PaymentTransaction.Status.FAILED)
+        self.assertEqual(self.order.status, Order.Status.CANCELLED)
+        # Stock reserved at order-creation time must be released back.
+        self.assertEqual(
+            self.variant.stock,
+            self.stock_after_order_creation + self.order_item.quantity,
+        )
+
+        movement = StockMovement.objects.get(related_order=self.order)
+        self.assertEqual(movement.variant, self.variant)
+        self.assertEqual(movement.reason, StockMovement.Reason.CANCELLATION)
+        self.assertEqual(movement.quantity_delta, self.order_item.quantity)
+        self.assertEqual(movement.stock_after, self.variant.stock)
+        self.assertIsNone(movement.actor)
+
+    @patch("payments.views.get_payment_gateway")
+    def test_nok_status_short_circuits_without_calling_verify_payment(
+        self, mock_get_gateway
+    ):
+        mock_gateway = mock_get_gateway.return_value
+
+        response = self.client.get(
+            self.url(), {"Authority": self.authority, "Status": "NOK"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertIn("reason=cancelled", response.url)
+        mock_gateway.verify_payment.assert_not_called()
+
+        self.txn.refresh_from_db()
+        self.order.refresh_from_db()
+        self.variant.refresh_from_db()
+
+        self.assertEqual(self.txn.status, PaymentTransaction.Status.FAILED)
+        self.assertEqual(self.order.status, Order.Status.CANCELLED)
+        self.assertEqual(
+            self.variant.stock,
+            self.stock_after_order_creation + self.order_item.quantity,
+        )
+
+    @patch("payments.views.get_payment_gateway")
+    def test_duplicate_callback_on_already_success_transaction_is_idempotent(
+        self, mock_get_gateway
+    ):
+        self.txn.status = PaymentTransaction.Status.SUCCESS
+        self.txn.ref_id = "201202070"
+        self.txn.save()
+        self.order.status = Order.Status.PROCESSING
+        self.order.save(update_fields=["status"])
+
+        response = self.client.get(
+            self.url(), {"Authority": self.authority, "Status": "OK"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertIn(f"/order-confirmation/{self.order.id}", response.url)
+
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.verify_payment.assert_not_called()
+
+        self.txn.refresh_from_db()
+        self.order.refresh_from_db()
+        self.variant.refresh_from_db()
+
+        self.assertEqual(self.txn.status, PaymentTransaction.Status.SUCCESS)
+        self.assertEqual(self.txn.ref_id, "201202070")
+        self.assertEqual(self.order.status, Order.Status.PROCESSING)
+        self.assertEqual(self.variant.stock, self.stock_after_order_creation)
+
+    @patch("payments.views.get_payment_gateway")
+    def test_unknown_authority_redirects_to_generic_failure_without_raising(
+        self, mock_get_gateway
+    ):
+        response = self.client.get(
+            self.url(), {"Authority": "totally-unknown-authority", "Status": "OK"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertIn("reason=unknown_transaction", response.url)
+
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.verify_payment.assert_not_called()

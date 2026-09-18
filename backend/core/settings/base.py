@@ -333,15 +333,15 @@ SMS_PROVIDER_CLASS = config(
 # ─── Payment gateways (Feature 6.1.1) ───────────────────────────────────────────
 # Unlike SMS_PROVIDER_CLASS above (a single active provider), gateways are
 # looked up by name since Phase 6.3 supports multiple simultaneously-available
-# gateways with admin-configurable selection/fallback. Zibal/IDPay stay
-# commented out until their classes exist (Tasks 6.3.1.1 / 6.3.1.2) — pointing
-# PAYMENT_GATEWAY_CLASSES at a class that doesn't exist yet would only break
-# at first actual use of get_payment_gateway(), but there's no reason to leave
-# a dangling entry in the meantime.
+# gateways with admin-configurable selection/fallback. IDPay stays commented
+# out until its class exists (Task 6.3.1.2) — pointing PAYMENT_GATEWAY_CLASSES
+# at a class that doesn't exist yet would only break at first actual use of
+# get_payment_gateway(), but there's no reason to leave a dangling entry in
+# the meantime.
 DEFAULT_PAYMENT_GATEWAY = config("DEFAULT_PAYMENT_GATEWAY", default="zarinpal")
 PAYMENT_GATEWAY_CLASSES = {
     "zarinpal": "payments.gateways.zarinpal.ZarinPalGateway",
-    # "zibal": "payments.gateways.zibal.ZibalGateway",       # added in Task 6.3.1.1
+    "zibal": "payments.gateways.zibal.ZibalGateway",
     # "idpay": "payments.gateways.idpay.IDPayGateway",       # added in Task 6.3.1.2
 }
 
@@ -350,6 +350,23 @@ PAYMENT_GATEWAY_CLASSES = {
 # live gateway with real money before a merchant ID has been configured.
 ZARINPAL_MERCHANT_ID = config("ZARINPAL_MERCHANT_ID", default="")
 ZARINPAL_SANDBOX = config("ZARINPAL_SANDBOX", default=True, cast=bool)
+
+# Zibal credentials (Task 6.3.1.1). Unlike ZarinPal, Zibal has no separate
+# sandbox subdomain/URL set — request/verify/start all use the same production
+# host (gateway.zibal.ir) regardless of mode. Zibal's own documented sandbox
+# mechanism is a special, literal merchant value: setting
+# ZIBAL_MERCHANT_ID=zibal (the literal string "zibal", not a real merchant ID)
+# makes the gateway itself operate in test mode against those same URLs —
+# confirmed against Zibal's official Node.js SDK
+# (https://github.com/zibalco/gateway-nodejs) and cross-checked against
+# several independent third-party client libraries. So there's deliberately
+# no ZIBAL_SANDBOX boolean here to mirror ZARINPAL_SANDBOX — that would imply
+# a URL-switching mechanism Zibal doesn't have. The safe default is still the
+# empty string: an unconfigured merchant ID fails at actual payment-attempt
+# time via ZibalGateway.request_payment()'s existing error handling, not at
+# import/startup time, and never accidentally reaches a real Zibal merchant
+# account.
+ZIBAL_MERCHANT_ID = config("ZIBAL_MERCHANT_ID", default="")
 
 
 # ─── Regulatory compliance (Iran cosmetics IRC registration) ───────────────────

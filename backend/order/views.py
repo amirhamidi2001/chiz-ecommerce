@@ -3,10 +3,10 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from shop.models import ProductVariant, StockMovement
 
 from .models import Order
 from .serializers import OrderCreateSerializer, OrderListSerializer, OrderSerializer
+from .services.stock import release_reserved_stock
 
 
 class OrderListCreateView(APIView):
@@ -98,31 +98,16 @@ class OrderDetailView(APIView):
             # count now (Tasks 3.1.1.1–3.1.1.4); Product.stock is
             # superseded and unused in the order flow — candidate for
             # removal in a future cleanup task.
-            for order_item in order.items.all():
-                if order_item.variant_id is None:
-                    # Variant was deleted after the order was placed
-                    # (OrderItem.variant is SET_NULL) — nothing to restore.
-                    continue
-
-                variant = ProductVariant.objects.select_for_update().get(
-                    pk=order_item.variant_id
-                )
-                variant.stock += order_item.quantity
-                variant.save(update_fields=["stock"])
-
-                # Audit trail (Task 4.1.1.1/4.1.1.3): logged inside this
-                # same atomic block, and only inside this guard, since
-                # there's nothing to log a movement against for an
-                # order_item whose variant no longer exists.
-                StockMovement.objects.create(
-                    variant=variant,
-                    reason=StockMovement.Reason.CANCELLATION,
-                    quantity_delta=order_item.quantity,
-                    stock_after=variant.stock,
-                    actor=self.request.user,
-                    related_order=order,
-                    note=f"Cancellation of order {order.order_number}",
-                )
+            #
+            # Shared with the payment-failure path (Task 6.2.1.4) via
+            # order.services.stock.release_reserved_stock — see that
+            # module for why this is a shared helper rather than two
+            # independently-maintained copies.
+            release_reserved_stock(
+                order,
+                actor=self.request.user,
+                note=f"Cancellation of order {order.order_number}",
+            )
 
         serializer = OrderSerializer(order, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)

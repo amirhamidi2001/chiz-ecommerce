@@ -2,7 +2,6 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
-
 from payments.gateways import get_payment_gateway
 from payments.gateways.base import (
     PaymentGateway,

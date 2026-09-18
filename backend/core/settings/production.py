@@ -7,9 +7,13 @@ Usage:
     DJANGO_SETTINGS_MODULE=core.settings.production
 """
 
+import logging
+
 from decouple import config
 
 from .base import *  # noqa: F401, F403
+
+logger = logging.getLogger(__name__)
 
 # ─── Core ─────────────────────────────────────────────────────────────────────
 DEBUG = False
@@ -36,6 +40,49 @@ DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default=config("EMAIL_HOST_USE
 
 # ─── Frontend URL ─────────────────────────────────────────────────────────────
 FRONTEND_URL = config("FRONTEND_URL")
+
+
+# ─── Payment gateway (Feature 6.1.1 / Task 6.2.1.1) ────────────────────────────
+# ZARINPAL_SANDBOX and ZARINPAL_MERCHANT_ID are intentionally NOT overridden
+# here — they're read from the environment via core/settings/base.py's
+# `config(...)` calls, same as everywhere else. A real production deployment
+# MUST set BOTH explicitly via environment variables:
+#     ZARINPAL_SANDBOX=False
+#     ZARINPAL_MERCHANT_ID=<your real ZarinPal merchant ID>
+# If either is forgotten, the app does NOT crash and does NOT silently start
+# accepting real charges — it silently stays in harmless sandbox mode (no real
+# money collected, per base.py's safe default=True). That's the safe failure
+# direction, but a deployment sitting in sandbox mode while believing it's
+# live is still a real problem that should be caught before going live —
+# hence the check below.
+#
+# Design choice — a WARNING, not a hard startup-blocking error:
+# A legitimate staging environment might deliberately run this exact
+# production settings module (DEBUG=False, real-looking ALLOWED_HOSTS, etc.)
+# while intentionally keeping ZARINPAL_SANDBOX=True for a smoke test against
+# production-like infrastructure without risking real money. A hard block
+# here would make that valid use case impossible. So this only logs.
+#
+# Design choice — a plain logging call here, not a django.core.checks
+# registration: this project has no existing django.core.checks usage to
+# follow as precedent, and two things make a registered system check a poor
+# fit anyway: (1) `core` is the project's settings/config package, not an
+# entry in INSTALLED_APPS, so there's no AppConfig.ready() to hook into, and
+# (2) Django's checks framework only runs automatically under `manage.py`
+# commands (runserver, check, migrate, ...) — it does NOT run just because a
+# WSGI/ASGI server (gunicorn/daphne) imports this settings module directly,
+# which is how this app actually runs in production. A plain statement here
+# fires unconditionally at settings-import time, on every process boot,
+# regardless of how the process was started — which is the actual goal.
+if not DEBUG and ZARINPAL_SANDBOX:  # noqa: F405 — ZARINPAL_SANDBOX from .base
+    logger.warning(
+        "ZARINPAL_SANDBOX is True while DEBUG=False (production settings). "
+        "If this is a genuine production deployment, real payments will NOT "
+        "be collected until ZARINPAL_SANDBOX=False is set explicitly via the "
+        "environment. If this is a deliberate staging/smoke-test environment "
+        "running production-like settings on purpose, this warning is "
+        "expected and safe to ignore."
+    )
 
 
 # ─── HTTP Security Headers ────────────────────────────────────────────────────

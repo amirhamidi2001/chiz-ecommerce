@@ -4,12 +4,12 @@ from unittest.mock import patch
 import requests
 import responses
 from django.test import SimpleTestCase
-from payments.gateways.zarinpal import ZarinPalGateway
+from payments.gateways.zibal import ZibalGateway
 
 
-class ZarinPalRequestPaymentTests(SimpleTestCase):
+class ZibalRequestPaymentTests(SimpleTestCase):
     def setUp(self):
-        self.gateway = ZarinPalGateway()
+        self.gateway = ZibalGateway()
         self.amount = Decimal("150000")
         self.callback_url = "https://example.test/payments/callback/"
 
@@ -17,16 +17,11 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
     def test_successful_response_returns_authority_and_redirect_url(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.REQUEST_URL,
+            ZibalGateway.REQUEST_URL,
             json={
-                "data": {
-                    "code": 100,
-                    "message": "Success",
-                    "authority": "A00000000000000000000000000000000wOGYpd",
-                    "fee_type": "Merchant",
-                    "fee": 100,
-                },
-                "errors": [],
+                "trackId": 1533727744287,
+                "result": 100,
+                "message": "success",
             },
             status=200,
         )
@@ -34,12 +29,10 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
         result = self.gateway.request_payment(self.amount, self.callback_url)
 
         self.assertTrue(result.success)
-        self.assertEqual(result.authority, "A00000000000000000000000000000000wOGYpd")
+        self.assertEqual(result.authority, "1533727744287")
         self.assertEqual(
             result.redirect_url,
-            ZarinPalGateway.START_PAY_URL.format(
-                authority="A00000000000000000000000000000000wOGYpd"
-            ),
+            ZibalGateway.START_PAY_URL.format(track_id="1533727744287"),
         )
         self.assertIn(result.authority, result.redirect_url)
         self.assertEqual(result.error_message, "")
@@ -48,14 +41,10 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
     def test_gateway_error_response_returns_failure_with_message(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.REQUEST_URL,
+            ZibalGateway.REQUEST_URL,
             json={
-                "data": [],
-                "errors": {
-                    "code": -9,
-                    "message": "amount is required and must be a positive number",
-                    "validations": [],
-                },
+                "result": 105,
+                "message": "amount must be greater than 1000",
             },
             status=200,
         )
@@ -64,7 +53,7 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
 
         self.assertFalse(result.success)
         self.assertNotEqual(result.error_message, "")
-        self.assertIn("amount is required", result.error_message)
+        self.assertIn("amount must be greater than 1000", result.error_message)
         self.assertEqual(result.authority, "")
         self.assertEqual(result.redirect_url, "")
 
@@ -72,7 +61,7 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
     def test_connection_error_is_caught_and_returns_failure(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.REQUEST_URL,
+            ZibalGateway.REQUEST_URL,
             body=requests.exceptions.ConnectionError("connection refused"),
         )
 
@@ -85,7 +74,7 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
     def test_timeout_is_caught_and_returns_failure(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.REQUEST_URL,
+            ZibalGateway.REQUEST_URL,
             body=requests.exceptions.Timeout("request timed out"),
         )
 
@@ -98,7 +87,7 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
     def test_malformed_non_json_body_is_caught_and_returns_failure(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.REQUEST_URL,
+            ZibalGateway.REQUEST_URL,
             body="<html>not json at all</html>",
             status=200,
             content_type="text/html",
@@ -109,12 +98,13 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
         self.assertFalse(result.success)
         self.assertNotEqual(result.error_message, "")
 
-    def test_timeout_parameter_is_passed_on_outbound_call(self):
-        with patch("payments.gateways.zarinpal.requests.post") as mock_post:
+    def test_amount_and_timeout_are_passed_on_outbound_call(self):
+        with patch("payments.gateways.zibal.requests.post") as mock_post:
             mock_post.return_value.raise_for_status.return_value = None
             mock_post.return_value.json.return_value = {
-                "data": {"code": 100, "authority": "A123", "message": "Success"},
-                "errors": [],
+                "trackId": 123,
+                "result": 100,
+                "message": "success",
             }
 
             self.gateway.request_payment(self.amount, self.callback_url)
@@ -123,32 +113,34 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
             _, call_kwargs = mock_post.call_args
             self.assertIn("timeout", call_kwargs)
             self.assertEqual(
-                call_kwargs["timeout"], ZarinPalGateway.REQUEST_TIMEOUT_SECONDS
+                call_kwargs["timeout"], ZibalGateway.REQUEST_TIMEOUT_SECONDS
             )
+            sent_payload = call_kwargs["json"]
+            self.assertEqual(sent_payload["amount"], int(self.amount))
+            self.assertEqual(sent_payload["callbackUrl"], self.callback_url)
 
 
-class ZarinPalVerifyPaymentTests(SimpleTestCase):
+class ZibalVerifyPaymentTests(SimpleTestCase):
     def setUp(self):
-        self.gateway = ZarinPalGateway()
+        self.gateway = ZibalGateway()
         self.amount = Decimal("150000")
-        self.authority = "A00000000000000000000000000000000wOGYpd"
+        self.authority = "1533727744287"
 
     @responses.activate
     def test_successful_verification_returns_ref_id(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.VERIFY_URL,
+            ZibalGateway.VERIFY_URL,
             json={
-                "data": {
-                    "code": 100,
-                    "message": "Verified",
-                    "card_hash": "...",
-                    "card_pan": "502229******5995",
-                    "ref_id": 201202070,
-                    "fee_type": "Merchant",
-                    "fee": 100,
-                },
-                "errors": [],
+                "paidAt": "2018-03-25T23:43:01.053000",
+                "cardNumber": "610433******9414",
+                "status": 1,
+                "amount": 150000,
+                "refNumber": 201202070,
+                "description": "Order payment",
+                "orderId": "",
+                "result": 100,
+                "message": "success",
             },
             status=200,
         )
@@ -162,20 +154,19 @@ class ZarinPalVerifyPaymentTests(SimpleTestCase):
 
     @responses.activate
     def test_already_verified_response_also_returns_success(self):
-        # Code 101 ("already verified") happens when the customer
-        # double-hits the callback URL (back-button/refresh) for an
-        # authority that was already confirmed on a previous verify
-        # call — this must be treated as success, not failure.
+        # result=201 ("processed before") happens when the customer
+        # double-hits the callback URL (back-button/refresh) for a
+        # trackId that was already confirmed on a previous verify call —
+        # this must be treated as success, not failure. Zibal's
+        # equivalent of ZarinPal's code 101.
         responses.add(
             responses.POST,
-            ZarinPalGateway.VERIFY_URL,
+            ZibalGateway.VERIFY_URL,
             json={
-                "data": {
-                    "code": 101,
-                    "message": "Verified before",
-                    "ref_id": 201202070,
-                },
-                "errors": [],
+                "result": 201,
+                "message": "processed before",
+                "refNumber": 201202070,
+                "amount": 150000,
             },
             status=200,
         )
@@ -189,14 +180,11 @@ class ZarinPalVerifyPaymentTests(SimpleTestCase):
     def test_failed_verification_returns_failure_with_message(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.VERIFY_URL,
+            ZibalGateway.VERIFY_URL,
             json={
-                "data": [],
-                "errors": {
-                    "code": -21,
-                    "message": "Transaction not found or unsuccessful.",
-                    "validations": [],
-                },
+                "result": 202,
+                "message": "payment failed",
+                "status": -2,
             },
             status=200,
         )
@@ -205,14 +193,14 @@ class ZarinPalVerifyPaymentTests(SimpleTestCase):
 
         self.assertFalse(result.success)
         self.assertNotEqual(result.error_message, "")
-        self.assertIn("Transaction not found", result.error_message)
+        self.assertIn("payment failed", result.error_message)
         self.assertEqual(result.ref_id, "")
 
     @responses.activate
     def test_connection_error_is_caught_and_returns_failure(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.VERIFY_URL,
+            ZibalGateway.VERIFY_URL,
             body=requests.exceptions.ConnectionError("connection refused"),
         )
 
@@ -226,7 +214,7 @@ class ZarinPalVerifyPaymentTests(SimpleTestCase):
     def test_timeout_is_caught_and_returns_failure(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.VERIFY_URL,
+            ZibalGateway.VERIFY_URL,
             body=requests.exceptions.Timeout("request timed out"),
         )
 
@@ -239,7 +227,7 @@ class ZarinPalVerifyPaymentTests(SimpleTestCase):
     def test_malformed_non_json_body_is_caught_and_returns_failure(self):
         responses.add(
             responses.POST,
-            ZarinPalGateway.VERIFY_URL,
+            ZibalGateway.VERIFY_URL,
             body="<html>not json at all</html>",
             status=200,
             content_type="text/html",
@@ -250,25 +238,29 @@ class ZarinPalVerifyPaymentTests(SimpleTestCase):
         self.assertFalse(result.success)
         self.assertNotEqual(result.error_message, "")
 
-    def test_amount_and_timeout_are_passed_on_outbound_call(self):
-        with patch("payments.gateways.zarinpal.requests.post") as mock_post:
+    def test_trackid_and_timeout_are_passed_on_outbound_call(self):
+        with patch("payments.gateways.zibal.requests.post") as mock_post:
             mock_post.return_value.raise_for_status.return_value = None
             mock_post.return_value.json.return_value = {
-                "data": {"code": 100, "ref_id": 1, "message": "Verified"},
-                "errors": [],
+                "result": 100,
+                "refNumber": 1,
+                "message": "success",
             }
 
             self.gateway.verify_payment(self.authority, self.amount)
 
             mock_post.assert_called_once()
-            call_args, call_kwargs = mock_post.call_args
+            _, call_kwargs = mock_post.call_args
             self.assertIn("timeout", call_kwargs)
             self.assertEqual(
-                call_kwargs["timeout"], ZarinPalGateway.REQUEST_TIMEOUT_SECONDS
+                call_kwargs["timeout"], ZibalGateway.REQUEST_TIMEOUT_SECONDS
             )
-            # The exact same amount (and unit) used for request_payment()
-            # must be sent to verify_payment() — a mismatch is itself
-            # grounds for ZarinPal to reject the verification.
+            # Unlike ZarinPal, Zibal's documented verify payload is just
+            # {"merchant", "trackId"} — no amount field (amount-matching
+            # against the gateway's own reported amount is a caller-side
+            # concern in Zibal's API, not part of the verify request
+            # itself) — confirmed against the docs cited in
+            # gateways/zibal.py's module docstring.
             sent_payload = call_kwargs["json"]
-            self.assertEqual(sent_payload["amount"], int(self.amount))
-            self.assertEqual(sent_payload["authority"], self.authority)
+            self.assertEqual(sent_payload["trackId"], self.authority)
+            self.assertNotIn("amount", sent_payload)

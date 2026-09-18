@@ -1,6 +1,6 @@
 """
-ZarinPal payment gateway (Task 6.2.1.1 — request_payment only;
-verify_payment lands in Task 6.2.1.3).
+ZarinPal payment gateway: request_payment() (Task 6.2.1.1) and
+verify_payment() (Task 6.2.1.3).
 
 Endpoint URLs, request field names and response shape below were
 verified against ZarinPal's current official REST API documentation
@@ -35,6 +35,13 @@ was written:
 - On failure, ``data`` is typically an empty list/object and
   ``errors`` is an object shaped like
   ``{"code": ..., "message": ..., "validations": {...}}``.
+- ``verify_payment()``'s success response has the same
+  ``{"data": {"code", ...}}`` shape, plus ``ref_id``. Codes ``100``
+  (verified just now) and ``101`` (already verified — e.g. the
+  customer hit the callback URL twice) are BOTH treated as success,
+  confirmed against ZarinPal's official SDK docs and maintainer
+  guidance (a second verify call for an already-settled authority is
+  not a payment failure).
 """
 
 from decimal import Decimal
@@ -58,6 +65,15 @@ class ZarinPalGateway(PaymentGateway):
     )
 
     REQUEST_TIMEOUT_SECONDS = 15
+
+    VERIFY_URL = (
+        "https://sandbox.zarinpal.com/pg/v4/payment/verify.json"
+        if settings.ZARINPAL_SANDBOX
+        else "https://payment.zarinpal.com/pg/v4/payment/verify.json"
+    )
+    # Same production-host correction as REQUEST_URL above: the verify
+    # endpoint's canonical production host is payment.zarinpal.com, not
+    # api.zarinpal.com — confirmed against current ZarinPal docs.
 
     def request_payment(
         self, amount: Decimal, callback_url: str, description: str = ""
@@ -100,7 +116,9 @@ class ZarinPalGateway(PaymentGateway):
         )
 
     @staticmethod
-    def _extract_error_message(errors) -> str:
+    def _extract_error_message(
+        errors, default: str = "ZarinPal payment request failed."
+    ) -> str:
         """
         ZarinPal's `errors` field is an empty list on success and, on
         failure, an object shaped like {"code", "message",
@@ -115,7 +133,53 @@ class ZarinPalGateway(PaymentGateway):
                 return f"{message} (code: {code})" if code is not None else message
         if errors:
             return str(errors)
-        return "ZarinPal payment request failed."
+        return default
 
     def verify_payment(self, authority: str, amount: Decimal) -> PaymentVerifyResult:
-        raise NotImplementedError  # implemented in Task 6.2.1.3
+        # IMPORTANT: `amount` must be the exact same value (and unit —
+        # Rial, per request_payment()) that was sent when the payment was
+        # first requested. A mismatched amount is itself grounds for
+        # ZarinPal to reject the verification, so the caller must pass
+        # the same order total used at request time, not a recomputed or
+        # reformatted value.
+        payload = {
+            "merchant_id": settings.ZARINPAL_MERCHANT_ID,
+            "authority": authority,
+            "amount": int(amount),
+        }
+
+        try:
+            response = requests.post(
+                self.VERIFY_URL,
+                json=payload,
+                timeout=self.REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            return PaymentVerifyResult(
+                success=False, error_message=str(exc), raw_response=None
+            )
+
+        result_data = data.get("data") or {}
+        # Codes 100 (verified just now) and 101 (already verified) are
+        # BOTH valid non-error outcomes for an idempotent verify call —
+        # confirmed against ZarinPal's own SDK docs and maintainer
+        # guidance. A customer double-hitting the callback URL (e.g. via
+        # browser back-button/refresh) triggers a second verify call for
+        # an already-settled authority, which comes back as 101 — that
+        # must NOT be treated as a payment failure.
+        if isinstance(result_data, dict) and result_data.get("code") in (100, 101):
+            return PaymentVerifyResult(
+                success=True,
+                ref_id=str(result_data.get("ref_id", "")),
+                raw_response=data,
+            )
+
+        return PaymentVerifyResult(
+            success=False,
+            error_message=self._extract_error_message(
+                data.get("errors"), default="ZarinPal payment verification failed."
+            ),
+            raw_response=data,
+        )
