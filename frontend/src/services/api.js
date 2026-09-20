@@ -314,6 +314,13 @@ export const cancelOrder = (orderId) =>
   api.patch(`/orders/${orderId}/`, { status: 'cancelled' });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PAYMENTS  →  /api/payments/
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const initiatePayment = (orderId) =>
+  api.post('/payments/initiate/', { order_id: orderId });
+
+// ═══════════════════════════════════════════════════════════════════════════
 // USER DASHBOARD  →  /api/dashboard/
 // ═══════════════════════════════════════════════════════════════════════════
 export const dashboardAPI = {

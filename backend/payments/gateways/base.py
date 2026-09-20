@@ -18,6 +18,10 @@ first one (ZarinPal).
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from django.http import HttpRequest
 
 
 @dataclass
@@ -51,4 +55,36 @@ class PaymentGateway(ABC):
     def verify_payment(self, authority: str, amount: Decimal) -> PaymentVerifyResult:
         """Confirm a payment was actually completed successfully after
         the customer returns from the gateway."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def extract_callback_params(self, request: "HttpRequest") -> dict:
+        """
+        Parse this gateway's own callback query-parameter convention out
+        of an inbound Django request and return it in a normalized,
+        gateway-agnostic shape:
+
+            {"authority": str, "is_customer_cancelled": bool}
+
+        Added in Task 6.3.1.4, once a second and third gateway (Zibal,
+        IDPay) existed and made it clear PaymentCallbackView's original
+        inline `request.GET.get("Authority")`/`"Status"`/`"NOK"`
+        extraction was accidentally ZarinPal-shaped rather than
+        genuinely gateway-agnostic. Each concrete gateway uses its own
+        actual documented query-parameter names/values here (they are
+        NOT the same across gateways) and normalizes them to this one
+        shape, so PaymentCallbackView never needs to know or branch on
+        which gateway it's handling.
+
+        `authority` must exactly match whatever this gateway's
+        request_payment() returned as PaymentRequestResult.authority —
+        it's used to look up the PaymentTransaction row. `is_customer_
+        cancelled` should be True only for this gateway's own definitive
+        "the customer did not complete payment" signal (mirroring
+        ZarinPal's Status=NOK) — for anything else, PaymentCallbackView
+        still calls verify_payment() to get an authoritative answer
+        rather than guessing from callback params alone, since callback
+        query parameters are client-controlled and not proof of
+        anything on their own.
+        """
         raise NotImplementedError

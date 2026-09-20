@@ -41,6 +41,9 @@ class TestPaymentGatewayInterface:
             ) -> PaymentVerifyResult:
                 return PaymentVerifyResult(success=True, ref_id="R456")
 
+            def extract_callback_params(self, request) -> dict:
+                return {"authority": "A123", "is_customer_cancelled": False}
+
         gateway = DummyGateway()
 
         assert isinstance(gateway, PaymentGateway)

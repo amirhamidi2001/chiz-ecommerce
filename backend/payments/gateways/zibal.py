@@ -171,3 +171,31 @@ class ZibalGateway(PaymentGateway):
                     else message
                 )
         return default
+
+    def extract_callback_params(self, request) -> dict:
+        """
+        Zibal's documented callback query parameters (confirmed against
+        Zibal's own official npm package README, which gives the exact
+        callback URL shape:
+        ``https://yourwebsite.com/ipg/cb?trackId=10000&success=1&status=2&orderId=1``,
+        and explicitly instructs verifying only "if success === true &&
+        status === 2"):
+        - ``trackId``: Zibal's transaction identifier — same value
+          returned from request_payment() as PaymentRequestResult.authority.
+        - ``success``: "1" if the customer completed payment at Zibal's
+          page, "0" (or absent) if they cancelled/abandoned before
+          completing it. This — not `status`, which is a richer, numeric
+          detail code shared with the verify response — is Zibal's own
+          definitive "customer cancelled" signal, mirroring ZarinPal's
+          Status=NOK.
+        - ``status``, ``orderId``: not needed here; `status` is
+          re-confirmed authoritatively via verify_payment(), and
+          `orderId` isn't part of this gateway's authority (unlike
+          IDPay, Zibal's authority is trackId alone).
+        """
+        authority = request.GET.get("trackId")
+        success_param = request.GET.get("success")
+        return {
+            "authority": authority,
+            "is_customer_cancelled": success_param != "1",
+        }

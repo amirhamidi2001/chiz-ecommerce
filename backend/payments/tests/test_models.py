@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 from order.models import Order
-from payments.models import PaymentTransaction
+from payments.models import PaymentGatewayConfig, PaymentTransaction
 
 
 def make_order(**kwargs):
@@ -60,3 +60,36 @@ class PaymentTransactionModelTests(TestCase):
             f"{transaction.status}"
         )
         self.assertEqual(str(transaction), expected)
+
+
+class PaymentGatewayConfigModelTests(TestCase):
+    def test_get_solo_creates_default_row_when_none_exists(self):
+        self.assertEqual(PaymentGatewayConfig.objects.count(), 0)
+
+        config = PaymentGatewayConfig.get_solo()
+
+        self.assertEqual(PaymentGatewayConfig.objects.count(), 1)
+        self.assertEqual(config.pk, 1)
+        self.assertEqual(config.active_gateway, PaymentTransaction.Gateway.ZARINPAL)
+        self.assertEqual(config.fallback_order, [])
+
+    def test_get_solo_returns_the_same_row_on_repeated_calls(self):
+        first = PaymentGatewayConfig.get_solo()
+        first.active_gateway = PaymentTransaction.Gateway.ZIBAL
+        first.fallback_order = ["idpay"]
+        first.save()
+
+        second = PaymentGatewayConfig.get_solo()
+
+        self.assertEqual(second.pk, first.pk)
+        self.assertEqual(second.active_gateway, PaymentTransaction.Gateway.ZIBAL)
+        self.assertEqual(second.fallback_order, ["idpay"])
+        self.assertEqual(PaymentGatewayConfig.objects.count(), 1)
+
+    def test_save_always_enforces_pk_1_singleton(self):
+        config = PaymentGatewayConfig(active_gateway=PaymentTransaction.Gateway.IDPAY)
+        config.pk = 999  # attempt to create a second row
+        config.save()
+
+        self.assertEqual(config.pk, 1)
+        self.assertEqual(PaymentGatewayConfig.objects.count(), 1)

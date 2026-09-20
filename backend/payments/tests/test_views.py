@@ -1,11 +1,11 @@
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from django.contrib.auth import get_user_model
 from order.models import Order, OrderItem
 from order.tests.factories import make_variant
 from payments.gateways.base import PaymentRequestResult, PaymentVerifyResult
-from payments.models import PaymentTransaction
+from payments.models import PaymentGatewayConfig, PaymentTransaction
 from rest_framework import status
 from rest_framework.test import APITestCase
 from shop.models import StockMovement
@@ -145,6 +145,175 @@ class PaymentInitiateViewTests(APITestCase):
         self.assertIn("detail", response.data)
         self.assertEqual(PaymentTransaction.objects.count(), 0)
 
+    # ── Task 6.3.1.3: database-backed active gateway + fallback chain ──────
+
+    @patch("payments.views.get_payment_gateway")
+    def test_default_config_with_no_fallback_matches_prior_single_gateway_behavior(
+        self, mock_get_gateway
+    ):
+        """
+        Regression check against Task 6.2.1.2's original behavior: with
+        NO PaymentGatewayConfig row created yet (the fresh-deploy state),
+        get_solo() creates one using the model field's own default
+        (zarinpal) and an empty fallback_order — so a single failure
+        still surfaces as a plain 502, exactly as before this task.
+        """
+        self.assertEqual(PaymentGatewayConfig.objects.count(), 0)
+
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.request_payment.return_value = PaymentRequestResult(
+            success=False, error_message="ZarinPal payment request failed."
+        )
+
+        response = self.client.post(
+            self.URL, {"order_id": self.order.id}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertEqual(PaymentTransaction.objects.count(), 0)
+        mock_get_gateway.assert_called_once_with("zarinpal")
+        config = PaymentGatewayConfig.objects.get()
+        self.assertEqual(config.active_gateway, PaymentTransaction.Gateway.ZARINPAL)
+        self.assertEqual(config.fallback_order, [])
+
+    @patch("payments.views.get_payment_gateway")
+    def test_fallback_to_next_gateway_succeeds_and_records_correct_gateway(
+        self, mock_get_gateway
+    ):
+        PaymentGatewayConfig.objects.create(
+            active_gateway=PaymentTransaction.Gateway.ZARINPAL,
+            fallback_order=["zibal"],
+        )
+
+        zarinpal_mock = type("M", (), {})()
+        zarinpal_mock.request_payment = lambda **kw: PaymentRequestResult(
+            success=False, error_message="ZarinPal is down."
+        )
+        zibal_mock = type("M", (), {})()
+        zibal_mock.request_payment = lambda **kw: PaymentRequestResult(
+            success=True,
+            authority="1533727744287",
+            redirect_url="https://gateway.zibal.ir/start/1533727744287",
+        )
+        mock_get_gateway.side_effect = lambda name: {
+            "zarinpal": zarinpal_mock,
+            "zibal": zibal_mock,
+        }[name]
+
+        response = self.client.post(
+            self.URL, {"order_id": self.order.id}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["redirect_url"],
+            "https://gateway.zibal.ir/start/1533727744287",
+        )
+        self.assertEqual(
+            mock_get_gateway.call_args_list, [call("zarinpal"), call("zibal")]
+        )
+
+        self.assertEqual(PaymentTransaction.objects.count(), 1)
+        txn = PaymentTransaction.objects.get()
+        self.assertEqual(txn.order, self.order)
+        # THE key assertion: the gateway that actually succeeded (zibal)
+        # is what's recorded — not the originally-configured primary
+        # (zarinpal), which failed and was never used for the actual
+        # transaction.
+        self.assertEqual(txn.gateway, "zibal")
+        self.assertEqual(txn.authority, "1533727744287")
+        self.assertEqual(txn.status, PaymentTransaction.Status.PENDING)
+
+    @patch("payments.views.get_payment_gateway")
+    def test_full_fallback_chain_all_fail_returns_502_and_creates_no_transaction(
+        self, mock_get_gateway
+    ):
+        PaymentGatewayConfig.objects.create(
+            active_gateway=PaymentTransaction.Gateway.ZARINPAL,
+            fallback_order=["zibal", "idpay"],
+        )
+
+        def make_failing_gateway(message):
+            gw = type("M", (), {})()
+            gw.request_payment = lambda **kw: PaymentRequestResult(
+                success=False, error_message=message
+            )
+            return gw
+
+        mocks = {
+            "zarinpal": make_failing_gateway("ZarinPal is down."),
+            "zibal": make_failing_gateway("Zibal is down."),
+            "idpay": make_failing_gateway("IDPay is down."),
+        }
+        mock_get_gateway.side_effect = lambda name: mocks[name]
+
+        response = self.client.post(
+            self.URL, {"order_id": self.order.id}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        # Every gateway in the chain was actually tried, in order.
+        self.assertEqual(
+            mock_get_gateway.call_args_list,
+            [call("zarinpal"), call("zibal"), call("idpay")],
+        )
+        # Only a SUCCESSFUL request_payment() call results in a persisted
+        # row (Task 6.2.1.2 behavior) — every attempt here failed, so
+        # nothing should exist for any of them.
+        self.assertEqual(PaymentTransaction.objects.count(), 0)
+
+    def test_changing_active_gateway_via_orm_takes_effect_on_next_call_without_restart(
+        self,
+    ):
+        """
+        Proves this is genuinely runtime-configurable: two separate
+        initiate calls, with the config's active_gateway changed via a
+        plain ORM save() in between — no server/process restart, no
+        settings reload — and each call must use whichever gateway was
+        active AT THE TIME of that call.
+        """
+        order_a = make_order(self.user)
+        order_b = make_order(self.user)
+
+        with patch("payments.views.get_payment_gateway") as mock_get_gateway:
+            zarinpal_mock = type("M", (), {})()
+            zarinpal_mock.request_payment = lambda **kw: PaymentRequestResult(
+                success=True,
+                authority="ZP-1",
+                redirect_url="https://zarinpal.example/1",
+            )
+            zibal_mock = type("M", (), {})()
+            zibal_mock.request_payment = lambda **kw: PaymentRequestResult(
+                success=True, authority="ZB-1", redirect_url="https://zibal.example/1"
+            )
+            mock_get_gateway.side_effect = lambda name: {
+                "zarinpal": zarinpal_mock,
+                "zibal": zibal_mock,
+            }[name]
+
+            # No config row yet — defaults to zarinpal.
+            first_response = self.client.post(
+                self.URL, {"order_id": order_a.id}, format="json"
+            )
+            self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+            self.assertEqual(
+                PaymentTransaction.objects.get(order=order_a).gateway, "zarinpal"
+            )
+
+            # An admin (or anything else) changes the config via a plain
+            # ORM save — simulating the admin site, with no code reload.
+            config = PaymentGatewayConfig.get_solo()
+            config.active_gateway = PaymentTransaction.Gateway.ZIBAL
+            config.save()
+
+            second_response = self.client.post(
+                self.URL, {"order_id": order_b.id}, format="json"
+            )
+            self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+            self.assertEqual(
+                PaymentTransaction.objects.get(order=order_b).gateway, "zibal"
+            )
+
 
 class PaymentCallbackViewTests(APITestCase):
     def url(self, gateway="zarinpal"):
@@ -173,6 +342,10 @@ class PaymentCallbackViewTests(APITestCase):
         self, mock_get_gateway
     ):
         mock_gateway = mock_get_gateway.return_value
+        mock_gateway.extract_callback_params.return_value = {
+            "authority": self.authority,
+            "is_customer_cancelled": False,
+        }
         mock_gateway.verify_payment.return_value = PaymentVerifyResult(
             success=True, ref_id="201202070", raw_response={"data": {"code": 100}}
         )
@@ -202,6 +375,10 @@ class PaymentCallbackViewTests(APITestCase):
         self, mock_get_gateway
     ):
         mock_gateway = mock_get_gateway.return_value
+        mock_gateway.extract_callback_params.return_value = {
+            "authority": self.authority,
+            "is_customer_cancelled": False,
+        }
         mock_gateway.verify_payment.return_value = PaymentVerifyResult(
             success=False, error_message="Transaction not found or unsuccessful."
         )
@@ -238,6 +415,10 @@ class PaymentCallbackViewTests(APITestCase):
         self, mock_get_gateway
     ):
         mock_gateway = mock_get_gateway.return_value
+        mock_gateway.extract_callback_params.return_value = {
+            "authority": self.authority,
+            "is_customer_cancelled": True,
+        }
 
         response = self.client.get(
             self.url(), {"Authority": self.authority, "Status": "NOK"}
@@ -268,6 +449,12 @@ class PaymentCallbackViewTests(APITestCase):
         self.order.status = Order.Status.PROCESSING
         self.order.save(update_fields=["status"])
 
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.extract_callback_params.return_value = {
+            "authority": self.authority,
+            "is_customer_cancelled": False,
+        }
+
         response = self.client.get(
             self.url(), {"Authority": self.authority, "Status": "OK"}
         )
@@ -275,7 +462,6 @@ class PaymentCallbackViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_302_FOUND)
         self.assertIn(f"/order-confirmation/{self.order.id}", response.url)
 
-        mock_gateway = mock_get_gateway.return_value
         mock_gateway.verify_payment.assert_not_called()
 
         self.txn.refresh_from_db()
@@ -291,6 +477,12 @@ class PaymentCallbackViewTests(APITestCase):
     def test_unknown_authority_redirects_to_generic_failure_without_raising(
         self, mock_get_gateway
     ):
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.extract_callback_params.return_value = {
+            "authority": "totally-unknown-authority",
+            "is_customer_cancelled": False,
+        }
+
         response = self.client.get(
             self.url(), {"Authority": "totally-unknown-authority", "Status": "OK"}
         )
@@ -298,5 +490,4 @@ class PaymentCallbackViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_302_FOUND)
         self.assertIn("reason=unknown_transaction", response.url)
 
-        mock_gateway = mock_get_gateway.return_value
         mock_gateway.verify_payment.assert_not_called()

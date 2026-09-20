@@ -123,13 +123,19 @@ class PaymentCallbackConcurrencyTests(TransactionTestCase):
                 "FakeGateway",
                 (),
                 {
+                    "extract_callback_params": staticmethod(
+                        lambda request: {
+                            "authority": authority,
+                            "is_customer_cancelled": False,
+                        }
+                    ),
                     "verify_payment": staticmethod(
                         lambda authority, amount: PaymentVerifyResult(
                             success=True,
                             ref_id="201202070",
                             raw_response={"data": {"code": 100}},
                         )
-                    )
+                    ),
                 },
             )()
             return gateway

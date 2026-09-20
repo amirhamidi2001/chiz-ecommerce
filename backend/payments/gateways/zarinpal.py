@@ -183,3 +183,23 @@ class ZarinPalGateway(PaymentGateway):
             ),
             raw_response=data,
         )
+
+    def extract_callback_params(self, request) -> dict:
+        """
+        ZarinPal's documented callback query parameters (confirmed
+        against multiple independent SDKs — see Task 6.2.1.4's original
+        research): ``Authority`` (the same authority returned from
+        request_payment()) and ``Status``, whose value is the literal
+        string "OK" or "NOK". "NOK" is ZarinPal's own definitive
+        "customer cancelled/failed before verification" signal — moved
+        here from PaymentCallbackView's original inline extraction
+        (Task 6.2.1.4/6.2.1.5) once Zibal/IDPay's very different
+        parameter conventions made clear that logic needed to live on
+        the gateway, not the view (Task 6.3.1.4).
+        """
+        authority = request.GET.get("Authority") or request.GET.get("authority")
+        status_param = request.GET.get("Status") or request.GET.get("status")
+        return {
+            "authority": authority,
+            "is_customer_cancelled": status_param == "NOK",
+        }

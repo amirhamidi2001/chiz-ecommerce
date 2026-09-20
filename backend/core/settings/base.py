@@ -333,16 +333,12 @@ SMS_PROVIDER_CLASS = config(
 # ─── Payment gateways (Feature 6.1.1) ───────────────────────────────────────────
 # Unlike SMS_PROVIDER_CLASS above (a single active provider), gateways are
 # looked up by name since Phase 6.3 supports multiple simultaneously-available
-# gateways with admin-configurable selection/fallback. IDPay stays commented
-# out until its class exists (Task 6.3.1.2) — pointing PAYMENT_GATEWAY_CLASSES
-# at a class that doesn't exist yet would only break at first actual use of
-# get_payment_gateway(), but there's no reason to leave a dangling entry in
-# the meantime.
+# gateways with admin-configurable selection/fallback.
 DEFAULT_PAYMENT_GATEWAY = config("DEFAULT_PAYMENT_GATEWAY", default="zarinpal")
 PAYMENT_GATEWAY_CLASSES = {
     "zarinpal": "payments.gateways.zarinpal.ZarinPalGateway",
     "zibal": "payments.gateways.zibal.ZibalGateway",
-    # "idpay": "payments.gateways.idpay.IDPayGateway",       # added in Task 6.3.1.2
+    "idpay": "payments.gateways.idpay.IDPayGateway",
 }
 
 # ZarinPal credentials/mode (Task 6.2.1.1). ZARINPAL_SANDBOX defaults to True so
@@ -367,6 +363,18 @@ ZARINPAL_SANDBOX = config("ZARINPAL_SANDBOX", default=True, cast=bool)
 # import/startup time, and never accidentally reaches a real Zibal merchant
 # account.
 ZIBAL_MERCHANT_ID = config("ZIBAL_MERCHANT_ID", default="")
+
+# IDPay credentials/mode (Task 6.3.1.2). Unlike ZarinPal (separate sandbox
+# subdomain) and Zibal (special literal merchant value), IDPay's sandbox
+# mechanism is a genuine settings toggle — it's just sent as an HTTP header
+# (X-SANDBOX) on every request rather than encoded in the URL or merchant
+# field. Confirmed against IDPay's own official documentation
+# (https://idpay.ir/web-service/v1.1/). Safe default is True (sandbox mode)
+# for the same reason as ZARINPAL_SANDBOX: a fresh checkout/CI environment
+# with no .env override should never accidentally reach IDPay's production
+# API before an API key has been configured.
+IDPAY_API_KEY = config("IDPAY_API_KEY", default="")
+IDPAY_SANDBOX = config("IDPAY_SANDBOX", default=True, cast=bool)
 
 
 # ─── Regulatory compliance (Iran cosmetics IRC registration) ───────────────────

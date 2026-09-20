@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import requests
 import responses
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase
 from payments.gateways.zibal import ZibalGateway
 
 
@@ -264,3 +264,50 @@ class ZibalVerifyPaymentTests(SimpleTestCase):
             sent_payload = call_kwargs["json"]
             self.assertEqual(sent_payload["trackId"], self.authority)
             self.assertNotIn("amount", sent_payload)
+
+
+class ZibalExtractCallbackParamsTests(SimpleTestCase):
+    """
+    Task 6.3.1.4: confirms ZibalGateway.extract_callback_params() parses
+    Zibal's actual documented callback shape — confirmed against Zibal's
+    own official npm package README:
+    ``?trackId=10000&success=1&status=2&orderId=1``, genuinely different
+    field names from ZarinPal's Authority/Status.
+    """
+
+    def setUp(self):
+        self.gateway = ZibalGateway()
+        self.factory = RequestFactory()
+
+    def test_extracts_trackid_as_authority_when_success_is_1(self):
+        request = self.factory.get(
+            "/api/payments/callback/zibal/",
+            {"trackId": "1533727744287", "success": "1", "status": "2", "orderId": "1"},
+        )
+
+        params = self.gateway.extract_callback_params(request)
+
+        self.assertEqual(params["authority"], "1533727744287")
+        self.assertFalse(params["is_customer_cancelled"])
+
+    def test_success_0_is_customer_cancelled(self):
+        request = self.factory.get(
+            "/api/payments/callback/zibal/",
+            {"trackId": "1533727744287", "success": "0", "status": "1", "orderId": "1"},
+        )
+
+        params = self.gateway.extract_callback_params(request)
+
+        self.assertTrue(params["is_customer_cancelled"])
+
+    def test_missing_success_param_treated_as_cancelled(self):
+        # Absent `success` (e.g. a malformed/truncated redirect) must
+        # fail toward "treat as cancelled, don't silently proceed to
+        # verify" rather than assuming success.
+        request = self.factory.get(
+            "/api/payments/callback/zibal/", {"trackId": "1533727744287"}
+        )
+
+        params = self.gateway.extract_callback_params(request)
+
+        self.assertTrue(params["is_customer_cancelled"])

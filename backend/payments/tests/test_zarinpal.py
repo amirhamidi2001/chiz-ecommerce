@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import requests
 import responses
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase
 from payments.gateways.zarinpal import ZarinPalGateway
 
 
@@ -272,3 +272,49 @@ class ZarinPalVerifyPaymentTests(SimpleTestCase):
             sent_payload = call_kwargs["json"]
             self.assertEqual(sent_payload["amount"], int(self.amount))
             self.assertEqual(sent_payload["authority"], self.authority)
+
+
+class ZarinPalExtractCallbackParamsTests(SimpleTestCase):
+    """
+    Task 6.3.1.4: confirms ZarinPalGateway.extract_callback_params()
+    reproduces exactly what PaymentCallbackView used to do inline before
+    this refactor (Task 6.2.1.4/6.2.1.5) — a regression test proving the
+    view's overall behavior for ZarinPal callbacks is byte-identical to
+    before this task.
+    """
+
+    def setUp(self):
+        self.gateway = ZarinPalGateway()
+        self.factory = RequestFactory()
+
+    def test_extracts_authority_and_ok_status(self):
+        request = self.factory.get(
+            "/api/payments/callback/zarinpal/",
+            {"Authority": "A00000000000000000000000000000000wOGYpd", "Status": "OK"},
+        )
+
+        params = self.gateway.extract_callback_params(request)
+
+        self.assertEqual(params["authority"], "A00000000000000000000000000000000wOGYpd")
+        self.assertFalse(params["is_customer_cancelled"])
+
+    def test_nok_status_is_customer_cancelled(self):
+        request = self.factory.get(
+            "/api/payments/callback/zarinpal/",
+            {"Authority": "A00000000000000000000000000000000wOGYpd", "Status": "NOK"},
+        )
+
+        params = self.gateway.extract_callback_params(request)
+
+        self.assertTrue(params["is_customer_cancelled"])
+
+    def test_lowercase_param_names_also_accepted(self):
+        request = self.factory.get(
+            "/api/payments/callback/zarinpal/",
+            {"authority": "lowercase-authority", "status": "OK"},
+        )
+
+        params = self.gateway.extract_callback_params(request)
+
+        self.assertEqual(params["authority"], "lowercase-authority")
+        self.assertFalse(params["is_customer_cancelled"])

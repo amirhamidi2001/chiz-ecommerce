@@ -22,6 +22,7 @@ vi.mock('../context/CartContext', () => ({
 
 vi.mock('../services/api', () => ({
   createOrder: vi.fn(),
+  initiatePayment: vi.fn(),
   isAuthenticated: vi.fn(),
   // Checkout fetches the shopper's saved address book on mount (Task
   // 5.2.1.5) to decide whether to show the saved-address picker.
@@ -31,7 +32,7 @@ vi.mock('../services/api', () => ({
 }));
 
 import { useCart } from '../context/CartContext';
-import { createOrder, isAuthenticated, dashboardAPI } from '../services/api';
+import { createOrder, initiatePayment, isAuthenticated, dashboardAPI } from '../services/api';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -396,8 +397,11 @@ describe('Checkout', () => {
   // ── Submission success ─────────────────────────────────────────────────────
 
   describe('submission success', () => {
-    it('calls createOrder with the correct payload', async () => {
+    it('calls createOrder with the correct payload (no payment fields)', async () => {
       createOrder.mockResolvedValueOnce({ data: { id: 42 } });
+      initiatePayment.mockResolvedValueOnce({
+        data: { redirect_url: 'https://sandbox.zarinpal.com/pg/StartPay/A123' },
+      });
       const user = userEvent.setup();
       renderCheckout();
 
@@ -417,26 +421,99 @@ describe('Checkout', () => {
         state: 'tehran',
         zip: '1234567890',
         country: 'IR',
-        payment_method: 'credit_card',
-        card_last_four: '3456',
         // Manual-address checkouts carry save_address and NOT address_id
         // (Task 5.2.1.5) — the two payload shapes are mutually exclusive.
         save_address: false,
       });
       expect(payload).not.toHaveProperty('address_id');
+      // Task 6.4.1.1: there's no card-entry step in the real flow any
+      // more — the gateway's own hosted page collects payment details,
+      // not this form — so these must NOT be sent, even though the (now
+      // dead, Task 6.4.1.3's job to remove) card UI fields are still
+      // present and filled in by fillValidForm() above.
+      expect(payload).not.toHaveProperty('payment_method');
+      expect(payload).not.toHaveProperty('card_last_four');
+      expect(payload).not.toHaveProperty('discount');
     });
 
-    it('navigates to /order-confirmation/:id on success', async () => {
+    it('calls initiatePayment with the created order id, then redirects the full browser window to the returned gateway URL', async () => {
       createOrder.mockResolvedValueOnce({ data: { id: 99 } });
+      initiatePayment.mockResolvedValueOnce({
+        data: { redirect_url: 'https://sandbox.zarinpal.com/pg/StartPay/A00000000wOGYpd' },
+      });
+
+      // jsdom doesn't implement real navigation; spy on the setter
+      // instead (same approach as ProductDetails.test.jsx). A real
+      // window.location.href assignment can't be observed any other way
+      // in jsdom, and this is a genuine external-origin redirect (the
+      // gateway's hosted page), not an in-app route — so there's no
+      // React Router navigation to assert on instead.
+      delete window.location;
+      window.location = { href: '' };
+
       const user = userEvent.setup();
       renderCheckout();
 
       await fillValidForm(user);
       await user.click(screen.getByRole('button', { name: /place order/i }));
 
+      await waitFor(() => expect(initiatePayment).toHaveBeenCalledWith(99));
+
       await waitFor(() =>
-        expect(mockNavigate).toHaveBeenCalledWith('/order-confirmation/99'),
+        expect(window.location.href).toBe(
+          'https://sandbox.zarinpal.com/pg/StartPay/A00000000wOGYpd',
+        ),
       );
+
+      // useNavigate() must NOT be used for this — it's an external
+      // origin, and React Router's navigate() only handles in-app
+      // routes.
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('retries payment initiation for the SAME order (no duplicate order) when initiatePayment fails then the user retries', async () => {
+      createOrder.mockResolvedValueOnce({ data: { id: 55 } });
+      initiatePayment
+        .mockRejectedValueOnce({
+          response: { data: { detail: 'Payment gateway is currently unavailable.' } },
+        })
+        .mockResolvedValueOnce({
+          data: { redirect_url: 'https://sandbox.zarinpal.com/pg/StartPay/RETRY' },
+        });
+
+      delete window.location;
+      window.location = { href: '' };
+
+      const user = userEvent.setup();
+      renderCheckout();
+
+      await fillValidForm(user);
+      await user.click(screen.getByRole('button', { name: /place order/i }));
+
+      // First initiate attempt fails — a clear error is shown, and the
+      // button becomes a "Retry Payment" affordance rather than a plain
+      // "Place Order" (which would resubmit the whole form).
+      expect(
+        await screen.findByText(/payment gateway is currently unavailable/i),
+      ).toBeInTheDocument();
+      const retryBtn = await screen.findByRole('button', { name: /retry payment/i });
+      expect(retryBtn).not.toBeDisabled();
+
+      await user.click(retryBtn);
+
+      await waitFor(() =>
+        expect(window.location.href).toBe(
+          'https://sandbox.zarinpal.com/pg/StartPay/RETRY',
+        ),
+      );
+
+      // THE key assertion: createOrder was called exactly ONCE across
+      // both the initial submit and the retry — the retry must reuse
+      // the already-created order, never create a duplicate one.
+      expect(createOrder).toHaveBeenCalledOnce();
+      expect(initiatePayment).toHaveBeenCalledTimes(2);
+      expect(initiatePayment).toHaveBeenNthCalledWith(1, 55);
+      expect(initiatePayment).toHaveBeenNthCalledWith(2, 55);
     });
 
     it('shows "Placing Order…" text on the button while submitting', async () => {

@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { createOrder, isAuthenticated, dashboardAPI } from '../services/api';
+import { createOrder, initiatePayment, isAuthenticated, dashboardAPI } from '../services/api';
 import AddressPicker from '../components/AddressPicker';
 import { NEW_ADDRESS } from '../utils/address';
 import { IRAN_PROVINCES, isValidPostalCode } from '../constants/provinces';
@@ -117,6 +117,12 @@ const Checkout = () => {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
+  // Task 6.4.1.1: set once createOrder() succeeds, so a failed
+  // initiatePayment() call (e.g. the gateway is down) can be retried
+  // against the SAME already-created PENDING order, instead of
+  // resubmitting the form and creating a duplicate order.
+  const [pendingOrderId, setPendingOrderId] = useState(null);
+  const [paymentInitError, setPaymentInitError] = useState('');
 
   // ── Derived totals ─────────────────────────────────────────────────────────
   // NOTE: there is no coupon/promo system yet (tracked as Epic 9). Discount
@@ -187,9 +193,46 @@ const Checkout = () => {
   };
 
   // ── Submit ──────────────────────────────────────────────────────────────────
+  // Task 6.4.1.1: real payment flow. Create the order (now PENDING, per
+  // Task 6.2.1.2 — payment hasn't happened yet), then ask the backend to
+  // initiate payment against the configured gateway and do a REAL browser
+  // navigation to its hosted page. There's no card-entry step here at all
+  // any more: the gateway's own page collects payment details, not this
+  // form. (The now-unused card fields/state further up this component are
+  // Task 6.4.1.3's job to remove — out of scope here.)
+  const initiateAndRedirect = async (orderId) => {
+    try {
+      const { data: paymentInit } = await initiatePayment(orderId);
+      // Deliberately window.location.href, NOT navigate(): the gateway's
+      // URL is a different origin entirely, and React Router's
+      // useNavigate() only handles in-app SPA routes. A true external
+      // redirect requires a real browser navigation. Left disabled/
+      // submitting on success — the page is about to unload anyway, and
+      // re-enabling the button for the brief moment before that happens
+      // would just invite a double-click.
+      window.location.href = paymentInit.redirect_url;
+    } catch (err) {
+      setPaymentInitError(
+        err.response?.data?.detail
+          || 'Payment could not be started, please try again.',
+      );
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setServerError('');
+    setPaymentInitError('');
+
+    if (pendingOrderId) {
+      // The order already exists (a previous initiatePayment() call
+      // failed) — retry payment initiation for that SAME order rather
+      // than resubmitting the form and creating a duplicate.
+      setSubmitting(true);
+      await initiateAndRedirect(pendingOrderId);
+      return;
+    }
 
     const validationErrors = validate();
     if (Object.keys(validationErrors).length) {
@@ -206,17 +249,18 @@ const Checkout = () => {
     }
 
     setSubmitting(true);
+    let orderId;
     try {
       // Two mutually exclusive shapes, matching the backend contract
       // (Task 5.2.1.3): either address_id referencing a saved Address, or
       // the full set of manual fields. The server treats address_id as
       // authoritative when both are present, but sending only what's
       // actually in use keeps the request honest about intent.
+      // payment_method / card_last_four are gone from this payload
+      // entirely (Task 6.4.1.1) — there's no card-entry step any more.
       const payload = {
         email: form.email,
         billing_same: form.billingSame,
-        payment_method: paymentMethod,
-        card_last_four: paymentMethod === 'credit_card' ? card.number.slice(-4) : '',
         notes: form.notes,
       };
 
@@ -237,8 +281,9 @@ const Checkout = () => {
         });
       }
 
-      const { data } = await createOrder(payload);
-      navigate(`/order-confirmation/${data.id}`);
+      const { data: order } = await createOrder(payload);
+      orderId = order.id;
+      setPendingOrderId(orderId);
     } catch (err) {
       const data = err.response?.data;
       if (data && typeof data === 'object') {
@@ -255,9 +300,11 @@ const Checkout = () => {
       } else {
         setServerError('Something went wrong. Please try again.');
       }
-    } finally {
       setSubmitting(false);
+      return;
     }
+
+    await initiateAndRedirect(orderId);
   };
 
   // ── Empty cart redirect ─────────────────────────────────────────────────────
@@ -299,6 +346,16 @@ const Checkout = () => {
             <div className="mb-6 flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 px-5 py-4 rounded-xl">
               <i className="bi bi-exclamation-triangle"></i>
               <span>{serverError}</span>
+            </div>
+          )}
+
+          {/* Payment initiation error — order already exists (pendingOrderId),
+              so the button below retries payment for that same order rather
+              than resubmitting the form. */}
+          {paymentInitError && (
+            <div className="mb-6 flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 px-5 py-4 rounded-xl">
+              <i className="bi bi-exclamation-triangle"></i>
+              <span>{paymentInitError}</span>
             </div>
           )}
 
@@ -593,6 +650,8 @@ const Checkout = () => {
                       <span className="flex items-center gap-2">
                         {submitting ? (
                           <><i className="bi bi-arrow-clockwise animate-spin"></i> Placing Order…</>
+                        ) : pendingOrderId && paymentInitError ? (
+                          <><i className="bi bi-arrow-repeat"></i> Retry Payment</>
                         ) : (
                           <><i className="bi bi-bag-check"></i> Place Order</>
                         )}

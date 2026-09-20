@@ -1,4 +1,7 @@
+import logging
+
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.shortcuts import redirect
 from django.urls import reverse
@@ -10,8 +13,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .gateways import get_payment_gateway
-from .models import PaymentTransaction
+from .models import PaymentGatewayConfig, PaymentTransaction
 from .serializers import PaymentInitiateSerializer
+
+logger = logging.getLogger(__name__)
 
 
 class PaymentInitiateView(APIView):
@@ -39,29 +44,108 @@ class PaymentInitiateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        gateway_name = settings.DEFAULT_PAYMENT_GATEWAY
-        gateway = get_payment_gateway(gateway_name)
-        callback_url = request.build_absolute_uri(
-            reverse("payments:callback", kwargs={"gateway": gateway_name})
-        )
-        result = gateway.request_payment(
-            amount=order.total,
-            callback_url=callback_url,
-            description=f"Order {order.order_number}",
-        )
+        # Task 6.3.1.3: PRIMARY choice now comes from a database-backed,
+        # admin-editable singleton (PaymentGatewayConfig) rather than the
+        # settings-only DEFAULT_PAYMENT_GATEWAY — so an admin can react to
+        # a gateway outage by changing the active gateway at runtime, no
+        # env var change or redeploy needed. get_solo()'s get_or_create
+        # already falls back to this model field's own default
+        # (Gateway.ZARINPAL) the first time it's ever called — e.g.
+        # immediately after a fresh deploy, before any admin has touched
+        # this config — which happens to match settings.
+        # DEFAULT_PAYMENT_GATEWAY's own default ("zarinpal"), so no extra
+        # glue code is needed to keep them in sync for the common case.
+        gateway_config = PaymentGatewayConfig.get_solo()
+        gateway_chain = [gateway_config.active_gateway]
+        for candidate in gateway_config.fallback_order:
+            if candidate not in gateway_chain:
+                gateway_chain.append(candidate)
 
-        if not result.success:
+        result = None
+        succeeded_with = None
+        attempted = []
+
+        for gateway_name in gateway_chain:
+            try:
+                gateway = get_payment_gateway(gateway_name)
+            except ImproperlyConfigured as exc:
+                # A misconfigured/typo'd entry in fallback_order (or a
+                # gateway class that no longer exists) shouldn't take
+                # down the whole initiate flow — skip it and keep trying
+                # the rest of the chain, but log it: a bad config entry
+                # sitting there silently is exactly the kind of thing
+                # that should be noticed before it matters.
+                logger.warning(
+                    "Payment gateway %r in the configured chain for order "
+                    "%s is misconfigured, skipping: %s",
+                    gateway_name,
+                    order.order_number,
+                    exc,
+                )
+                continue
+
+            callback_url = request.build_absolute_uri(
+                reverse("payments:callback", kwargs={"gateway": gateway_name})
+            )
+            result = gateway.request_payment(
+                amount=order.total,
+                callback_url=callback_url,
+                description=f"Order {order.order_number}",
+            )
+            attempted.append(gateway_name)
+
+            if result.success:
+                succeeded_with = gateway_name
+                break
+
+            logger.warning(
+                "Payment gateway %r failed to initiate for order %s: %s",
+                gateway_name,
+                order.order_number,
+                result.error_message,
+            )
+
+        if succeeded_with is None:
+            # Every gateway in the chain failed (or the chain was empty/
+            # entirely misconfigured) — this operational visibility
+            # matters: a string of failures across the whole fallback
+            # chain is a strong signal of a genuine multi-gateway outage,
+            # not a one-off blip.
+            logger.error(
+                "All configured payment gateways failed to initiate for "
+                "order %s. Attempted, in order: %s",
+                order.order_number,
+                attempted or "(none — chain was empty or fully misconfigured)",
+            )
             # 502, not 400/500: this is a failed call to an external
             # dependency (the gateway), not a client input error or a
             # bug on our side.
+            error_message = (
+                result.error_message if result else "Payment initiation failed."
+            )
             return Response(
-                {"detail": result.error_message or "Payment initiation failed."},
+                {"detail": error_message or "Payment initiation failed."},
                 status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        if len(attempted) > 1:
+            logger.info(
+                "Payment gateway fallback succeeded for order %s: %r worked "
+                "after %s failed first.",
+                order.order_number,
+                succeeded_with,
+                attempted[:-1],
+            )
+        else:
+            logger.info(
+                "Payment initiated via %r for order %s.",
+                succeeded_with,
+                order.order_number,
             )
 
         PaymentTransaction.objects.create(
             order=order,
-            gateway=gateway_name,
+            gateway=succeeded_with,
             authority=result.authority,
             amount=order.total,
             status=PaymentTransaction.Status.PENDING,
@@ -89,8 +173,29 @@ class PaymentCallbackView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, gateway):
-        authority = request.GET.get("Authority") or request.GET.get("authority")
-        gateway_status = request.GET.get("Status") or request.GET.get("status")
+        try:
+            gateway_instance = get_payment_gateway(gateway)
+        except ImproperlyConfigured:
+            # Unknown/misconfigured gateway name in the URL itself (e.g.
+            # a stale callback URL for a gateway that's since been
+            # removed from PAYMENT_GATEWAY_CLASSES) — there's no
+            # transaction to look up without knowing which gateway's
+            # authority format to expect, so this is the earliest
+            # possible failure point.
+            return redirect(
+                f"{settings.FRONTEND_URL}/checkout/failed?reason=unknown_transaction"
+            )
+
+        # Task 6.3.1.4: extraction of this gateway's own callback
+        # query-parameter convention (ZarinPal's Authority/Status=NOK,
+        # Zibal's trackId/success, IDPay's id+order_id/status=1 — three
+        # genuinely different shapes) now lives on the gateway itself via
+        # extract_callback_params(), not hardcoded here. This view no
+        # longer knows or cares which gateway's parameter names it's
+        # looking at.
+        params = gateway_instance.extract_callback_params(request)
+        authority = params["authority"]
+        is_customer_cancelled = params["is_customer_cancelled"]
 
         # Unlocked read: only used (a) to short-circuit an unknown
         # authority before touching any lock, and (b) as a fast-path
@@ -119,12 +224,13 @@ class PaymentCallbackView(APIView):
                 f"{settings.FRONTEND_URL}/checkout/failed?reason=already_failed"
             )
 
-        if gateway_status == "NOK":
+        if is_customer_cancelled:
             # Gateway itself reports the customer cancelled/failed before
-            # even reaching verification (confirmed against current
-            # ZarinPal docs/SDKs: Status=NOK means the customer cancelled
-            # or the payment failed client-side) — no need to call
-            # verify_payment for a known-cancelled flow.
+            # even reaching verification — no need to call verify_payment
+            # for a known-cancelled flow. What "reports cancelled" means
+            # is entirely gateway-specific (see extract_callback_params()
+            # on each concrete gateway) — this view just trusts the
+            # normalized boolean.
             final_txn = self._process_verification_result(
                 gateway, authority, success=False
             )
@@ -133,15 +239,15 @@ class PaymentCallbackView(APIView):
         # IMPORTANT: verify_payment() is a network call to the gateway —
         # deliberately made BEFORE acquiring any row lock. Holding a DB
         # lock across a slow external HTTP call would tie up a DB
-        # connection/lock for however long ZarinPal takes to respond,
+        # connection/lock for however long the gateway takes to respond,
         # which is worth avoiding. In the rare case of two near-
         # simultaneous callbacks for the same authority, this means
         # verify_payment() may genuinely be called twice — that's fine,
-        # since ZarinPal's verify endpoint is itself idempotent (Task
-        # 6.2.1.3: code 101 = "already verified"). Only the DATABASE
-        # mutation below — the part that must never happen twice — is
-        # guarded by the lock.
-        gateway_instance = get_payment_gateway(gateway)
+        # since every gateway's verify endpoint is itself idempotent
+        # (Task 6.2.1.3/6.3.1.1/6.3.1.2: ZarinPal code 101, Zibal result
+        # 201, IDPay status 101/200 = "already verified"). Only the
+        # DATABASE mutation below — the part that must never happen
+        # twice — is guarded by the lock.
         result = gateway_instance.verify_payment(
             authority=authority, amount=txn.order.total
         )

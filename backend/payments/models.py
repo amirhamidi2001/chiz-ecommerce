@@ -45,3 +45,44 @@ class PaymentTransaction(models.Model):
 
     def __str__(self):
         return f"{self.gateway} — {self.order.order_number} — {self.status}"
+
+
+class PaymentGatewayConfig(models.Model):
+    """
+    Singleton config row (Task 6.3.1.3) letting an admin change which
+    gateway checkout uses, and its fallback chain, at runtime — without
+    an env var change + redeploy. No existing singleton-config pattern
+    was found elsewhere in this codebase (checked first), so this uses
+    the straightforward pk=1-enforced approach: save() always writes to
+    pk=1, and get_solo() get-or-creates that one row, using this model's
+    own field default (Gateway.ZARINPAL) the first time it's ever
+    accessed — e.g. immediately after a fresh deploy, before an admin
+    has configured anything through the admin site.
+    """
+
+    active_gateway = models.CharField(
+        max_length=20,
+        choices=PaymentTransaction.Gateway.choices,
+        default=PaymentTransaction.Gateway.ZARINPAL,
+    )
+    fallback_order = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Ordered list of gateway names to try if the active gateway's "
+            "request fails, e.g. ['zibal', 'idpay']."
+        ),
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # enforce singleton
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return f"Payment gateway config (active: {self.active_gateway})"
