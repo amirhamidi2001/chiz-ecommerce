@@ -125,7 +125,21 @@ class OrderCreateSerializer(serializers.Serializer):
     billing_same = serializers.BooleanField(default=True)
 
     # Payment
-    payment_method = serializers.ChoiceField(choices=Order.PaymentMethod.choices)
+    # Task 6.4.1.3: made optional with a default. Checkout no longer asks
+    # the customer to pick a payment method type on this platform at all
+    # (real payment happens on the gateway's own hosted page — tracked
+    # separately via PaymentTransaction.gateway, e.g. "zarinpal"), so the
+    # frontend stopped sending this field entirely (Task 6.4.1.1). Keeping
+    # the field itself (rather than removing it from the model) avoids a
+    # migration and keeps existing order-history/admin displays working;
+    # CREDIT_CARD is just a harmless placeholder value now, not a real
+    # signal of anything. An explicit value is still accepted and
+    # validated normally if a caller does send one.
+    payment_method = serializers.ChoiceField(
+        choices=Order.PaymentMethod.choices,
+        required=False,
+        default=Order.PaymentMethod.CREDIT_CARD,
+    )
     card_last_four = serializers.CharField(
         max_length=4, min_length=4, allow_blank=True, default=""
     )
@@ -440,8 +454,18 @@ class OrderCreateSerializer(serializers.Serializer):
                     quantity=cart_item.quantity,
                 )
 
-            # ── Clear the cart ───────────────────────────────────────────────
-            cart.items.all().delete()
+            # NOTE: the cart is deliberately NOT cleared here any more
+            # (Task 6.4.1.2). It used to be cleared at order-creation time,
+            # but Phase 6's real-payment flow creates the order as PENDING
+            # *before* the customer ever reaches the gateway — clearing the
+            # cart at this point meant a customer whose payment failed or
+            # who cancelled at the gateway page lost their cart entirely,
+            # with no easy way to reorder, even though their order was
+            # correctly cancelled and stock released
+            # (payments.views.PaymentCallbackView._mark_failed). The cart is
+            # now cleared only on CONFIRMED payment success, in
+            # PaymentCallbackView.get()'s success branch — see that view for
+            # the corresponding cart.items.all().delete() call.
 
             # ── Save this address for next time ──────────────────────────────
             # Only when checkout used manually-typed fields (not an

@@ -1,6 +1,7 @@
 from decimal import Decimal
 from unittest.mock import call, patch
 
+from cart.models import Cart, CartItem
 from django.contrib.auth import get_user_model
 from order.models import Order, OrderItem
 from order.tests.factories import make_variant
@@ -491,3 +492,71 @@ class PaymentCallbackViewTests(APITestCase):
         self.assertIn("reason=unknown_transaction", response.url)
 
         mock_gateway.verify_payment.assert_not_called()
+
+    # ── Task 6.4.1.2: cart-clearing moved to confirmed payment success ─────
+
+    @patch("payments.views.get_payment_gateway")
+    def test_successful_callback_clears_the_cart(self, mock_get_gateway):
+        cart = Cart.objects.create(user=self.user)
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
+
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.extract_callback_params.return_value = {
+            "authority": self.authority,
+            "is_customer_cancelled": False,
+        }
+        mock_gateway.verify_payment.return_value = PaymentVerifyResult(
+            success=True, ref_id="201202070", raw_response={"data": {"code": 100}}
+        )
+
+        response = self.client.get(
+            self.url(), {"Authority": self.authority, "Status": "OK"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        cart.refresh_from_db()
+        self.assertEqual(cart.items.count(), 0)
+
+    @patch("payments.views.get_payment_gateway")
+    def test_failed_callback_preserves_the_cart(self, mock_get_gateway):
+        cart = Cart.objects.create(user=self.user)
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
+
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.extract_callback_params.return_value = {
+            "authority": self.authority,
+            "is_customer_cancelled": False,
+        }
+        mock_gateway.verify_payment.return_value = PaymentVerifyResult(
+            success=False, error_message="Transaction not found or unsuccessful."
+        )
+
+        response = self.client.get(
+            self.url(), {"Authority": self.authority, "Status": "OK"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        # A failed/cancelled payment must NOT touch the cart — the whole
+        # point of Task 6.4.1.2's fix is that the customer can retry
+        # checkout without having lost their cart contents.
+        cart.refresh_from_db()
+        self.assertEqual(cart.items.count(), 1)
+
+    @patch("payments.views.get_payment_gateway")
+    def test_customer_cancelled_callback_preserves_the_cart(self, mock_get_gateway):
+        cart = Cart.objects.create(user=self.user)
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
+
+        mock_gateway = mock_get_gateway.return_value
+        mock_gateway.extract_callback_params.return_value = {
+            "authority": self.authority,
+            "is_customer_cancelled": True,
+        }
+
+        response = self.client.get(
+            self.url(), {"Authority": self.authority, "Status": "NOK"}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        cart.refresh_from_db()
+        self.assertEqual(cart.items.count(), 1)

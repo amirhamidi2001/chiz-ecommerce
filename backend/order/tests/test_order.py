@@ -372,6 +372,20 @@ class OrderCreateSerializerTests(TestCase):
         s = self._serialize({"payment_method": "paypal", "card_last_four": ""})
         self.assertTrue(s.is_valid(), s.errors)
 
+    def test_payment_method_omitted_entirely_defaults_to_credit_card(self):
+        # Task 6.4.1.3: the frontend checkout form no longer asks the
+        # customer to pick a payment method at all (real payment happens
+        # on the gateway's hosted page) and stopped sending this field
+        # entirely (Task 6.4.1.1). Omitting it must NOT reject the
+        # checkout — it must default, not 400.
+        payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "payment_method"}
+        from order.serializers import OrderCreateSerializer
+
+        s = OrderCreateSerializer(data=payload, context={"request": self.request})
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+        self.assertEqual(order.payment_method, Order.PaymentMethod.CREDIT_CARD)
+
     def test_discount_field_removed_client_input_is_ignored(self):
         """
         Security fix (this task): `discount` is no longer a declared field
@@ -846,10 +860,10 @@ class OrderCreateSerializerTests(TestCase):
         s = self._serialize()
         self.assertTrue(s.is_valid(), s.errors)
         order = s.save()
-        cart = Cart.objects.get(user=self.user)
-        # Cart should be empty after creation
-        self.assertEqual(cart.subtotal, Decimal("0"))
-        # Order subtotal = 2 × $100
+        # Order subtotal = 2 × $100 — captured as a snapshot at checkout
+        # time, independent of the cart's own state afterward (Task
+        # 6.4.1.2: the cart is deliberately preserved, not cleared, at
+        # order-creation time any more).
         self.assertEqual(order.subtotal, Decimal("200.00"))
 
     def test_order_tax_is_ten_percent_of_subtotal(self):
@@ -1049,12 +1063,17 @@ class OrderCreateSerializerTests(TestCase):
         self.assertEqual(item_a.variant_id, shade_a.id)
         self.assertEqual(item_b.variant_id, shade_b.id)
 
-    def test_cart_cleared_after_order_creation(self):
+    def test_cart_preserved_after_order_creation(self):
+        # Task 6.4.1.2: the cart is deliberately NOT cleared at order
+        # creation any more — only on CONFIRMED payment success (see
+        # PaymentCallbackView). Clearing it here, before the customer
+        # ever reaches the gateway, meant a failed/cancelled payment lost
+        # the cart entirely.
         s = self._serialize()
         s.is_valid()
         s.save()
         cart = Cart.objects.get(user=self.user)
-        self.assertEqual(cart.items.count(), 0)
+        self.assertGreater(cart.items.count(), 0)
 
     def test_order_status_is_pending_after_creation(self):
         s = self._serialize()
@@ -1712,10 +1731,12 @@ class OrderListCreateAPITests(APITestCase):
             with self.subTest(field=field):
                 self.assertIn(field, res.data)
 
-    def test_post_clears_cart_after_order(self):
+    def test_post_preserves_cart_after_order(self):
+        # Task 6.4.1.2: cart-clearing moved to PaymentCallbackView's
+        # success path — see order/serializers.py's create() for why.
         self._post_order()
         cart = Cart.objects.get(user=self.user)
-        self.assertEqual(cart.items.count(), 0)
+        self.assertGreater(cart.items.count(), 0)
 
     def test_post_with_empty_cart_returns_400(self):
         Cart.objects.filter(user=self.user).delete()

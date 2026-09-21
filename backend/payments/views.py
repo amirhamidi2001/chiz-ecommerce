@@ -327,6 +327,22 @@ class PaymentCallbackView(APIView):
                 # transition is purely a status change.
                 txn.order.status = Order.Status.PROCESSING
                 txn.order.save(update_fields=["status"])
+
+                # Task 6.4.1.2: the cart is cleared HERE, on confirmed
+                # payment success — not at order-creation time (moved out
+                # of OrderCreateSerializer.create(); see that method's
+                # comment). Clearing it at order-creation meant a customer
+                # whose payment failed or who cancelled lost their cart
+                # entirely, with no easy way to reorder, even though their
+                # order was correctly cancelled and stock released below.
+                # Addressed via order.user rather than request.user/session
+                # — this view is AllowAny and reached via the gateway's
+                # redirect, so relying on order.user (set at order-creation
+                # time) is more robust than assuming any particular session
+                # state on this specific request.
+                cart = getattr(txn.order.user, "cart", None)
+                if cart is not None:
+                    cart.items.all().delete()
             else:
                 txn.status = PaymentTransaction.Status.FAILED
                 txn.save(update_fields=["status"])

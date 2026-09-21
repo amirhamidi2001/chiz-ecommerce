@@ -275,11 +275,6 @@ describe('Checkout saved-address integration', () => {
 
     // Email is still required — it isn't part of a saved Address.
     await user.type(document.querySelector('[name="email"]'), 'jane@example.com');
-    // Card details are still required for the credit_card method.
-    await user.type(screen.getByPlaceholderText('1234 5678 9012 3456'), '1234567890123456');
-    await user.type(screen.getByPlaceholderText('MM/YY'), '1227');
-    await user.type(document.querySelector('[name="cvv"]'), '321');
-    await user.type(document.querySelector('[name="name"]'), 'Jane Doe');
     await user.click(document.querySelector('[name="terms"]'));
 
     await user.click(screen.getByRole('button', { name: /place order/i }));
@@ -304,14 +299,10 @@ describe('Checkout saved-address integration', () => {
 
     await screen.findByTestId('address-picker');
 
-    // Deliberately fill ONLY email + card + terms. If validation still
-    // demanded first/last/phone/address/city/province/zip, this submit
-    // would never reach createOrder.
+    // Deliberately fill ONLY email + terms. If validation still demanded
+    // first/last/phone/address/city/province/zip, this submit would
+    // never reach createOrder.
     await user.type(document.querySelector('[name="email"]'), 'jane@example.com');
-    await user.type(screen.getByPlaceholderText('1234 5678 9012 3456'), '1234567890123456');
-    await user.type(screen.getByPlaceholderText('MM/YY'), '1227');
-    await user.type(document.querySelector('[name="cvv"]'), '321');
-    await user.type(document.querySelector('[name="name"]'), 'Jane Doe');
     await user.click(document.querySelector('[name="terms"]'));
 
     await user.click(screen.getByRole('button', { name: /place order/i }));
@@ -341,10 +332,6 @@ describe('Checkout saved-address integration', () => {
     await user.type(document.querySelector('[name="zip"]'), '1112223334');
     await user.click(document.querySelector('[name="saveAddress"]'));
 
-    await user.type(screen.getByPlaceholderText('1234 5678 9012 3456'), '1234567890123456');
-    await user.type(screen.getByPlaceholderText('MM/YY'), '1227');
-    await user.type(document.querySelector('[name="cvv"]'), '321');
-    await user.type(document.querySelector('[name="name"]'), 'Jane Doe');
     await user.click(document.querySelector('[name="terms"]'));
 
     await user.click(screen.getByRole('button', { name: /place order/i }));

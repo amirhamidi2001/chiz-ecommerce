@@ -35,6 +35,7 @@ import Cart from './pages/Cart';
 import Category from './pages/Category';
 import ChangePassword from './pages/ChangePassword';
 import Checkout from './pages/Checkout';
+import CheckoutFailed from './pages/CheckoutFailed';
 import ConfirmEmail from './pages/ConfirmEmail';
 import Contact from './pages/Contact';
 import Faq from './pages/Faq';
@@ -179,6 +180,7 @@ function App() {
                 <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
                 <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
                 <Route path="/checkout" element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
+                <Route path="/checkout/failed" element={<ProtectedRoute><CheckoutFailed /></ProtectedRoute>} />
                 <Route path="/order-confirmation/:id" element={<ProtectedRoute><OrderConfirmation /></ProtectedRoute>} />
 
                 {/* 404 */}

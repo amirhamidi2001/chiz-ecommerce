@@ -10,10 +10,6 @@ import { IRAN_PROVINCES, isValidPostalCode } from '../constants/provinces';
 const TAX_RATE = 0.10;
 const SHIPPING_COST = 9.99;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const formatCardNumber = (raw) =>
-  raw.replace(/(\d{4})/g, '$1 ').trim();
-
 // ─── Field component ──────────────────────────────────────────────────────────
 const Field = ({ label, required, error, children }) => (
   <div>
@@ -111,9 +107,6 @@ const Checkout = () => {
   const usingSavedAddress =
     selectedAddressId !== NEW_ADDRESS && selectedAddressId != null;
 
-  const [paymentMethod, setPaymentMethod] = useState('credit_card');
-  const [card, setCard] = useState({ number: '', expiry: '', cvv: '', name: '' });
-
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
@@ -137,24 +130,6 @@ const Checkout = () => {
     const { name, value, type, checked } = e.target;
     setForm((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: '' }));
-  };
-
-  const handleCardChange = (e) => {
-    const { name, value } = e.target;
-    setCard((prev) => ({ ...prev, [name]: value }));
-    if (errors[name]) setErrors((prev) => ({ ...prev, [name]: '' }));
-  };
-
-  const handleCardNumberChange = (e) => {
-    const raw = e.target.value.replace(/\D/g, '').slice(0, 16);
-    setCard((prev) => ({ ...prev, number: raw }));
-    if (errors.cardNumber) setErrors((prev) => ({ ...prev, cardNumber: '' }));
-  };
-
-  const handleExpiryChange = (e) => {
-    let v = e.target.value.replace(/\D/g, '');
-    if (v.length >= 3) v = v.slice(0, 2) + '/' + v.slice(2, 4);
-    setCard((prev) => ({ ...prev, expiry: v }));
   };
 
   // ── Validation ──────────────────────────────────────────────────────────────
@@ -182,13 +157,6 @@ const Checkout = () => {
       if (!form.country) e.country = 'Required';
     }
 
-    if (paymentMethod === 'credit_card') {
-      if (card.number.length < 16) e.cardNumber = 'Enter a valid 16-digit card number.';
-      if (!card.expiry.match(/^\d{2}\/\d{2}$/)) e.expiry = 'Use MM/YY format.';
-      if (card.cvv.length < 3) e.cvv = 'Enter a valid CVV.';
-      if (!card.name.trim()) e.cardName = 'Required';
-    }
-
     return e;
   };
 
@@ -198,8 +166,8 @@ const Checkout = () => {
   // initiate payment against the configured gateway and do a REAL browser
   // navigation to its hosted page. There's no card-entry step here at all
   // any more: the gateway's own page collects payment details, not this
-  // form. (The now-unused card fields/state further up this component are
-  // Task 6.4.1.3's job to remove — out of scope here.)
+  // form. (The old fake card-entry UI/state itself was removed in Task
+  // 6.4.1.3.)
   const initiateAndRedirect = async (orderId) => {
     try {
       const { data: paymentInit } = await initiatePayment(orderId);
@@ -516,109 +484,9 @@ const Checkout = () => {
                   )}
                 </div>
 
-                {/* 3 — Payment Method */}
-                <div className="bg-white border border-gray-100 rounded-xl shadow-sm mb-6 overflow-hidden">
-                  <StepHeader num="3" title="Payment Method" />
-                  <div className="p-6">
-                    {/* Method Selector */}
-                    <div className="flex flex-wrap gap-4 mb-6">
-                      {[
-                        { id: 'credit_card', icon: 'bi-credit-card-2-front', label: 'Credit / Debit Card' },
-                        { id: 'paypal', icon: 'bi-paypal', label: 'PayPal' },
-                        { id: 'apple_pay', icon: 'bi-apple', label: 'Apple Pay' },
-                      ].map((m) => (
-                        <label
-                          key={m.id}
-                          className={`flex-1 min-w-[120px] border rounded-xl p-3 text-center cursor-pointer transition ${paymentMethod === m.id
-                              ? 'border-teal-600 bg-teal-50'
-                              : 'border-gray-200 hover:border-gray-300'
-                            }`}
-                        >
-                          <input
-                            type="radio" name="paymentMethod" value={m.id}
-                            checked={paymentMethod === m.id}
-                            onChange={() => setPaymentMethod(m.id)}
-                            className="hidden"
-                          />
-                          <i className={`bi ${m.icon} text-2xl block mb-1`}></i>
-                          <span className="text-sm">{m.label}</span>
-                        </label>
-                      ))}
-                    </div>
-
-                    {/* Credit card fields */}
-                    {paymentMethod === 'credit_card' && (
-                      <div className="space-y-4">
-                        <Field label="Card Number" required error={errors.cardNumber}>
-                          <div className="relative">
-                            <input
-                              type="text"
-                              value={formatCardNumber(card.number)}
-                              onChange={handleCardNumberChange}
-                              className={`${inputCls(errors.cardNumber)} pr-16`}
-                              placeholder="1234 5678 9012 3456"
-                              data-error={!!errors.cardNumber}
-                            />
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1 text-gray-400">
-                              <i className="bi bi-credit-card-2-front"></i>
-                            </div>
-                          </div>
-                        </Field>
-                        <div className="grid md:grid-cols-2 gap-4">
-                          <Field label="Expiration Date" required error={errors.expiry}>
-                            <input
-                              type="text" value={card.expiry}
-                              onChange={handleExpiryChange}
-                              className={inputCls(errors.expiry)}
-                              placeholder="MM/YY"
-                              data-error={!!errors.expiry}
-                            />
-                          </Field>
-                          <Field label="Security Code (CVV)" required error={errors.cvv}>
-                            <div className="relative">
-                              <input
-                                type="text" name="cvv" value={card.cvv}
-                                onChange={handleCardChange}
-                                className={`${inputCls(errors.cvv)} pr-10`}
-                                placeholder="123"
-                                maxLength={4}
-                                data-error={!!errors.cvv}
-                              />
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" title="3-digit code on the back of your card">
-                                <i className="bi bi-question-circle"></i>
-                              </span>
-                            </div>
-                          </Field>
-                        </div>
-                        <Field label="Name on Card" required error={errors.cardName}>
-                          <input
-                            type="text" name="name" value={card.name}
-                            onChange={handleCardChange}
-                            className={inputCls(errors.cardName)}
-                            data-error={!!errors.cardName}
-                          />
-                        </Field>
-                      </div>
-                    )}
-
-                    {paymentMethod === 'paypal' && (
-                      <div className="bg-blue-50 border border-blue-200 text-blue-700 p-4 rounded-lg text-sm">
-                        <i className="bi bi-info-circle me-2"></i>
-                        You will be redirected to PayPal to complete your purchase securely.
-                      </div>
-                    )}
-                    {paymentMethod === 'apple_pay' && (
-                      <div className="bg-gray-50 border border-gray-200 text-gray-600 p-4 rounded-lg text-sm">
-                        <i className="bi bi-apple me-2"></i>
-                        You will be prompted to authorize payment with Apple Pay.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 4 — Review & Place Order */}
+                {/* 3 — Review & Place Order */}
                 <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-                  <StepHeader num="4" title="Review & Place Order" />
+                  <StepHeader num="3" title="Review & Place Order" />
                   <div className="p-6">
                     <Field label="" error={errors.terms}>
                       <label className="flex items-start gap-2 cursor-pointer select-none" data-error={!!errors.terms}>

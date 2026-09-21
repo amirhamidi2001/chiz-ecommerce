@@ -99,7 +99,6 @@ const byName = (name) => document.querySelector(`[name="${name}"]`);
 
 /**
  * Fills every required field and accepts the terms checkbox.
- * Requires credit_card as the active payment method (the default).
  */
 const fillValidForm = async (user) => {
   // ── Customer Information ──────────────────────────────────────────────────
@@ -116,14 +115,9 @@ const fillValidForm = async (user) => {
   await user.selectOptions(byName('state'), 'tehran');
   await user.type(byName('zip'), '1234567890');
 
-  // ── Credit card ───────────────────────────────────────────────────────────
-  // Card number uses a custom handler (no name attr); query by placeholder.
-  await user.type(screen.getByPlaceholderText('1234 5678 9012 3456'), '1234567890123456');
-  // Expiry also uses a custom handler; query by placeholder.
-  await user.type(screen.getByPlaceholderText('MM/YY'), '1227');
-  await user.type(byName('cvv'), '321');
-  // "Name on Card" input uses name="name"
-  await user.type(byName('name'), 'Jane Doe');
+  // Task 6.4.1.3: no payment-method/card-entry step any more — real
+  // payment method selection now happens on the gateway's own hosted
+  // page, not this form.
 
   // ── Terms ─────────────────────────────────────────────────────────────────
   await user.click(byName('terms'));
@@ -247,24 +241,20 @@ describe('Checkout', () => {
       expect(byName('zip')).toBeInTheDocument();
     });
 
-    it('renders payment method labels for each option', () => {
+    it('does not render any payment-method selector or card-entry fields (Task 6.4.1.3)', () => {
       renderCheckout();
 
-      expect(screen.getByText(/credit \/ debit card/i)).toBeInTheDocument();
-      expect(screen.getByText(/paypal/i)).toBeInTheDocument();
-      expect(screen.getByText(/apple pay/i)).toBeInTheDocument();
-    });
-
-    it('renders credit card fields when credit_card is the selected payment method (default)', () => {
-      renderCheckout();
-
-      // Card number: no name attr, identified by its unique placeholder
-      expect(screen.getByPlaceholderText('1234 5678 9012 3456')).toBeInTheDocument();
-      // Expiry: no name attr, identified by its placeholder
-      expect(screen.getByPlaceholderText('MM/YY')).toBeInTheDocument();
-      // CVV and card name have name attrs
-      expect(byName('cvv')).toBeInTheDocument();
-      expect(byName('name')).toBeInTheDocument();
+      // Real payment method selection now happens on the gateway's own
+      // hosted page — this platform's checkout form no longer asks the
+      // customer to pick a payment method type or enter card details at
+      // all.
+      expect(screen.queryByText(/credit \/ debit card/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/^paypal$/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/apple pay/i)).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('1234 5678 9012 3456')).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('MM/YY')).not.toBeInTheDocument();
+      expect(screen.queryByText(/security code/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/name on card/i)).not.toBeInTheDocument();
     });
 
     it('renders the Order Summary heading', () => {
@@ -344,36 +334,6 @@ describe('Checkout', () => {
       expect(countrySelect).toHaveValue('IR');
     });
 
-    it('switches payment method when a different option is clicked', async () => {
-      const user = userEvent.setup();
-      renderCheckout();
-
-      // Click the PayPal label — the radio is hidden (className="hidden") so we
-      // click the visible label text instead.
-      await user.click(screen.getByText(/paypal/i));
-
-      // Credit card fields should disappear
-      expect(screen.queryByPlaceholderText('1234 5678 9012 3456')).not.toBeInTheDocument();
-    });
-
-    it('shows a PayPal redirect notice when PayPal is selected', async () => {
-      const user = userEvent.setup();
-      renderCheckout();
-
-      await user.click(screen.getByText(/paypal/i));
-
-      expect(screen.getByText(/redirected to paypal/i)).toBeInTheDocument();
-    });
-
-    it('shows an Apple Pay notice when Apple Pay is selected', async () => {
-      const user = userEvent.setup();
-      renderCheckout();
-
-      await user.click(screen.getByText(/apple pay/i));
-
-      expect(screen.getByText(/prompted to authorize payment with apple pay/i)).toBeInTheDocument();
-    });
-
     it('allows the user to toggle the terms checkbox', async () => {
       const user = userEvent.setup();
       renderCheckout();
@@ -428,9 +388,8 @@ describe('Checkout', () => {
       expect(payload).not.toHaveProperty('address_id');
       // Task 6.4.1.1: there's no card-entry step in the real flow any
       // more — the gateway's own hosted page collects payment details,
-      // not this form — so these must NOT be sent, even though the (now
-      // dead, Task 6.4.1.3's job to remove) card UI fields are still
-      // present and filled in by fillValidForm() above.
+      // not this form — so these must NOT be sent. The card UI fields
+      // themselves are gone too, per Task 6.4.1.3.
       expect(payload).not.toHaveProperty('payment_method');
       expect(payload).not.toHaveProperty('card_last_four');
       expect(payload).not.toHaveProperty('discount');
@@ -577,46 +536,14 @@ describe('Checkout', () => {
       await user.type(byName('phone'), '555-0100');
       await user.type(byName('address'), '123 Main St');
       await user.type(byName('city'), 'Springfield');
-      await user.type(byName('state'), 'IL');
-      await user.type(byName('zip'), '62701');
-      await user.type(screen.getByPlaceholderText('1234 5678 9012 3456'), '1234567890123456');
-      await user.type(screen.getByPlaceholderText('MM/YY'), '1227');
-      await user.type(byName('cvv'), '321');
-      await user.type(byName('name'), 'Jane Doe');
+      await user.selectOptions(byName('state'), 'tehran');
+      await user.type(byName('zip'), '1234567890');
       // Deliberately do NOT check the terms checkbox
 
       await user.click(screen.getByRole('button', { name: /place order/i }));
 
       expect(
         await screen.findByText(/you must agree to the terms and conditions/i),
-      ).toBeInTheDocument();
-    });
-
-    it('shows a card number error when fewer than 16 digits are entered', async () => {
-      const user = userEvent.setup();
-      renderCheckout();
-
-      await user.type(screen.getByPlaceholderText('1234 5678 9012 3456'), '1234');
-      await user.click(screen.getByRole('button', { name: /place order/i }));
-
-      expect(
-        await screen.findByText(/valid 16-digit card number/i),
-      ).toBeInTheDocument();
-    });
-
-    it('shows an expiry format error when the value does not match MM/YY', async () => {
-      const user = userEvent.setup();
-      renderCheckout();
-
-      // Type only digits — the auto-formatter inserts the slash, but an
-      // incomplete entry won't match /^\d{2}\/\d{2}$/ in validate().
-      await user.type(screen.getByPlaceholderText('MM/YY'), '12');
-      await user.click(screen.getByRole('button', { name: /place order/i }));
-
-      // The error text is "Use MM/YY format." — the slash in the source text
-      // can cause RTL to fail with a plain regex. Use a function matcher.
-      expect(
-        await screen.findByText((content) => content.includes('MM/YY')),
       ).toBeInTheDocument();
     });
 
