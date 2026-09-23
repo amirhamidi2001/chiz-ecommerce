@@ -2,11 +2,9 @@ import logging
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.db import transaction
 from django.shortcuts import redirect
 from django.urls import reverse
 from order.models import Order
-from order.services.stock import release_reserved_stock
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -15,6 +13,7 @@ from rest_framework.views import APIView
 from .gateways import get_payment_gateway
 from .models import PaymentGatewayConfig, PaymentTransaction
 from .serializers import PaymentInitiateSerializer
+from .services import process_verification_result
 
 logger = logging.getLogger(__name__)
 
@@ -203,9 +202,9 @@ class PaymentCallbackView(APIView):
         # hit back/refresh on the confirmation page) so we skip an
         # unnecessary verify_payment() network call. This read is NOT
         # what guarantees correctness under concurrent duplicate
-        # callbacks — see _process_verification_result() below, which
-        # re-fetches under select_for_update() and is the only place
-        # that's actually allowed to decide "yes, apply this write."
+        # callbacks — see payments.services.process_verification_result(),
+        # which re-fetches under select_for_update() and is the only
+        # place that's actually allowed to decide "yes, apply this write."
         try:
             txn = PaymentTransaction.objects.select_related("order").get(
                 gateway=gateway, authority=authority
@@ -231,9 +230,7 @@ class PaymentCallbackView(APIView):
             # is entirely gateway-specific (see extract_callback_params()
             # on each concrete gateway) — this view just trusts the
             # normalized boolean.
-            final_txn = self._process_verification_result(
-                gateway, authority, success=False
-            )
+            final_txn = process_verification_result(gateway, authority, success=False)
             return self._redirect_for_failure(final_txn, reason="cancelled")
 
         # IMPORTANT: verify_payment() is a network call to the gateway —
@@ -253,7 +250,7 @@ class PaymentCallbackView(APIView):
         )
 
         if result.success:
-            final_txn = self._process_verification_result(
+            final_txn = process_verification_result(
                 gateway, authority, success=True, result=result
             )
             if final_txn.status == PaymentTransaction.Status.SUCCESS:
@@ -262,7 +259,7 @@ class PaymentCallbackView(APIView):
                 )
             return self._redirect_for_failure(final_txn, reason="already_failed")
 
-        final_txn = self._process_verification_result(gateway, authority, success=False)
+        final_txn = process_verification_result(gateway, authority, success=False)
         return self._redirect_for_failure(final_txn, reason="verification_failed")
 
     def _redirect_for_failure(self, txn, reason):
@@ -272,8 +269,9 @@ class PaymentCallbackView(APIView):
         verification_failed/already_failed) — in the extremely rare case
         where a concurrent request settled the outcome for a different
         reason than this one observed, the persisted STATE is still
-        guaranteed correct and singular (see _process_verification_result);
-        only the cosmetic redirect-reason query param could, in theory,
+        guaranteed correct and singular (see
+        payments.services.process_verification_result); only the
+        cosmetic redirect-reason query param could, in theory,
         reflect this request's path rather than whichever request won the
         race, which has no functional consequence.
         """
@@ -282,79 +280,3 @@ class PaymentCallbackView(APIView):
                 f"{settings.FRONTEND_URL}/order-confirmation/{txn.order.id}"
             )
         return redirect(f"{settings.FRONTEND_URL}/checkout/failed?reason={reason}")
-
-    def _process_verification_result(self, gateway, authority, success, result=None):
-        """
-        The ONLY place allowed to mutate a PaymentTransaction's status.
-
-        Locks the transaction row (select_for_update()) and re-checks its
-        status BEFORE writing, all inside one atomic block — mirroring
-        the exact lock-then-check-then-act pattern used for stock in
-        Epic 1 Task 1.1.1.2/1.1.1.3. This closes the race that a plain
-        `if txn.status != PENDING` check (Task 6.2.1.4) leaves open: two
-        near-simultaneous callbacks could both read PENDING before either
-        finishes writing. With the lock, only one request's write can
-        ever land per transaction row — the other blocks here until the
-        first commits, then sees status != PENDING and takes the
-        early-return path below, applying nothing.
-
-        Returns the transaction as it stands after this call — which may
-        reflect a DIFFERENT request's write (if this one lost the race),
-        not necessarily the `success`/`result` passed in here.
-        """
-        with transaction.atomic():
-            txn = (
-                PaymentTransaction.objects.select_for_update()
-                .select_related("order")
-                .get(gateway=gateway, authority=authority)
-            )
-
-            if txn.status != PaymentTransaction.Status.PENDING:
-                # Lost the race: another request already processed this
-                # transaction while we were (a) blocked waiting for this
-                # lock, or (b) off making our own verify_payment() call.
-                # Apply nothing — the winner's write already happened.
-                return txn
-
-            if success:
-                txn.status = PaymentTransaction.Status.SUCCESS
-                txn.ref_id = result.ref_id
-                txn.raw_callback_payload = result.raw_response
-                txn.save()
-                # Stock was already decremented at order-creation time
-                # (Epic 1/3's flow, before the customer ever reached the
-                # gateway) — nothing to touch here regarding stock; this
-                # transition is purely a status change.
-                txn.order.status = Order.Status.PROCESSING
-                txn.order.save(update_fields=["status"])
-
-                # Task 6.4.1.2: the cart is cleared HERE, on confirmed
-                # payment success — not at order-creation time (moved out
-                # of OrderCreateSerializer.create(); see that method's
-                # comment). Clearing it at order-creation meant a customer
-                # whose payment failed or who cancelled lost their cart
-                # entirely, with no easy way to reorder, even though their
-                # order was correctly cancelled and stock released below.
-                # Addressed via order.user rather than request.user/session
-                # — this view is AllowAny and reached via the gateway's
-                # redirect, so relying on order.user (set at order-creation
-                # time) is more robust than assuming any particular session
-                # state on this specific request.
-                cart = getattr(txn.order.user, "cart", None)
-                if cart is not None:
-                    cart.items.all().delete()
-            else:
-                txn.status = PaymentTransaction.Status.FAILED
-                txn.save(update_fields=["status"])
-
-                order = txn.order
-                if order.status == Order.Status.PENDING:
-                    order.status = Order.Status.CANCELLED
-                    order.save(update_fields=["status"])
-                    release_reserved_stock(
-                        order,
-                        actor=None,  # system-triggered, not an admin/user action
-                        note=f"Payment failed for order {order.order_number}",
-                    )
-
-            return txn

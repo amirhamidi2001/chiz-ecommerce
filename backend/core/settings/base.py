@@ -376,6 +376,16 @@ ZIBAL_MERCHANT_ID = config("ZIBAL_MERCHANT_ID", default="")
 IDPAY_API_KEY = config("IDPAY_API_KEY", default="")
 IDPAY_SANDBOX = config("IDPAY_SANDBOX", default=True, cast=bool)
 
+# Payment reconciliation (Task 6.5.1.1). How long a PaymentTransaction can
+# sit PENDING before the periodic reconcile_stuck_payment_transactions
+# Celery task actively re-verifies it against its gateway — covers the
+# customer-abandoned-the-gateway-page case that PaymentCallbackView alone
+# can never catch (nothing ever calls that view if the gateway never
+# redirects back).
+PAYMENT_RECONCILIATION_THRESHOLD_MINUTES = config(
+    "PAYMENT_RECONCILIATION_THRESHOLD_MINUTES", default=30, cast=int
+)
+
 
 # ─── Regulatory compliance (Iran cosmetics IRC registration) ───────────────────
 # OFF by default: when True, a Product that HAS an irc_regulatory_code

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -86,3 +87,42 @@ class PaymentGatewayConfig(models.Model):
 
     def __str__(self):
         return f"Payment gateway config (active: {self.active_gateway})"
+
+
+class PaymentAdminOverride(models.Model):
+    """
+    Audit log for a support/admin agent manually forcing a
+    PaymentTransaction to SUCCESS or FAILED through the admin action
+    (Task 6.4.2.2) — e.g. a support agent confirms via the gateway's own
+    merchant dashboard that a payment actually succeeded despite this
+    platform's records showing it failed, and needs to correct it
+    without opening a full unrestricted edit form. Distinct from
+    StockMovement (Epic 4's audit-logging convention) since this isn't
+    specifically a stock event — it's about WHO overrode WHICH
+    transaction, WHY, and what the status was before/after.
+
+    Deliberately has no admin add/change/delete permission of its own
+    (see PaymentAdminOverrideAdmin) — rows are only ever created by the
+    force_mark_success/force_mark_failed admin actions on
+    PaymentTransactionAdmin, never edited or deleted afterward.
+    """
+
+    transaction = models.ForeignKey(
+        PaymentTransaction, on_delete=models.CASCADE, related_name="admin_overrides"
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    previous_status = models.CharField(max_length=20)
+    new_status = models.CharField(max_length=20)
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return (
+            f"Override of transaction #{self.transaction_id}: "
+            f"{self.previous_status} → {self.new_status}"
+        )
