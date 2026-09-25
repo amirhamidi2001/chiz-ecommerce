@@ -5,9 +5,15 @@ from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.db import transaction
 from django.template.response import TemplateResponse
+from django.utils import timezone
 
 from .gateways.base import PaymentVerifyResult
-from .models import PaymentAdminOverride, PaymentGatewayConfig, PaymentTransaction
+from .models import (
+    PaymentAdminOverride,
+    PaymentGatewayConfig,
+    PaymentTransaction,
+    RefundRequest,
+)
 from .services import finalize_transaction_failure, finalize_transaction_success
 
 logger = logging.getLogger(__name__)
@@ -256,3 +262,122 @@ class PaymentAdminOverrideAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(RefundRequest)
+class RefundRequestAdmin(admin.ModelAdmin):
+    """
+    Task 6.4.2.3: a minimal, MANUAL staff workflow for tracking a refund
+    request's resolution — never calls any gateway refund API and never
+    moves real money. A staff member processes the actual refund through
+    the gateway's own merchant dashboard outside this platform, then uses
+    these actions to record the outcome here.
+
+    Unlike PaymentTransaction/PaymentAdminOverride, this model isn't
+    locked fully read-only: `admin_notes` is an ordinary free-text field
+    staff can annotate directly. `status`/`resolved_at` ARE readonly on
+    the change form, though — they're only ever set together, correctly,
+    by the actions below, so hand-editing `status` directly could leave
+    a PROCESSED/REJECTED row with no resolved_at, or vice versa.
+    """
+
+    list_display = (
+        "id",
+        "order",
+        "amount",
+        "status",
+        "requested_by",
+        "created_at",
+        "resolved_at",
+    )
+    list_filter = ("status", "created_at")
+    search_fields = ("order__order_number", "requested_by__email", "reason")
+    readonly_fields = (
+        "order",
+        "transaction",
+        "requested_by",
+        "amount",
+        "reason",
+        "status",
+        "created_at",
+        "resolved_at",
+    )
+    ordering = ("-created_at",)
+    actions = [
+        "approve_refund_requests",
+        "mark_refund_requests_processed",
+        "reject_refund_requests",
+    ]
+
+    @admin.action(description="Approve selected refund requests (Requested → Approved)")
+    def approve_refund_requests(self, request, queryset):
+        eligible = queryset.filter(status=RefundRequest.Status.REQUESTED)
+        skipped = queryset.exclude(status=RefundRequest.Status.REQUESTED).count()
+        updated = eligible.update(status=RefundRequest.Status.APPROVED)
+
+        # TODO: Epic 16 — notify customer of refund status change, once
+        # the proper notification infrastructure exists. No ad-hoc email
+        # sending here in the meantime.
+
+        self.message_user(
+            request, f"Approved {updated} refund request(s).", level=messages.SUCCESS
+        )
+        if skipped:
+            self.message_user(
+                request,
+                f"Skipped {skipped} request(s) not in Requested status.",
+                level=messages.WARNING,
+            )
+
+    @admin.action(
+        description="Mark selected refund requests as Processed (Approved → Processed)"
+    )
+    def mark_refund_requests_processed(self, request, queryset):
+        eligible = queryset.filter(status=RefundRequest.Status.APPROVED)
+        skipped = queryset.exclude(status=RefundRequest.Status.APPROVED).count()
+        updated = eligible.update(
+            status=RefundRequest.Status.PROCESSED, resolved_at=timezone.now()
+        )
+
+        # TODO: Epic 16 — notify customer of refund status change, once
+        # the proper notification infrastructure exists. No ad-hoc email
+        # sending here in the meantime.
+
+        self.message_user(
+            request,
+            f"Marked {updated} refund request(s) as processed.",
+            level=messages.SUCCESS,
+        )
+        if skipped:
+            self.message_user(
+                request,
+                f"Skipped {skipped} request(s) not in Approved status — a "
+                "request must be Approved before it can be marked Processed.",
+                level=messages.WARNING,
+            )
+
+    @admin.action(description="Reject selected refund requests")
+    def reject_refund_requests(self, request, queryset):
+        eligible = queryset.filter(
+            status__in=[RefundRequest.Status.REQUESTED, RefundRequest.Status.APPROVED]
+        )
+        skipped = queryset.exclude(
+            status__in=[RefundRequest.Status.REQUESTED, RefundRequest.Status.APPROVED]
+        ).count()
+        updated = eligible.update(
+            status=RefundRequest.Status.REJECTED, resolved_at=timezone.now()
+        )
+
+        # TODO: Epic 16 — notify customer of refund status change, once
+        # the proper notification infrastructure exists. No ad-hoc email
+        # sending here in the meantime.
+
+        self.message_user(
+            request, f"Rejected {updated} refund request(s).", level=messages.SUCCESS
+        )
+        if skipped:
+            self.message_user(
+                request,
+                f"Skipped {skipped} request(s) already in a terminal status.",
+                level=messages.WARNING,
+            )

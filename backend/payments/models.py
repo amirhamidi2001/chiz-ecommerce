@@ -126,3 +126,54 @@ class PaymentAdminOverride(models.Model):
             f"Override of transaction #{self.transaction_id}: "
             f"{self.previous_status} → {self.new_status}"
         )
+
+
+class RefundRequest(models.Model):
+    """
+    Tracks a refund REQUEST and its resolution status (Task 6.4.2.3).
+
+    Deliberately does NOT move any real money or call any gateway refund
+    API — per this task's explicit scoping, actually processing a refund
+    through ZarinPal/Zibal/IDPay's API is out of scope (real money
+    movement, gateway-specific, deferred). The assumption is that a staff
+    member processes the refund manually through the gateway's own
+    merchant dashboard outside this platform, then records the outcome
+    here via the admin actions on RefundRequestAdmin.
+    """
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        APPROVED = "approved", "Approved"
+        PROCESSED = "processed", "Processed (refunded outside platform)"
+        REJECTED = "rejected", "Rejected"
+
+    order = models.ForeignKey(
+        "order.Order", on_delete=models.CASCADE, related_name="refund_requests"
+    )
+    transaction = models.ForeignKey(
+        PaymentTransaction,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="refund_requests",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="refund_requests",
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    reason = models.TextField()
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.REQUESTED
+    )
+    admin_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Refund request for {self.order.order_number} — {self.status}"
