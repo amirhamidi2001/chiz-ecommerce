@@ -15,7 +15,12 @@ via APIClient.
 import responses
 from django.contrib.auth import get_user_model
 from order.models import Order, OrderItem
-from order.tests.factories import make_cart_with_items, make_product, make_variant
+from order.tests.factories import (
+    make_cart_with_items,
+    make_product,
+    make_shipping_rate,
+    make_variant,
+)
 from payments.gateways.idpay import IDPayGateway
 from payments.models import PaymentGatewayConfig, PaymentTransaction
 from rest_framework import status
@@ -48,6 +53,22 @@ VALID_CHECKOUT_PAYLOAD = {
     "card_last_four": "4242",
     "notes": "",
 }
+
+
+def _checkout_payload(**overrides):
+    """
+    Task 7.1.1.4 made shipping_carrier_id/shipping_rate_id required on
+    OrderCreateSerializer — resolve a default rate matching this file's
+    VALID_CHECKOUT_PAYLOAD "tehran" state and merge the ids in.
+    """
+    rate = make_shipping_rate(province="tehran")
+    payload = {
+        **VALID_CHECKOUT_PAYLOAD,
+        "shipping_carrier_id": rate.carrier_id,
+        "shipping_rate_id": rate.id,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def idpay_success_response(idpay_id="d2e353189823079e1e4181772cff5292"):
@@ -83,7 +104,7 @@ class IDPayCheckoutIntegrationTests(APITestCase):
         )
 
     def _checkout(self):
-        response = self.client.post(ORDERS_URL, VALID_CHECKOUT_PAYLOAD, format="json")
+        response = self.client.post(ORDERS_URL, _checkout_payload(), format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertEqual(response.data["status"], Order.Status.PENDING)
         return Order.objects.get(pk=response.data["id"])

@@ -856,6 +856,12 @@ class TestStockMovementModel:
             shipping_state="IL",
             shipping_zip="62704",
             shipping_country="US",
+            # shipping_cost has no model-level default any more (Task
+            # 7.1.1.4 removed the flat $9.99 fallback since it's now
+            # always resolved from a ShippingRate at checkout) — this
+            # test doesn't go through checkout at all, so it must be
+            # supplied explicitly like the other financial fields below.
+            shipping_cost=10,
             subtotal=100,
             tax=10,
             total=110,

@@ -79,16 +79,16 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from .factories import (
-    VALID_PAYLOAD,
     make_cart_with_items,
     make_color,
     make_product,
     make_user,
     make_variant,
+    valid_payload,
 )
 
 
-def _place_order(user, results, index):
+def _place_order(user, results, index, payload):
     """
     Thread worker: authenticate as *user* with a fresh APIClient and POST
     to /api/orders/, recording (status_code, response_data) into
@@ -101,17 +101,30 @@ def _place_order(user, results, index):
     client = APIClient()
     client.force_authenticate(user=user)
     try:
-        response = client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        response = client.post("/api/orders/", payload, format="json")
         results[index] = (response.status_code, response.data)
     finally:
         connections.close_all()
 
 
-def _run_concurrently(users):
-    """Fire one order-creation request per user, all at roughly the same time."""
+def _run_concurrently(users, payload=None):
+    """
+    Fire one order-creation request per user, all at roughly the same time.
+
+    The shipping payload is resolved ONCE here, on the main thread, before
+    any worker thread starts — not inside _place_order() itself. Task
+    7.1.1.4's valid_payload() creates/reuses a ShippingCarrier+ShippingRate
+    via get_or_create(); calling that concurrently from multiple threads
+    racing against the same unique (carrier, code) constraint would be
+    exactly the kind of spurious race this file is otherwise careful to
+    avoid conflating with the real stock-locking race under test. A plain
+    dict of already-resolved IDs is safe to share read-only across threads.
+    """
+    if payload is None:
+        payload = valid_payload()
     results = [None] * len(users)
     threads = [
-        threading.Thread(target=_place_order, args=(user, results, i))
+        threading.Thread(target=_place_order, args=(user, results, i, payload))
         for i, user in enumerate(users)
     ]
     for t in threads:

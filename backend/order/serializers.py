@@ -4,6 +4,7 @@ from dashboard.models import Address, IranProvince, iran_postal_code_validator
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
+from shipping.models import ShippingRate
 from shop.models import ProductVariant, StockMovement
 
 from .models import Order, OrderItem
@@ -116,6 +117,15 @@ class OrderCreateSerializer(serializers.Serializer):
         validators=[iran_postal_code_validator],
     )
     country = serializers.CharField(max_length=10, required=False, allow_blank=True)
+
+    # Shipping carrier/rate (Task 7.1.1.4). The customer must have already
+    # selected a specific carrier+rate BEFORE submitting checkout, via the
+    # rate-lookup/quote step in the checkout UI (Task 7.2.1.6) — mirroring
+    # exactly how address_id above works for saved addresses: reference an
+    # ID, resolve + re-validate server-side in validate() below, never
+    # trust client-computed shipping pricing.
+    shipping_carrier_id = serializers.IntegerField()
+    shipping_rate_id = serializers.IntegerField()
 
     # If checking out with manually-typed fields (not address_id), save
     # them as a new Address for next time.
@@ -248,6 +258,49 @@ class OrderCreateSerializer(serializers.Serializer):
             )
 
         attrs["cart"] = cart
+
+        # ── Resolve + re-validate the shipping rate (Task 7.1.1.4) ──────────
+        # SECURITY: never trust the client's earlier quote request matched
+        # what's actually being submitted now — the same "never trust
+        # client-supplied pricing, always re-derive/re-validate
+        # server-side" principle already established for stock (Epic 5
+        # Task 5.2.1.1) and price (Epic 5 Task 5.2.1.2). A quote fetched
+        # minutes ago could reference a rate that's since been deactivated,
+        # or the customer could have changed the destination address after
+        # fetching the quote without re-fetching a new one — either way,
+        # re-check against the ACTUAL resolved destination (attrs["state"],
+        # set above from either the saved address or manual fields) rather
+        # than assuming the earlier quote is still valid.
+        try:
+            shipping_rate = ShippingRate.objects.select_related("carrier").get(
+                pk=attrs["shipping_rate_id"]
+            )
+        except ShippingRate.DoesNotExist:
+            raise serializers.ValidationError(
+                {"shipping_rate_id": "Shipping rate not found."}
+            )
+
+        if not shipping_rate.is_active:
+            raise serializers.ValidationError(
+                {"shipping_rate_id": "This shipping rate is no longer available."}
+            )
+
+        if shipping_rate.province != attrs["state"]:
+            raise serializers.ValidationError(
+                {
+                    "shipping_rate_id": (
+                        "This shipping rate does not apply to the selected "
+                        "destination."
+                    )
+                }
+            )
+
+        if shipping_rate.carrier_id != attrs["shipping_carrier_id"]:
+            raise serializers.ValidationError(
+                {"shipping_carrier_id": "Carrier does not match the selected rate."}
+            )
+
+        attrs["shipping_rate"] = shipping_rate
         return attrs
 
     def create(self, validated_data):
@@ -369,9 +422,13 @@ class OrderCreateSerializer(serializers.Serializer):
             # submit an arbitrary `discount` value directly in the POST body
             # and have it applied at checkout with no server-side validation.
             # TODO: Epic 9 — replace with server-validated coupon discount
+            shipping_rate = validated_data["shipping_rate"]
+
             try:
                 totals = calculate_order_totals(
-                    subtotal=subtotal, discount=Decimal("0")
+                    subtotal=subtotal,
+                    shipping_cost=shipping_rate.price,
+                    discount=Decimal("0"),
                 )
             except (PricingError, ValueError) as e:
                 raise serializers.ValidationError({"discount": str(e)})
@@ -388,6 +445,7 @@ class OrderCreateSerializer(serializers.Serializer):
                 shipping_state=validated_data["state"],
                 shipping_zip=validated_data["zip"],
                 shipping_country=validated_data["country"],
+                shipping_carrier=shipping_rate.carrier,
                 billing_same_as_shipping=validated_data.get("billing_same", True),
                 payment_method=validated_data["payment_method"],
                 card_last_four=validated_data.get("card_last_four", ""),

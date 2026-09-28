@@ -7,8 +7,10 @@ inside a serializer. This is expected to grow (coupon-based discounts,
 real shipping-rate lookups, region-specific tax rules) — keeping it here
 means future changes don't have to touch the serializer at all.
 
-Note: this module is not yet wired into OrderCreateSerializer — that's a
-separate follow-up task. As of now it's a standalone, unit-tested service.
+Wired into OrderCreateSerializer.create() (Epic 1), with shipping_cost as
+an explicit caller-supplied argument as of Task 7.1.1.4 — see that
+serializer's create() for how the destination/weight-based ShippingRate
+lookup resolves the value passed in here.
 """
 
 from decimal import Decimal
@@ -35,16 +37,24 @@ class PricingService:
     """
 
     TAX_RATE: Decimal = Decimal("0.10")  # 10%
-    SHIPPING_COST: Decimal = Decimal("9.99")
 
     @classmethod
     def calculate_order_totals(
         cls,
         subtotal: Decimal,
+        shipping_cost: Decimal,
         discount: Decimal = Decimal("0"),
     ) -> Dict[str, Decimal]:
         """
         Compute the full set of order totals for a given cart subtotal.
+
+        `shipping_cost` (Task 7.1.1.4) is now an explicit, caller-supplied
+        input rather than an internal flat constant — real shipping cost
+        varies by carrier, destination, and weight, resolved by the new
+        ShippingRate lookup system (shipping.models.ShippingRate.find_rate)
+        before this function is ever called. This function has no opinion
+        on HOW shipping_cost was derived; it just needs a non-negative
+        Decimal to fold into the total.
 
         Returns a dict with keys: "subtotal", "shipping_cost", "tax",
         "discount", "total" — all Decimal, quantized to 2 decimal places
@@ -52,19 +62,23 @@ class PricingService:
         formula previously inlined in OrderCreateSerializer.create():
 
             tax = (subtotal * TAX_RATE).quantize(Decimal("0.01"))
-            total = (subtotal + SHIPPING_COST + tax - discount).quantize(Decimal("0.01"))
+            total = (subtotal + shipping_cost + tax - discount).quantize(Decimal("0.01"))
 
         Raises:
-            PricingError: if `subtotal` is negative, `discount` is
-                negative, or `discount` exceeds subtotal + shipping_cost +
-                tax (which would make the total negative).
+            PricingError: if `subtotal` is negative, `shipping_cost` is
+                negative, `discount` is negative, or `discount` exceeds
+                subtotal + shipping_cost + tax (which would make the
+                total negative).
         """
         if subtotal < 0:
             raise PricingError(f"subtotal cannot be negative (got {subtotal!r}).")
+        if shipping_cost < 0:
+            raise PricingError(
+                f"shipping_cost cannot be negative (got {shipping_cost!r})."
+            )
         if discount < 0:
             raise PricingError(f"discount cannot be negative (got {discount!r}).")
 
-        shipping_cost = cls.SHIPPING_COST
         tax = (subtotal * cls.TAX_RATE).quantize(TWO_PLACES)
 
         max_discount = subtotal + shipping_cost + tax
@@ -87,6 +101,7 @@ class PricingService:
 
 def calculate_order_totals(
     subtotal: Decimal,
+    shipping_cost: Decimal,
     discount: Decimal = Decimal("0"),
 ) -> Dict[str, Decimal]:
     """
@@ -96,4 +111,4 @@ def calculate_order_totals(
     referencing the class directly. See PricingService.calculate_order_totals
     for the full behavior/contract.
     """
-    return PricingService.calculate_order_totals(subtotal, discount)
+    return PricingService.calculate_order_totals(subtotal, shipping_cost, discount)

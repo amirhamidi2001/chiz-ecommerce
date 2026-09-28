@@ -400,6 +400,41 @@ class ProductVariant(models.Model):
     def is_low_stock(self) -> bool:
         return 0 < self.stock <= self.low_stock_threshold
 
+    # Flat per-item fallback used when a variant has neither weight_g nor
+    # volume_ml set. Deliberately conservative/approximate — real
+    # packaging weight data is inherently imperfect at this stage of the
+    # project (Task 7.1.1.4); this is an explicitly-flagged simplification
+    # rather than a silent inaccuracy, and is expected to shrink in
+    # importance over time as more variants get real weight_g data.
+    DEFAULT_ESTIMATED_WEIGHT_G = 100
+
+    # volume_ml -> weight_g approximation for liquid products that only
+    # have volume recorded. Roughly 1 gram per ml is a reasonable
+    # approximation for water-based cosmetic liquids (serums, toners),
+    # though it will overshoot for genuinely dense liquids and undershoot
+    # for less dense ones — again, an explicit approximation, not a
+    # precise conversion.
+    ML_TO_GRAMS_APPROXIMATION = 1
+
+    def weight_g_or_estimate(self) -> int:
+        """
+        Best-effort shippable weight in grams for this variant, used by
+        the shipping-rate lookup (ShippingRate.find_rate) to compute
+        total cart weight. Precedence:
+
+          1. weight_g, if set — the real, authoritative value.
+          2. volume_ml, if set and weight_g isn't — approximated at
+             ML_TO_GRAMS_APPROXIMATION grams per ml (see that constant's
+             docstring for the caveat).
+          3. DEFAULT_ESTIMATED_WEIGHT_G — a flat, conservative per-item
+             fallback when neither dimension is recorded at all.
+        """
+        if self.weight_g is not None:
+            return self.weight_g
+        if self.volume_ml is not None:
+            return self.volume_ml * self.ML_TO_GRAMS_APPROXIMATION
+        return self.DEFAULT_ESTIMATED_WEIGHT_G
+
 
 class StockMovement(models.Model):
     class Reason(models.TextChoices):

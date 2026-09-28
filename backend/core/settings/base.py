@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "cart.apps.CartConfig",
     "order.apps.OrderConfig",
     "payments.apps.PaymentsConfig",
+    "shipping.apps.ShippingConfig",
     "dashboard.apps.DashboardConfig",
     "chat.apps.ChatConfig",
     "blog.apps.BlogConfig",
@@ -385,6 +386,136 @@ IDPAY_SANDBOX = config("IDPAY_SANDBOX", default=True, cast=bool)
 PAYMENT_RECONCILIATION_THRESHOLD_MINUTES = config(
     "PAYMENT_RECONCILIATION_THRESHOLD_MINUTES", default=30, cast=int
 )
+
+
+# ─── Carrier providers (Feature 7.1.1) ──────────────────────────────────────────
+# Mirrors PAYMENT_GATEWAY_CLASSES exactly, one layer over in the shipping
+# domain: carriers are looked up by code (matching ShippingCarrier.Code —
+# "post", "tipax", "snapbox", "alopeyk") rather than a single active
+# provider, since multiple carriers are simultaneously available and the
+# one to use is resolved per-order from the customer's selection.
+CARRIER_PROVIDER_CLASSES = {
+    "post": "shipping.providers.post.PostCarrierProvider",
+    "tipax": "shipping.providers.tipax.TipaxCarrierProvider",
+    "snapbox": "shipping.providers.snapbox.SnapBoxCarrierProvider",
+    "alopeyk": "shipping.providers.alopeyk.AloPeykCarrierProvider",
+}
+
+# Iran Post credentials (Task 7.2.1.2). Confirmed against post.ir's own
+# "e-bazaar" (ای‌بازار) business/organizational panel documentation and
+# independent tracking-aggregator sources (e.g. 17TRACK, which explicitly
+# notes Iran Post's official public tracking API is unconfirmed): Iran Post
+# has NO publicly documented, self-service REST/SOAP API for rate quoting,
+# shipment creation, or tracking. Structured business access (bulk pickup,
+# booking) instead requires signing a direct contract ("عقد قرارداد
+# مستقیم") through their e-bazaar panel — an account relationship, not a
+# self-service API-key signup. There is deliberately no "sandbox" toggle
+# here (unlike ZARINPAL_SANDBOX/IDPAY_SANDBOX above) because no live API
+# call is made anywhere in this integration — see
+# shipping/providers/post.py's module docstring for the full research
+# behind that. IRAN_POST_ACCOUNT_NUMBER is a forward-looking placeholder
+# for the account/contract identifier Iran Post would issue if/when such a
+# business contract is signed and grants real API access; it is currently
+# unused by any code path.
+IRAN_POST_ACCOUNT_NUMBER = config("IRAN_POST_ACCOUNT_NUMBER", default="")
+
+# Tipax credentials (Task 7.2.1.3). Verified against Tipax's own public
+# presence (tipaxco.com) and its "eTipax" business platform
+# (etipaxco.com): despite this integration's initial assumption that
+# Tipax — being a more modern private courier — might expose a
+# documented, self-service developer API, no such API was found. eTipax
+# is a login-based WEB PORTAL for businesses (order registration,
+# door-to-door pickup, tracking, reporting), not a documented REST/SOAP
+# API with API keys — structurally the same shape as Iran Post's
+# e-bazaar panel (see IRAN_POST_ACCOUNT_NUMBER above), not the
+# ZarinPal/Zibal/IDPay-style merchant API this task's context suggested
+# might exist here. See shipping/providers/tipax.py's module docstring
+# for the full research behind this. As with Iran Post, there is
+# deliberately no "sandbox" toggle here because no live API call is made
+# anywhere in this integration. TIPAX_ACCOUNT_USERNAME/
+# TIPAX_ACCOUNT_PASSWORD are forward-looking placeholders for eTipax
+# business-portal login credentials, should a documented API ever become
+# available under that account; both are currently unused by any code
+# path.
+TIPAX_ACCOUNT_USERNAME = config("TIPAX_ACCOUNT_USERNAME", default="")
+TIPAX_ACCOUNT_PASSWORD = config("TIPAX_ACCOUNT_PASSWORD", default="")
+
+# SnapBox credentials/config (Task 7.2.1.4). Unlike Iran Post/Tipax above,
+# SnapBox DOES publish a real, documented merchant API (OpenAPI spec bundled
+# with its official SDK; production https://customer.snapp-box.com, staging
+# https://customer-stg.snapp-box.com). It is an on-demand bike/van courier
+# (not a locker/pickup-point service, contrary to this task's initial
+# assumption) that addresses every stop by latitude/longitude — see
+# shipping/providers/snapbox.py's module docstring for the full findings and
+# the unverified points to smoke-test against a staging token before
+# activating this carrier.
+#
+# SNAPBOX_API_KEY is the customer token sent in the `Authorization` header.
+# SNAPBOX_SANDBOX selects the staging host and defaults to True, for the same
+# reason as ZARINPAL_SANDBOX/IDPAY_SANDBOX: a fresh checkout/CI environment
+# must never hit production by accident.
+SNAPBOX_API_KEY = config("SNAPBOX_API_KEY", default="")
+SNAPBOX_SANDBOX = config("SNAPBOX_SANDBOX", default=True, cast=bool)
+# One of SnapBox's documented delivery categories: "bike", "bike-without-box",
+# "van", "van-heavy". Pricing depends on this, NOT on package weight.
+SNAPBOX_DEFAULT_DELIVERY_CATEGORY = config(
+    "SNAPBOX_DEFAULT_DELIVERY_CATEGORY", default="bike"
+)
+# Sent as `customerWalletType` on pricing requests; "SNAPP_BOX" is the value
+# used in SnapBox's own documented example.
+SNAPBOX_CUSTOMER_WALLET_TYPE = config(
+    "SNAPBOX_CUSTOMER_WALLET_TYPE", default="SNAPP_BOX"
+)
+# The store's own pickup location. create_shipment(order, destination) has no
+# origin parameter, so the pickup terminal must come from configuration.
+# Latitude/longitude are kept as strings (python-decouple can't cast a None
+# default to float) and parsed/validated by the provider; all default to
+# empty, in which case SnapBox shipment creation fails with a clear message
+# rather than sending a bogus pickup.
+SNAPBOX_PICKUP_CITY = config("SNAPBOX_PICKUP_CITY", default="")
+SNAPBOX_PICKUP_ADDRESS = config("SNAPBOX_PICKUP_ADDRESS", default="")
+SNAPBOX_PICKUP_LATITUDE = config("SNAPBOX_PICKUP_LATITUDE", default="")
+SNAPBOX_PICKUP_LONGITUDE = config("SNAPBOX_PICKUP_LONGITUDE", default="")
+SNAPBOX_PICKUP_CONTACT_NAME = config("SNAPBOX_PICKUP_CONTACT_NAME", default="")
+SNAPBOX_PICKUP_CONTACT_PHONE = config("SNAPBOX_PICKUP_CONTACT_PHONE", default="")
+
+# AloPeyk credentials/config (Task 7.2.1.5). AloPeyk DOES publish a real
+# RESTful merchant API (confirmed from AloPeyk's own official open-source
+# SDKs — AloPeyk/AloPeyk-Api-PHP and AloPeyk/AloPeyk-Api-Laravel on GitHub,
+# whose source was read directly, not just their README examples) — a
+# static, long-lived JWT "ACCESS-TOKEN" issued by AloPeyk's sales team
+# (alopeyk.com/contact?unit=sales), sent as `Authorization: Bearer <token>`
+# on every request, no separate login/exchange step. See
+# shipping/providers/alopeyk.py's module docstring for the full findings,
+# including the confirmed served-city list (Tehran, Karaj, Mashhad, Shiraz —
+# NOT the "Tehran, Mashhad, Isfahan" this task's own context speculated).
+#
+# ALOPEYK_API_BASE_URL exists (rather than a hardcoded host) because the
+# SDK source shows the base URL is an explicitly configurable endpoint
+# (Configs::ENDPOINTS, with 'production'/'sandbox'/'custom' entries) whose
+# literal values live in a config file this research could not access —
+# only the production API host could be independently confirmed (from a
+# screenshot URL embedded in AloPeyk's own documented API response, see
+# module docstring point 2). No sandbox host could be confirmed, so no
+# ALOPEYK_SANDBOX toggle is offered here (unlike SNAPBOX_SANDBOX above) —
+# get whichever URL(s) AloPeyk's sales contact actually provides and set
+# this per-environment instead of assuming a guessed staging subdomain.
+ALOPEYK_API_KEY = config("ALOPEYK_API_KEY", default="")
+ALOPEYK_API_BASE_URL = config("ALOPEYK_API_BASE_URL", default="https://api.alopeyk.com")
+# One of Configs::TRANSPORT_TYPES confirmed in the SDK's own examples:
+# "motor_taxi", "car", "cargo_s", "cargo".
+ALOPEYK_DEFAULT_TRANSPORT_TYPE = config(
+    "ALOPEYK_DEFAULT_TRANSPORT_TYPE", default="motor_taxi"
+)
+# The store's own pickup location — create_shipment(order, destination) has
+# no origin parameter, so it comes from configuration, mirroring
+# SNAPBOX_PICKUP_* above. Latitude/longitude are kept as strings (decouple
+# can't cast a None default to float) and parsed/validated by the provider.
+ALOPEYK_PICKUP_LATITUDE = config("ALOPEYK_PICKUP_LATITUDE", default="")
+ALOPEYK_PICKUP_LONGITUDE = config("ALOPEYK_PICKUP_LONGITUDE", default="")
+ALOPEYK_PICKUP_CITY = config("ALOPEYK_PICKUP_CITY", default="")
+ALOPEYK_PICKUP_CONTACT_NAME = config("ALOPEYK_PICKUP_CONTACT_NAME", default="")
+ALOPEYK_PICKUP_CONTACT_PHONE = config("ALOPEYK_PICKUP_CONTACT_PHONE", default="")
 
 
 # ─── Regulatory compliance (Iran cosmetics IRC registration) ───────────────────

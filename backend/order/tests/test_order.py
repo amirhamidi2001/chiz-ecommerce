@@ -19,8 +19,10 @@ from .factories import (
     make_category,
     make_color,
     make_product,
+    make_shipping_rate,
     make_user,
     make_variant,
+    valid_payload,
 )
 
 User = get_user_model()
@@ -312,7 +314,7 @@ class OrderCreateSerializerTests(TestCase):
     def _serialize(self, data=None):
         from order.serializers import OrderCreateSerializer
 
-        payload = {**VALID_PAYLOAD, **(data or {})}
+        payload = {**valid_payload(), **(data or {})}
         s = OrderCreateSerializer(data=payload, context={"request": self.request})
         return s
 
@@ -333,7 +335,7 @@ class OrderCreateSerializerTests(TestCase):
         """
         from order.serializers import OrderCreateSerializer
 
-        payload = {**VALID_PAYLOAD, **(data or {})}
+        payload = {**valid_payload(), **(data or {})}
         s = OrderCreateSerializer(data=payload, context={"request": self.request})
         validated_data = s.to_internal_value(payload)
         validated_data["cart"] = cart
@@ -378,7 +380,7 @@ class OrderCreateSerializerTests(TestCase):
         # on the gateway's hosted page) and stopped sending this field
         # entirely (Task 6.4.1.1). Omitting it must NOT reject the
         # checkout — it must default, not 400.
-        payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "payment_method"}
+        payload = {k: v for k, v in valid_payload().items() if k != "payment_method"}
         from order.serializers import OrderCreateSerializer
 
         s = OrderCreateSerializer(data=payload, context={"request": self.request})
@@ -521,7 +523,19 @@ class OrderCreateSerializerTests(TestCase):
         self.assertIn("state", s.errors)
 
     def test_checkout_with_valid_iran_province_is_accepted(self):
-        s = self._serialize({"state": "isfahan"})
+        # The default shipping_rate_id from valid_payload() is for
+        # "tehran" — overriding the destination province here also needs
+        # a rate that actually matches it, or checkout would correctly
+        # (and separately) reject on the shipping_rate_id/province
+        # mismatch check (this task) rather than on province validity.
+        isfahan_rate = make_shipping_rate(province="isfahan")
+        s = self._serialize(
+            {
+                "state": "isfahan",
+                "shipping_carrier_id": isfahan_rate.carrier_id,
+                "shipping_rate_id": isfahan_rate.id,
+            }
+        )
         self.assertTrue(s.is_valid(), s.errors)
         order = s.save()
         self.assertEqual(order.shipping_state, "isfahan")
@@ -619,12 +633,15 @@ class OrderCreateSerializerTests(TestCase):
             postal_code="0000000000",
             country="US",
         )
+        rate = make_shipping_rate(province="tehran")  # matches address.province
         payload = {
             "email": VALID_PAYLOAD["email"],
             "billing_same": True,
             "payment_method": VALID_PAYLOAD["payment_method"],
             "card_last_four": VALID_PAYLOAD["card_last_four"],
             "address_id": address.id,
+            "shipping_carrier_id": rate.carrier_id,
+            "shipping_rate_id": rate.id,
         }
         s = OrderCreateSerializer(data=payload, context={"request": self.request})
         self.assertTrue(s.is_valid(), s.errors)
@@ -676,7 +693,12 @@ class OrderCreateSerializerTests(TestCase):
         # argument ON TOP OF VALID_PAYLOAD — so passing a dict with a key
         # removed wouldn't actually unset it; a real client request
         # simply omitting "city" is a genuinely different payload shape).
-        payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "city"}
+        # Built from valid_payload() (not a bare VALID_PAYLOAD filter) so
+        # shipping_carrier_id/shipping_rate_id are present — otherwise
+        # those (now-required) fields would fail at the DRF field level
+        # and validate() would never even run far enough to produce the
+        # "city" error this test is actually checking for.
+        payload = {k: v for k, v in valid_payload().items() if k != "city"}
         s = OrderCreateSerializer(data=payload, context={"request": self.request})
         self.assertFalse(s.is_valid())
         self.assertIn("city", s.errors)
@@ -684,7 +706,7 @@ class OrderCreateSerializerTests(TestCase):
     def test_checkout_with_manual_fields_and_save_address_creates_new_address(self):
         addresses_before = Address.objects.filter(user=self.user).count()
 
-        payload = {**VALID_PAYLOAD, "save_address": True}
+        payload = {**valid_payload(), "save_address": True}
         s = self._serialize(payload)
         self.assertTrue(s.is_valid(), s.errors)
         s.save()
@@ -1636,6 +1658,165 @@ class OrderCreateSerializerTests(TestCase):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 2b. Shipping rate resolution at checkout (Task 7.1.1.4)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class OrderCreateShippingRateTests(TestCase):
+    """
+    OrderCreateSerializer.validate() resolves shipping_rate_id server-side
+    and re-validates it against the ACTUAL submitted destination — never
+    trusting that an earlier client-side quote still applies, mirroring
+    the same principle already established for stock (Epic 5 Task
+    5.2.1.1) and price (Epic 5 Task 5.2.1.2).
+    """
+
+    def setUp(self):
+        self.user = make_user()
+        self.product = make_product(price="100.00", stock=5)
+        self.variant = make_variant(product=self.product, price="100.00", stock=5)
+        make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])
+        self.request = type(
+            "Request", (), {"user": self.user, "build_absolute_uri": lambda s, u: u}
+        )()
+
+    def _serialize(self, data=None):
+        from order.serializers import OrderCreateSerializer
+
+        payload = {**valid_payload(), **(data or {})}
+        return OrderCreateSerializer(data=payload, context={"request": self.request})
+
+    def test_valid_matching_rate_sets_order_shipping_cost_and_carrier(self):
+        """
+        A valid shipping_rate_id matching the destination province results
+        in Order.shipping_cost exactly matching that rate's price, and
+        Order.shipping_carrier correctly set.
+        """
+        rate = make_shipping_rate(province="tehran", price="34.50")
+
+        s = self._serialize(
+            {
+                "shipping_carrier_id": rate.carrier_id,
+                "shipping_rate_id": rate.id,
+            }
+        )
+        self.assertTrue(s.is_valid(), s.errors)
+        order = s.save()
+
+        self.assertEqual(order.shipping_cost, Decimal("34.50"))
+        self.assertEqual(order.shipping_carrier_id, rate.carrier_id)
+
+    def test_rate_belonging_to_different_province_is_rejected(self):
+        """
+        A shipping_rate_id that exists but belongs to a DIFFERENT province
+        than the submitted shipping address is rejected (re-validation
+        check) — not silently accepted just because the ID itself is real.
+        """
+        isfahan_rate = make_shipping_rate(province="isfahan")
+
+        # valid_payload()'s "state" is "tehran" (unchanged here), but the
+        # referenced rate is for "isfahan" — a genuine mismatch.
+        s = self._serialize(
+            {
+                "shipping_carrier_id": isfahan_rate.carrier_id,
+                "shipping_rate_id": isfahan_rate.id,
+            }
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("shipping_rate_id", s.errors)
+
+    def test_inactive_rate_is_rejected(self):
+        """
+        A shipping_rate_id referencing an is_active=False rate is
+        rejected, even though the row genuinely exists and would
+        otherwise match the destination province.
+        """
+        inactive_rate = make_shipping_rate(province="tehran", is_active=False)
+
+        s = self._serialize(
+            {
+                "shipping_carrier_id": inactive_rate.carrier_id,
+                "shipping_rate_id": inactive_rate.id,
+            }
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("shipping_rate_id", s.errors)
+
+    def test_nonexistent_shipping_rate_id_is_rejected(self):
+        s = self._serialize({"shipping_carrier_id": 1, "shipping_rate_id": 999999})
+        self.assertFalse(s.is_valid())
+        self.assertIn("shipping_rate_id", s.errors)
+
+    def test_shipping_carrier_id_and_shipping_rate_id_are_required(self):
+        from order.serializers import OrderCreateSerializer
+
+        payload = {
+            k: v
+            for k, v in valid_payload().items()
+            if k not in ("shipping_carrier_id", "shipping_rate_id")
+        }
+        s = OrderCreateSerializer(data=payload, context={"request": self.request})
+        self.assertFalse(s.is_valid())
+        self.assertIn("shipping_carrier_id", s.errors)
+        self.assertIn("shipping_rate_id", s.errors)
+
+
+class OrderCreateShippingRateAPITests(APITestCase):
+    """
+    Same shipping-rate re-validation scenarios as
+    OrderCreateShippingRateTests, but through the real POST /api/orders/
+    endpoint, confirming the acceptance criteria's specific "rejected
+    with a 400" requirement end-to-end rather than only at the serializer
+    unit level.
+    """
+
+    URL = "/api/orders/"
+
+    def setUp(self):
+        self.user = make_user()
+        self.product = make_product(price="40.00", stock=5)
+        self.variant = make_variant(product=self.product, price="40.00", stock=5)
+        make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 1}])
+        self.client.force_authenticate(user=self.user)
+
+    def test_post_with_valid_rate_returns_201_with_matching_cost_and_carrier(self):
+        rate = make_shipping_rate(province="tehran", price="12.34")
+        payload = {
+            **valid_payload(),
+            "shipping_carrier_id": rate.carrier_id,
+            "shipping_rate_id": rate.id,
+        }
+        res = self.client.post(self.URL, payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+
+        order = Order.objects.get(pk=res.data["id"])
+        self.assertEqual(order.shipping_cost, Decimal("12.34"))
+        self.assertEqual(order.shipping_carrier_id, rate.carrier_id)
+
+    def test_post_with_rate_for_wrong_province_returns_400(self):
+        wrong_province_rate = make_shipping_rate(province="fars")
+        payload = {
+            **valid_payload(),  # "state": "tehran"
+            "shipping_carrier_id": wrong_province_rate.carrier_id,
+            "shipping_rate_id": wrong_province_rate.id,
+        }
+        res = self.client.post(self.URL, payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("shipping_rate_id", res.data)
+
+    def test_post_with_inactive_rate_returns_400(self):
+        inactive_rate = make_shipping_rate(province="tehran", is_active=False)
+        payload = {
+            **valid_payload(),
+            "shipping_carrier_id": inactive_rate.carrier_id,
+            "shipping_rate_id": inactive_rate.id,
+        }
+        res = self.client.post(self.URL, payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("shipping_rate_id", res.data)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 3. Order List + Create API  —  GET / POST  /api/orders/
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1650,7 +1831,7 @@ class OrderListCreateAPITests(APITestCase):
         self.client.force_authenticate(user=self.user)
 
     def _post_order(self, payload=None):
-        return self.client.post(self.URL, payload or VALID_PAYLOAD, format="json")
+        return self.client.post(self.URL, payload or valid_payload(), format="json")
 
     # ── GET: list ─────────────────────────────────────────────────────────────
 
@@ -1698,7 +1879,7 @@ class OrderListCreateAPITests(APITestCase):
         other_client = self.__class__.__new__(self.__class__)
         other_client.__dict__.update(self.__dict__)
         self.client.force_authenticate(user=other)
-        self.client.post(self.URL, VALID_PAYLOAD, format="json")
+        self.client.post(self.URL, valid_payload(), format="json")
 
         # Back to original user
         self.client.force_authenticate(user=self.user)
@@ -1745,23 +1926,23 @@ class OrderListCreateAPITests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_post_missing_first_name_returns_400(self):
-        payload = {**VALID_PAYLOAD, "first_name": ""}
+        payload = {**valid_payload(), "first_name": ""}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("first_name", res.data)
 
     def test_post_invalid_payment_method_returns_400(self):
-        payload = {**VALID_PAYLOAD, "payment_method": "cash"}
+        payload = {**valid_payload(), "payment_method": "cash"}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_post_invalid_email_returns_400(self):
-        payload = {**VALID_PAYLOAD, "email": "bad-email"}
+        payload = {**valid_payload(), "email": "bad-email"}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_post_missing_address_returns_400(self):
-        payload = {**VALID_PAYLOAD, "address": ""}
+        payload = {**valid_payload(), "address": ""}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -1805,7 +1986,7 @@ class OrderListCreateAPITests(APITestCase):
         silently ignored (unknown-field passthrough), and the resulting
         order's discount is always $0.
         """
-        payload = {**VALID_PAYLOAD, "discount": "5.00"}
+        payload = {**valid_payload(), "discount": "5.00"}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Decimal(res.data["discount"]), Decimal("0.00"))
@@ -1815,18 +1996,22 @@ class OrderListCreateAPITests(APITestCase):
         self.assertEqual(order.total, expected)
 
     def test_post_paypal_payment_method(self):
-        payload = {**VALID_PAYLOAD, "payment_method": "paypal", "card_last_four": ""}
+        payload = {**valid_payload(), "payment_method": "paypal", "card_last_four": ""}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(res.data["payment_method"], "paypal")
 
     def test_post_apple_pay_method(self):
-        payload = {**VALID_PAYLOAD, "payment_method": "apple_pay", "card_last_four": ""}
+        payload = {
+            **valid_payload(),
+            "payment_method": "apple_pay",
+            "card_last_four": "",
+        }
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
 
     def test_post_order_with_notes(self):
-        payload = {**VALID_PAYLOAD, "notes": "Leave at front door"}
+        payload = {**valid_payload(), "notes": "Leave at front door"}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(res.data["notes"], "Leave at front door")
@@ -1846,7 +2031,7 @@ class OrderListCreateAPITests(APITestCase):
         self.assertEqual(len(res.data["items"]), 2)
 
     def test_post_billing_same_as_shipping_stored(self):
-        payload = {**VALID_PAYLOAD, "billing_same": False}
+        payload = {**valid_payload(), "billing_same": False}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         order = Order.objects.get(user=self.user)
@@ -1872,7 +2057,7 @@ class OrderDetailAPITests(APITestCase):
         self.variant = make_variant(product=self.product, price="30.00", stock=10)
         make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])
         self.client.force_authenticate(user=self.user)
-        res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res = self.client.post("/api/orders/", valid_payload(), format="json")
         self.order = Order.objects.get(pk=res.data["id"])
 
     # ── GET ───────────────────────────────────────────────────────────────────
@@ -1945,7 +2130,7 @@ class OrderDetailAPITests(APITestCase):
             other, [{"product": self.product, "quantity": 1}]
         )
         self.client.force_authenticate(user=other)
-        res1 = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res1 = self.client.post("/api/orders/", valid_payload(), format="json")
         other_order_id = res1.data["id"]
 
         # Switch back to original user and try to read other's order
@@ -2015,7 +2200,7 @@ class OrderDetailAPITests(APITestCase):
             other, [{"product": self.product, "quantity": 1}]
         )
         self.client.force_authenticate(user=other)
-        res1 = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res1 = self.client.post("/api/orders/", valid_payload(), format="json")
         other_order_id = res1.data["id"]
 
         self.client.force_authenticate(user=self.user)
@@ -2073,7 +2258,7 @@ class OrderDetailAPITests(APITestCase):
                 {"variant": second_variant, "quantity": 3},
             ],
         )
-        res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res = self.client.post("/api/orders/", valid_payload(), format="json")
         order = Order.objects.get(pk=res.data["id"])
 
         second_variant.refresh_from_db()
@@ -2197,7 +2382,7 @@ class OrderDetailAPITests(APITestCase):
                 {"variant": second_variant, "quantity": 3},
             ],
         )
-        res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res = self.client.post("/api/orders/", valid_payload(), format="json")
         order = Order.objects.get(pk=res.data["id"])
 
         second_variant_id = second_variant.id
@@ -2266,7 +2451,7 @@ class OrderAuthTests(APITestCase):
         make_cart_with_items(self.user, [{"product": self.product, "quantity": 1}])
         # Create a real order (authenticated) to test detail endpoints
         self.client.force_authenticate(user=self.user)
-        res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res = self.client.post("/api/orders/", valid_payload(), format="json")
         self.order_id = res.data["id"]
         self.client.force_authenticate(user=None)  # back to unauthenticated
 
@@ -2275,7 +2460,7 @@ class OrderAuthTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_create_order_unauthenticated(self):
-        res = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res = self.client.post("/api/orders/", valid_payload(), format="json")
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_get_order_detail_unauthenticated(self):
@@ -2310,13 +2495,13 @@ class OrderIsolationTests(APITestCase):
         # User A places an order
         make_cart_with_items(self.user_a, [{"product": self.product, "quantity": 2}])
         self.client.force_authenticate(user=self.user_a)
-        res_a = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res_a = self.client.post("/api/orders/", valid_payload(), format="json")
         self.order_a_id = res_a.data["id"]
 
         # User B places an order
         make_cart_with_items(self.user_b, [{"product": self.product, "quantity": 3}])
         self.client.force_authenticate(user=self.user_b)
-        res_b = self.client.post("/api/orders/", VALID_PAYLOAD, format="json")
+        res_b = self.client.post("/api/orders/", valid_payload(), format="json")
         self.order_b_id = res_b.data["id"]
 
     def test_user_a_cannot_see_user_b_orders(self):

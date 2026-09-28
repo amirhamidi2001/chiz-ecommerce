@@ -74,9 +74,29 @@ class Order(models.Model):
     # Last four digits stored only if credit card; never store full PAN
     card_last_four = models.CharField(max_length=4, blank=True)
 
+    # ── Shipping carrier/rate (Task 7.1.1.4) ────────────────────────────────
+    # The specific carrier the customer selected at checkout (resolved
+    # server-side from shipping_rate_id, never trusted from client-supplied
+    # pricing — see OrderCreateSerializer.validate()). SET_NULL rather than
+    # PROTECT/CASCADE: a carrier being deactivated or removed later must
+    # never prevent historical orders from being read, and shipping_cost
+    # below is already a frozen snapshot of the price at checkout time, so
+    # losing this FK doesn't lose the financial record.
+    shipping_carrier = models.ForeignKey(
+        "shipping.ShippingCarrier",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+
     # ── Financials (snapshot at checkout time) ─────────────────────────────
     subtotal = models.DecimalField(max_digits=12, decimal_places=2)
-    shipping_cost = models.DecimalField(max_digits=8, decimal_places=2, default=9.99)
+    # No default any more (Task 7.1.1.4): shipping_cost is now always
+    # explicitly set from the resolved ShippingRate's price at checkout —
+    # a hardcoded fallback default here is no longer appropriate and could
+    # mask a bug (an order silently getting the old flat $9.99 instead of
+    # its actual resolved rate) if ever accidentally relied upon.
+    shipping_cost = models.DecimalField(max_digits=8, decimal_places=2)
     tax = models.DecimalField(max_digits=10, decimal_places=2)
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2)
