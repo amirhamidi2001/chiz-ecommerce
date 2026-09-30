@@ -314,6 +314,19 @@ export const cancelOrder = (orderId) =>
   api.patch(`/orders/${orderId}/`, { status: 'cancelled' });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SHIPPING  →  /api/shipping/
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Task 7.2.1.6: discover which carrier+rate options are available for a
+// destination (and the current cart's weight, resolved server-side) BEFORE
+// the customer submits checkout — Task 7.1.1.4 made shipping_carrier_id/
+// shipping_rate_id required on POST /orders/, so this is how the checkout
+// page gets those ids to send. Works for guest carts too (AllowAny on the
+// backend), so it's called the same way regardless of auth state.
+export const getShippingQuote = (province, city) =>
+  api.post('/shipping/quote/', { province, city });
+
+// ═══════════════════════════════════════════════════════════════════════════
 // PAYMENTS  →  /api/payments/
 // ═══════════════════════════════════════════════════════════════════════════
 

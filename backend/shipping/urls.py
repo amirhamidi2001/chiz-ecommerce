@@ -1,5 +1,9 @@
 from django.urls import path
 
+from . import views
+
 app_name = "shipping"
 
-urlpatterns = []
+urlpatterns = [
+    path("quote/", views.ShippingQuoteView.as_view(), name="quote"),
+]

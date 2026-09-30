@@ -2,13 +2,13 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { createOrder, initiatePayment, isAuthenticated, dashboardAPI } from '../services/api';
+import { createOrder, initiatePayment, isAuthenticated, dashboardAPI, getShippingQuote } from '../services/api';
 import AddressPicker from '../components/AddressPicker';
+import ShippingOptionPicker from '../components/ShippingOptionPicker';
 import { NEW_ADDRESS } from '../utils/address';
 import { IRAN_PROVINCES, isValidPostalCode } from '../constants/provinces';
 
 const TAX_RATE = 0.10;
-const SHIPPING_COST = 9.99;
 
 // ─── Field component ──────────────────────────────────────────────────────────
 const Field = ({ label, required, error, children }) => (
@@ -107,6 +107,85 @@ const Checkout = () => {
   const usingSavedAddress =
     selectedAddressId !== NEW_ADDRESS && selectedAddressId != null;
 
+  // ── Shipping options (Task 7.2.1.6) ───────────────────────────────────────
+  // Task 7.1.1.4 made shipping_carrier_id/shipping_rate_id REQUIRED on
+  // POST /api/orders/ — the customer must pick a specific carrier+rate
+  // here before submitting, resolved via POST /api/shipping/quote/ against
+  // whatever destination (province+city) they've entered/selected so far.
+  const [shippingOptions, setShippingOptions] = useState([]);
+  const [shippingLoading, setShippingLoading] = useState(false);
+  const [shippingError, setShippingError] = useState('');
+  const [selectedShipping, setSelectedShipping] = useState(null);
+  // Distinguishes "never queried yet" (show a prompt) from "queried and
+  // got zero options back" (ShippingOptionPicker's own empty-state
+  // message) — both look like an empty shippingOptions array otherwise.
+  const [hasShippingDestination, setHasShippingDestination] = useState(false);
+
+  const fetchShippingOptions = async (province, city) => {
+    if (!province || !city) return;
+    setHasShippingDestination(true);
+    setShippingLoading(true);
+    setShippingError('');
+    setSelectedShipping(null);
+    try {
+      const { data } = await getShippingQuote(province, city);
+      setShippingOptions(data?.options ?? []);
+    } catch {
+      setShippingOptions([]);
+      setShippingError('Could not load shipping options. Please try again.');
+    } finally {
+      setShippingLoading(false);
+    }
+  };
+
+  // Switching between "saved address" and "new address" changes the
+  // destination entirely — any previously-fetched options/selection no
+  // longer necessarily apply, so clear them rather than leave a stale
+  // choice sitting in state.
+  useEffect(() => {
+    setSelectedShipping(null);
+    setShippingOptions([]);
+    setShippingError('');
+    setHasShippingDestination(false);
+  }, [usingSavedAddress]);
+
+  // Saved addresses already carry a complete province+city, so fetch
+  // options as soon as one is selected — no blur/submit step needed.
+  useEffect(() => {
+    if (!usingSavedAddress) return;
+    const addr = addresses.find((a) => String(a.id) === String(selectedAddressId));
+    if (addr) fetchShippingOptions(addr.province, addr.city);
+  }, [usingSavedAddress, selectedAddressId, addresses]);
+
+  // Manual entry: city is free text, so firing on every keystroke would
+  // spam the endpoint — fetch on blur instead (once the shopper has
+  // finished typing), and also when province changes afterward.
+  const handleCityBlur = () => {
+    if (!usingSavedAddress && form.city.trim() && form.state) {
+      fetchShippingOptions(form.state, form.city.trim());
+    }
+  };
+
+  const handleProvinceChange = (e) => {
+    handleChange(e);
+    if (!usingSavedAddress && form.city.trim() && e.target.value) {
+      fetchShippingOptions(e.target.value, form.city.trim());
+    }
+  };
+
+  // "Try a different address" from the empty-options fallback: send the
+  // shopper back to whichever address input actually determines the
+  // destination, rather than leaving them stuck looking at a dead end.
+  const handleChangeShippingAddress = () => {
+    if (usingSavedAddress) {
+      setSelectedAddressId(NEW_ADDRESS);
+      return;
+    }
+    const cityField = document.querySelector('[name="city"]');
+    cityField?.focus();
+    cityField?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
@@ -121,8 +200,9 @@ const Checkout = () => {
   // NOTE: there is no coupon/promo system yet (tracked as Epic 9). Discount
   // is always $0 and is not client-controlled — the server hardcodes it too.
   const subtotal = Number(cart?.subtotal ?? 0);
+  const shippingCost = selectedShipping ? Number(selectedShipping.price) : 0;
   const tax = subtotal * TAX_RATE;
-  const total = subtotal + SHIPPING_COST + tax;
+  const total = subtotal + shippingCost + tax;
   const items = cart?.items ?? [];
 
   // ── Input handlers ──────────────────────────────────────────────────────────
@@ -137,6 +217,10 @@ const Checkout = () => {
     const e = {};
     if (!form.email.trim()) e.email = 'Required';
     if (!form.terms) e.terms = 'You must agree to the Terms and Conditions.';
+    // Mirrors every other required-field check here — clicking submit
+    // without a selection is blocked the same way an empty required text
+    // field is: a validate() error, not a separately-disabled button.
+    if (!selectedShipping) e.shipping = 'Please select a shipping option.';
 
     // Address fields are only required when the shopper is typing a new
     // address — with a saved address selected, the server resolves every
@@ -230,6 +314,10 @@ const Checkout = () => {
         email: form.email,
         billing_same: form.billingSame,
         notes: form.notes,
+        // Task 7.1.1.4's backend contract: required regardless of whether
+        // the destination came from a saved address or manual fields.
+        shipping_carrier_id: selectedShipping.carrier_id,
+        shipping_rate_id: selectedShipping.rate_id,
       };
 
       if (usingSavedAddress) {
@@ -411,7 +499,8 @@ const Checkout = () => {
                         <Field label="City" required error={errors.city}>
                           <input
                             type="text" name="city" value={form.city}
-                            onChange={handleChange} className={inputCls(errors.city)}
+                            onChange={handleChange} onBlur={handleCityBlur}
+                            className={inputCls(errors.city)}
                             data-error={!!errors.city} required
                           />
                         </Field>
@@ -421,7 +510,7 @@ const Checkout = () => {
                         <Field label="Province" required error={errors.state}>
                           <select
                             name="state" value={form.state}
-                            onChange={handleChange} className={inputCls(errors.state)}
+                            onChange={handleProvinceChange} className={inputCls(errors.state)}
                             data-error={!!errors.state} required
                           >
                             <option value="">Select Province</option>
@@ -482,6 +571,32 @@ const Checkout = () => {
                       </label>
                     </div>
                   )}
+
+                  {/* Shipping Method (Task 7.2.1.6) — always rendered,
+                      regardless of manual vs. saved address, since both
+                      paths converge on a resolved province+city. */}
+                  <div className="p-6 pt-0 space-y-2" data-error={!!errors.shipping}>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-1">
+                      Shipping Method
+                    </h4>
+                    {hasShippingDestination ? (
+                      <ShippingOptionPicker
+                        loading={shippingLoading}
+                        error={shippingError}
+                        options={shippingOptions}
+                        selected={selectedShipping}
+                        onSelect={setSelectedShipping}
+                        onChangeAddress={handleChangeShippingAddress}
+                      />
+                    ) : (
+                      <p className="text-sm text-gray-500">
+                        Enter your city and province above to see shipping options.
+                      </p>
+                    )}
+                    {errors.shipping && (
+                      <p className="text-red-500 text-xs mt-1">{errors.shipping}</p>
+                    )}
+                  </div>
                 </div>
 
                 {/* 3 — Review & Place Order */}
@@ -603,7 +718,9 @@ const Checkout = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Shipping</span>
-                    <span>${SHIPPING_COST.toFixed(2)}</span>
+                    <span>
+                      {selectedShipping ? `$${shippingCost.toFixed(2)}` : 'Select an option'}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Tax (10%)</span>

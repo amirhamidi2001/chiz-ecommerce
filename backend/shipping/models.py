@@ -127,3 +127,58 @@ class ShippingRate(models.Model):
         if city_specific:
             return city_specific
         return qs.filter(city="").first()
+
+
+class Shipment(models.Model):
+    """
+    The actual booked shipment for a paid order — created when a
+    warehouse/admin physically packs and dispatches the order (Phase 7.2's
+    admin fulfillment workflow), NOT at checkout/payment time.
+
+    This is distinct from Order.shipping_carrier (Task 7.1.1.4), which
+    only records which carrier the CUSTOMER selected/quoted at checkout —
+    that field can exist with no Shipment yet (order is paid but not yet
+    packed), and once dispatched this row is what actually carries the
+    tracking number, label, and live delivery status.
+
+    KNOWN SIMPLIFICATION: `order` is a OneToOneField because exactly one
+    shipment exists per order in this initial implementation — there is
+    no support for split/multi-package shipments per order yet. A future
+    "split shipment" feature would need to change this to a ForeignKey
+    (with related_name="shipments" instead of "shipment") and update
+    every place that currently assumes order.shipment is a single object.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending Pickup"
+        IN_TRANSIT = "in_transit", "In Transit"
+        OUT_FOR_DELIVERY = "out_for_delivery", "Out for Delivery"
+        DELIVERED = "delivered", "Delivered"
+        FAILED = "failed", "Failed"
+
+    order = models.OneToOneField(
+        "order.Order", on_delete=models.CASCADE, related_name="shipment"
+    )
+    # PROTECT, deliberately unlike most other FKs in this codebase (e.g.
+    # ShippingRate.carrier above uses CASCADE): a ShippingCarrier must
+    # never be DELETABLE while any Shipment still references it — deleting
+    # the carrier would corrupt historical shipment records (losing the
+    # ability to know who actually shipped a past order) in a way that's
+    # worse than just blocking the deletion outright. If an admin genuinely
+    # needs to retire a carrier, ShippingCarrier.is_active=False is the
+    # correct mechanism, not deletion.
+    carrier = models.ForeignKey(ShippingCarrier, on_delete=models.PROTECT)
+    tracking_number = models.CharField(max_length=100, blank=True, db_index=True)
+    label_url = models.URLField(blank=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    last_tracked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Shipment for {self.order.order_number} — {self.status}"

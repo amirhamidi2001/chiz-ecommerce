@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import AddressPicker from '../components/AddressPicker';
@@ -19,12 +19,14 @@ vi.mock('../context/CartContext', () => ({ useCart: vi.fn() }));
 vi.mock('../services/api', () => ({
   createOrder: vi.fn(),
   isAuthenticated: vi.fn(),
+  // Task 7.2.1.6: discovers available carrier+rate options for a destination.
+  getShippingQuote: vi.fn(),
   dashboardAPI: { getAddresses: vi.fn() },
 }));
 
 import Checkout from '../pages/Checkout';
 import { useCart } from '../context/CartContext';
-import { createOrder, isAuthenticated, dashboardAPI } from '../services/api';
+import { createOrder, isAuthenticated, dashboardAPI, getShippingQuote } from '../services/api';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -69,6 +71,21 @@ const MOCK_CART = {
     },
   ],
 };
+
+// Task 7.2.1.6: default resolved shape for POST /api/shipping/quote/, used
+// by the "Checkout saved-address integration" tests below (a saved address
+// already carries a complete province+city, so this fetches automatically
+// on selection — no manual city/province entry needed first).
+const MOCK_SHIPPING_OPTIONS = [
+  {
+    carrier_id: 1,
+    carrier_name: 'Iran Post',
+    rate_id: 10,
+    price: '9.99',
+    estimated_days_min: 2,
+    estimated_days_max: 4,
+  },
+];
 
 const CART_READY_STATE = {
   cart: MOCK_CART,
@@ -211,6 +228,7 @@ describe('Checkout saved-address integration', () => {
     isAuthenticated.mockReturnValue(true);
     useCart.mockReturnValue(CART_READY_STATE);
     dashboardAPI.getAddresses.mockResolvedValue({ data: [] });
+    getShippingQuote.mockResolvedValue({ data: { options: MOCK_SHIPPING_OPTIONS } });
   });
 
   it('shows no picker when the shopper has no saved addresses', async () => {
@@ -276,6 +294,10 @@ describe('Checkout saved-address integration', () => {
     // Email is still required — it isn't part of a saved Address.
     await user.type(document.querySelector('[name="email"]'), 'jane@example.com');
     await user.click(document.querySelector('[name="terms"]'));
+    // Task 7.2.1.6: the saved address's province+city triggers a shipping
+    // quote automatically — wait for it and select the option, required
+    // just like every other field before submission.
+    await user.click(within(await screen.findByTestId('shipping-options')).getByRole('radio'));
 
     await user.click(screen.getByRole('button', { name: /place order/i }));
 
@@ -304,6 +326,7 @@ describe('Checkout saved-address integration', () => {
     // never reach createOrder.
     await user.type(document.querySelector('[name="email"]'), 'jane@example.com');
     await user.click(document.querySelector('[name="terms"]'));
+    await user.click(within(await screen.findByTestId('shipping-options')).getByRole('radio'));
 
     await user.click(screen.getByRole('button', { name: /place order/i }));
 
@@ -331,6 +354,9 @@ describe('Checkout saved-address integration', () => {
     await user.selectOptions(document.querySelector('[name="state"]'), 'fars');
     await user.type(document.querySelector('[name="zip"]'), '1112223334');
     await user.click(document.querySelector('[name="saveAddress"]'));
+    // Task 7.2.1.6: city+province are now both filled — select the
+    // resulting shipping option before submitting.
+    await user.click(within(await screen.findByTestId('shipping-options')).getByRole('radio'));
 
     await user.click(document.querySelector('[name="terms"]'));
 

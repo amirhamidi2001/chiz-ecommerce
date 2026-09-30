@@ -24,6 +24,8 @@ vi.mock('../services/api', () => ({
   createOrder: vi.fn(),
   initiatePayment: vi.fn(),
   isAuthenticated: vi.fn(),
+  // Task 7.2.1.6: discovers available carrier+rate options for a destination.
+  getShippingQuote: vi.fn(),
   // Checkout fetches the shopper's saved address book on mount (Task
   // 5.2.1.5) to decide whether to show the saved-address picker.
   dashboardAPI: {
@@ -32,7 +34,7 @@ vi.mock('../services/api', () => ({
 }));
 
 import { useCart } from '../context/CartContext';
-import { createOrder, initiatePayment, isAuthenticated, dashboardAPI } from '../services/api';
+import { createOrder, initiatePayment, isAuthenticated, dashboardAPI, getShippingQuote } from '../services/api';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -83,6 +85,21 @@ const CART_EMPTY_STATE = {
   clearCart: vi.fn(),
 };
 
+// Task 7.2.1.6: default resolved shape for POST /api/shipping/quote/.
+// Deliberately a single option so `screen.findByRole('radio')` (singular)
+// stays unambiguous throughout this file — tests that need multiple
+// options or an empty result override this locally.
+const MOCK_SHIPPING_OPTIONS = [
+  {
+    carrier_id: 1,
+    carrier_name: 'Iran Post',
+    rate_id: 10,
+    price: '9.99',
+    estimated_days_min: 2,
+    estimated_days_max: 4,
+  },
+];
+
 // ─── Query helpers ────────────────────────────────────────────────────────────
 //
 // The Field component renders a plain <label> (no htmlFor) and a sibling
@@ -115,6 +132,13 @@ const fillValidForm = async (user) => {
   await user.selectOptions(byName('state'), 'tehran');
   await user.type(byName('zip'), '1234567890');
 
+  // ── Shipping Method (Task 7.2.1.6) ─────────────────────────────────────────
+  // Selecting the province above (with city already typed) triggers a
+  // POST /shipping/quote/ request — wait for the resulting option to
+  // render, then select it. shipping_carrier_id/shipping_rate_id are
+  // required for submission just like every other field here.
+  await user.click(await screen.findByRole('radio'));
+
   // Task 6.4.1.3: no payment-method/card-entry step any more — real
   // payment method selection now happens on the gateway's own hosted
   // page, not this form.
@@ -142,6 +166,10 @@ describe('Checkout', () => {
     // Default: no saved addresses, so the picker stays hidden and these
     // pre-existing tests exercise the manual form exactly as before.
     dashboardAPI.getAddresses.mockResolvedValue({ data: [] });
+    // Default: one shipping option available for any destination —
+    // fillValidForm() relies on this to complete the shipping-selection
+    // step (Task 7.2.1.6) alongside every other required field.
+    getShippingQuote.mockResolvedValue({ data: { options: MOCK_SHIPPING_OPTIONS } });
   });
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -269,12 +297,27 @@ describe('Checkout', () => {
       expect(screen.getByText('Premium Gadget')).toBeInTheDocument();
     });
 
-    it('displays subtotal, shipping, and tax rows in the order summary', () => {
+    it('displays subtotal and tax rows, prompting for a shipping selection before one is made', () => {
       renderCheckout();
 
       expect(screen.getByText('$89.97')).toBeInTheDocument();
-      expect(screen.getByText('$9.99')).toBeInTheDocument();
       expect(screen.getByText(/tax \(10%\)/i)).toBeInTheDocument();
+      // Shipping cost isn't known until a carrier+rate is actually
+      // selected (Task 7.2.1.6) — no more hardcoded flat $9.99.
+      expect(screen.getByText('Select an option')).toBeInTheDocument();
+    });
+
+    it('displays the selected shipping option\'s price in the order summary once chosen', async () => {
+      const user = userEvent.setup();
+      renderCheckout();
+
+      await user.type(byName('city'), 'Springfield');
+      await user.selectOptions(byName('state'), 'tehran');
+      await user.click(await screen.findByRole('radio'));
+
+      // Appears twice by design: once on the option row itself, once in
+      // the Order Summary total.
+      expect(screen.getAllByText('$9.99').length).toBeGreaterThanOrEqual(2);
     });
 
     it('renders the Place Order submit button', () => {
@@ -393,6 +436,9 @@ describe('Checkout', () => {
       expect(payload).not.toHaveProperty('payment_method');
       expect(payload).not.toHaveProperty('card_last_four');
       expect(payload).not.toHaveProperty('discount');
+      // Task 7.1.1.4's backend contract: required on every submission.
+      expect(payload.shipping_carrier_id).toBe(1);
+      expect(payload.shipping_rate_id).toBe(10);
     });
 
     it('calls initiatePayment with the created order id, then redirects the full browser window to the returned gateway URL', async () => {
@@ -508,6 +554,109 @@ describe('Checkout', () => {
       expect(btn).toBeDisabled();
 
       resolveOrder({ data: { id: 1 } });
+    });
+  });
+
+  // ── Shipping method (Task 7.2.1.6) ──────────────────────────────────────────
+
+  describe('shipping method', () => {
+    it('shows a prompt instead of options before a destination is known', () => {
+      renderCheckout();
+
+      expect(
+        screen.getByText(/enter your city and province above to see shipping options/i),
+      ).toBeInTheDocument();
+      expect(getShippingQuote).not.toHaveBeenCalled();
+    });
+
+    it('fetches and renders options once city and province are both filled in', async () => {
+      const user = userEvent.setup();
+      renderCheckout();
+
+      await user.type(byName('city'), 'Springfield');
+      await user.selectOptions(byName('state'), 'tehran');
+
+      await waitFor(() =>
+        expect(getShippingQuote).toHaveBeenCalledWith('tehran', 'Springfield'),
+      );
+      expect(await screen.findByText('Iran Post')).toBeInTheDocument();
+    });
+
+    it('does not fetch again on every keystroke — only once the city field is blurred/settled', async () => {
+      const user = userEvent.setup();
+      renderCheckout();
+
+      await user.type(byName('city'), 'Springfield');
+      // Typing alone (no province, no blur-triggering province change yet)
+      // must not spam the endpoint on every keystroke.
+      expect(getShippingQuote).not.toHaveBeenCalled();
+    });
+
+    it('selecting an option shows its price in the order summary and clears the shipping error', async () => {
+      const user = userEvent.setup();
+      renderCheckout();
+
+      // Trigger the shipping-required validation error first.
+      await user.click(screen.getByRole('button', { name: /place order/i }));
+      expect(
+        await screen.findByText(/please select a shipping option/i),
+      ).toBeInTheDocument();
+
+      await user.type(byName('city'), 'Springfield');
+      await user.selectOptions(byName('state'), 'tehran');
+      await user.click(await screen.findByRole('radio'));
+
+      // Appears twice by design: once on the option row, once in the
+      // Order Summary total.
+      expect(screen.getAllByText('$9.99').length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('shows the empty-options fallback when no rate is configured for the destination', async () => {
+      getShippingQuote.mockResolvedValueOnce({ data: { options: [] } });
+      const user = userEvent.setup();
+      renderCheckout();
+
+      await user.type(byName('city'), 'Nowhereville');
+      await user.selectOptions(byName('state'), 'tehran');
+
+      expect(
+        await screen.findByText(/shipping is not currently available for this address/i),
+      ).toBeInTheDocument();
+    });
+
+    it('does NOT call createOrder when every other field is valid but no shipping option is selected', async () => {
+      const user = userEvent.setup();
+      renderCheckout();
+
+      await user.type(byName('firstName'), 'Jane');
+      await user.type(byName('lastName'), 'Doe');
+      await user.type(byName('email'), 'jane@example.com');
+      await user.type(byName('phone'), '555-0100');
+      await user.type(byName('address'), '123 Main St');
+      await user.type(byName('city'), 'Springfield');
+      await user.selectOptions(byName('state'), 'tehran');
+      await user.type(byName('zip'), '1234567890');
+      await user.click(byName('terms'));
+      // Options have loaded (per the mocked default) but deliberately
+      // left unselected.
+      await screen.findByRole('radio');
+
+      await user.click(screen.getByRole('button', { name: /place order/i }));
+
+      expect(
+        await screen.findByText(/please select a shipping option/i),
+      ).toBeInTheDocument();
+      expect(createOrder).not.toHaveBeenCalled();
+    });
+
+    it('blocks submission the same way as any other required field is blocked — the submit button itself stays enabled', async () => {
+      renderCheckout();
+
+      // Mirrors the existing validate()-driven pattern for every other
+      // required field (e.g. terms), not a separately-disabled button —
+      // otherwise a disabled button would silently swallow the click and
+      // no other field's error would ever be shown either.
+      expect(screen.getByRole('button', { name: /place order/i })).not.toBeDisabled();
     });
   });
 

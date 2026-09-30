@@ -2,8 +2,32 @@ from decimal import Decimal
 
 from dashboard.models import IranProvince
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
-from shipping.models import ShippingCarrier, ShippingRate
+from order.models import Order
+from order.tests.factories import make_user
+from shipping.models import Shipment, ShippingCarrier, ShippingRate
+
+
+def make_order(user, **overrides):
+    fields = dict(
+        user=user,
+        first_name="Jane",
+        last_name="Smith",
+        email="jane@example.com",
+        phone="555-1234",
+        shipping_address="42 Elm Street",
+        shipping_city="Tehran",
+        shipping_state=IranProvince.TEHRAN,
+        shipping_zip="1234567890",
+        shipping_country="IR",
+        subtotal=Decimal("100.00"),
+        shipping_cost=Decimal("9.99"),
+        tax=Decimal("10.00"),
+        total=Decimal("119.99"),
+    )
+    fields.update(overrides)
+    return Order.objects.create(**fields)
 
 
 class ShippingCarrierModelTests(TestCase):
@@ -173,3 +197,54 @@ class ShippingRateCleanTests(TestCase):
 
         with self.assertRaises(ValidationError):
             rate.clean()
+
+
+class ShipmentModelTests(TestCase):
+    def setUp(self):
+        self.user = make_user()
+        self.order = make_order(self.user)
+        self.carrier = ShippingCarrier.objects.get(code=ShippingCarrier.Code.POST)
+
+    def test_create_shipment_linked_to_order(self):
+        shipment = Shipment.objects.create(
+            order=self.order,
+            carrier=self.carrier,
+            tracking_number="TRK123456",
+        )
+
+        self.assertEqual(shipment.order, self.order)
+        self.assertEqual(shipment.carrier, self.carrier)
+        self.assertEqual(shipment.status, Shipment.Status.PENDING)
+        # Accessible from the order side too, via the OneToOne related_name.
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.shipment, shipment)
+
+    def test_str_includes_order_number_and_status(self):
+        shipment = Shipment.objects.create(order=self.order, carrier=self.carrier)
+
+        self.assertEqual(
+            str(shipment),
+            f"Shipment for {self.order.order_number} — {Shipment.Status.PENDING}",
+        )
+
+    def test_second_shipment_for_the_same_order_is_rejected(self):
+        Shipment.objects.create(order=self.order, carrier=self.carrier)
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Shipment.objects.create(order=self.order, carrier=self.carrier)
+
+    def test_carrier_cannot_be_deleted_while_a_shipment_references_it(self):
+        Shipment.objects.create(order=self.order, carrier=self.carrier)
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self.carrier.delete()
+
+    def test_deleting_the_order_deletes_its_shipment(self):
+        shipment = Shipment.objects.create(order=self.order, carrier=self.carrier)
+        shipment_id = shipment.id
+
+        self.order.delete()
+
+        self.assertFalse(Shipment.objects.filter(id=shipment_id).exists())
