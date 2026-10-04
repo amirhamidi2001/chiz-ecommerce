@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { dashboardAPI } from "../services/api";
+import ShipmentTrackingWidget from "./ShipmentTrackingWidget";
 
 const STATUS_STYLES = {
   pending: "bg-gray-100 text-gray-700",
@@ -59,6 +60,12 @@ const OrderDetailModal = ({ orderId, onClose }) => {
               <span className="text-sm text-gray-500">
                 Placed {new Date(order.created_at).toLocaleDateString()}
               </span>
+            </div>
+
+            {/* Shipment tracking (Task 7.2.2.3) */}
+            <div>
+              <h5 className="font-semibold text-gray-700 mb-2">Shipment</h5>
+              <ShipmentTrackingWidget shipment={order.shipment} />
             </div>
 
             {/* Items */}

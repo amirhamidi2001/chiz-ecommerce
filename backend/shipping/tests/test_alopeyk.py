@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import requests
 import responses
 from django.test import SimpleTestCase, override_settings
+from shipping.models import Shipment
 from shipping.providers import get_carrier_provider
 from shipping.providers.alopeyk import AloPeykCarrierProvider
 
@@ -448,7 +449,9 @@ class AloPeykTrackTests(AloPeykTestCase):
         result = self.provider.track("300")
 
         self.assertTrue(result.success)
-        self.assertEqual(result.status, "delivered")
+        # Task 7.2.2.1: normalized to this platform's Shipment.Status, not
+        # AloPeyk's raw "delivered" string — see alopeyk.py's _STATUS_MAP.
+        self.assertEqual(result.status, Shipment.Status.DELIVERED)
         self.assertEqual(result.status_description, "The package has been delivered")
         request = responses.calls[0].request
         self.assertEqual(request.headers["Authorization"], "Bearer test-token")
@@ -464,10 +467,10 @@ class AloPeykTrackTests(AloPeykTestCase):
         result = self.provider.track("300")
 
         self.assertTrue(result.success)
-        self.assertEqual(result.status, "new")
+        self.assertEqual(result.status, Shipment.Status.PENDING)
 
     @responses.activate
-    def test_unknown_status_is_passed_through_with_empty_description(self):
+    def test_unrecognized_status_defaults_to_in_transit_with_empty_description(self):
         responses.add(
             responses.GET,
             self._detail_url("7"),
@@ -480,8 +483,39 @@ class AloPeykTrackTests(AloPeykTestCase):
         result = self.provider.track("7")
 
         self.assertTrue(result.success)
-        self.assertEqual(result.status, "some_new_state")
+        # Unmapped raw status -> safe default (not a failure, not assumed
+        # delivered/failed) — see alopeyk.py's _normalize_status().
+        self.assertEqual(result.status, Shipment.Status.IN_TRANSIT)
         self.assertEqual(result.status_description, "")
+
+    @responses.activate
+    def test_full_status_mapping_table(self):
+        # Exercises every entry in alopeyk.py's _STATUS_MAP explicitly, not
+        # just a couple of spot checks — this table is this file's own
+        # judgment call (see its documentation), so a change to it should
+        # show up here as a deliberate, visible diff.
+        expected = {
+            "new": Shipment.Status.PENDING,
+            "accepted": Shipment.Status.PENDING,
+            "picking": Shipment.Status.PENDING,
+            "delivering": Shipment.Status.OUT_FOR_DELIVERY,
+            "delivered": Shipment.Status.DELIVERED,
+            "finished": Shipment.Status.DELIVERED,
+            "stopped": Shipment.Status.FAILED,
+            "removed": Shipment.Status.FAILED,
+            "cancelled": Shipment.Status.FAILED,
+        }
+        for raw_status in expected:
+            responses.add(
+                responses.GET,
+                self._detail_url("1"),
+                json={"status": "success", "object": {"id": 1, "status": raw_status}},
+            )
+
+        for raw_status, expected_status in expected.items():
+            with self.subTest(raw_status=raw_status):
+                result = self.provider.track("1")
+                self.assertEqual(result.status, expected_status)
 
     @responses.activate
     def test_response_without_a_status_is_an_explicit_failure(self):

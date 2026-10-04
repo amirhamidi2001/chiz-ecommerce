@@ -70,6 +70,12 @@ admin deliberately enables it. Before doing so, confirm:
   d. GET /v2/orders/{id} has NO documented response body. track() reads a
      top-level `status` (or `data.status`) and returns success=False with an
      explicit message if neither is present, rather than guessing further.
+     The raw value is then mapped to a Shipment.Status via _STATUS_MAP below
+     (Task 7.2.2.1's poll_shipment_tracking() relies on every provider
+     normalizing to this platform's own status vocabulary, not SnapBox's
+     raw strings) — that mapping is this file's own interpretation, not
+     something SnapBox documents, so revisit it if their status vocabulary
+     changes.
   e. The spec contradicts itself in places. Followed the prose parameter
      table for required fields and the schema/example for object shapes:
      `timeSlotDTO` and `pricingId` are optional in the table but required in
@@ -97,6 +103,14 @@ from decimal import Decimal, InvalidOperation
 import requests
 from django.conf import settings
 
+# Shipment lives in shipping/models.py, which imports nothing from
+# shipping/providers (and nothing in this package is imported eagerly by
+# shipping/__init__.py or models.py — concrete providers are only ever
+# resolved lazily, by dotted path, via get_carrier_provider()) — so this
+# top-level import is safe, same reasoning already documented for the
+# dashboard.models/cart.views imports in shipping/serializers.py and
+# shipping/views.py.
+from ..models import Shipment
 from .base import CarrierProvider, RateQuoteResult, ShipmentCreateResult, TrackingResult
 
 _SUPPORTED_CITIES = ("tehran", "mashhad", "isfahan")
@@ -113,6 +127,42 @@ _STATUS_DESCRIPTIONS = {
     "DELIVERED": "The package has been delivered",
     "CANCELLED": "The order was cancelled",
 }
+
+# Task 7.2.2.1 (poll_shipment_tracking): maps SnapBox's own status
+# vocabulary onto THIS platform's Shipment.Status values. This is an
+# interpretive approximation, not a literal 1:1 correspondence — SnapBox
+# has no "in transit vs. out for delivery" distinction for a single-leg
+# same-day courier the way a multi-hub carrier might. The polling task
+# itself stays carrier-agnostic by relying on every concrete provider
+# doing this mapping here, rather than normalizing raw carrier strings
+# generically.
+#   - Every pre-pickup stage (scheduled, waiting for/assigned to a
+#     courier, courier en route to or arrived at pickup) maps to PENDING:
+#     the package hasn't moved yet from this platform's point of view.
+#   - PICKED_UP maps to IN_TRANSIT: the package is now in the courier's
+#     possession and moving toward the destination. There's no separate
+#     "out for delivery" leg to distinguish for a single-courier,
+#     point-to-point same-day delivery.
+#   - CANCELLED maps to FAILED.
+#   - Anything unrecognized maps to IN_TRANSIT rather than treated as a
+#     failure: the order genuinely exists and has *some* non-terminal
+#     status, so IN_TRANSIT is the safer default than silently treating
+#     an unmapped (but real) status as delivered or failed.
+_STATUS_MAP = {
+    "PREPENDING": Shipment.Status.PENDING,
+    "PENDING": Shipment.Status.PENDING,
+    "ACCEPTED": Shipment.Status.PENDING,
+    "ARRIVED": Shipment.Status.PENDING,
+    "ARRIVIED": Shipment.Status.PENDING,
+    "PICKED_UP": Shipment.Status.IN_TRANSIT,
+    "DELIVERED": Shipment.Status.DELIVERED,
+    "CANCELLED": Shipment.Status.FAILED,
+}
+
+
+def _normalize_status(raw_status):
+    """Maps a raw SnapBox status string to a Shipment.Status value."""
+    return _STATUS_MAP.get(raw_status.upper(), Shipment.Status.IN_TRANSIT)
 
 
 def _to_float(value):
@@ -546,7 +596,7 @@ class SnapBoxCarrierProvider(CarrierProvider):
         raw_status = str(raw_status)
         return TrackingResult(
             success=True,
-            status=raw_status,
+            status=_normalize_status(raw_status),
             status_description=_STATUS_DESCRIPTIONS.get(raw_status.upper(), ""),
         )
 

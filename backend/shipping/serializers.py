@@ -6,6 +6,8 @@
 from dashboard.models import IranProvince
 from rest_framework import serializers
 
+from .models import Shipment
+
 
 class ShippingQuoteSerializer(serializers.Serializer):
     """
@@ -17,3 +19,28 @@ class ShippingQuoteSerializer(serializers.Serializer):
 
     province = serializers.ChoiceField(choices=IranProvince.choices)
     city = serializers.CharField(max_length=100)
+
+
+class ShipmentSerializer(serializers.ModelSerializer):
+    """
+    Read-only shipment status for a customer-facing order detail page
+    (Task 7.2.2.3) — nested into OrderSerializer via
+    OrderSerializer.get_shipment(). Deliberately thin: exposes the
+    carrier's display name (not the internal ShippingCarrier row) and the
+    human-readable status label alongside the raw code, since the
+    frontend widget needs both (status for which step to highlight,
+    status_display for the label actually shown to the customer).
+    """
+
+    carrier_name = serializers.CharField(source="carrier.display_name", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = Shipment
+        fields = (
+            "carrier_name",
+            "tracking_number",
+            "status",
+            "status_display",
+            "last_tracked_at",
+        )

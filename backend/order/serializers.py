@@ -5,6 +5,14 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 from shipping.models import ShippingRate
+
+# ShipmentSerializer (Task 7.2.2.3): checked for circularity before this
+# top-level import — shipping/serializers.py imports nothing from order
+# (and nothing else in shipping does either), so a top-level import here
+# works fine. This mirrors the ShippingRate import directly above, which
+# already established that order -> shipping is a safe direction; no
+# local-import-inside-the-method fallback is actually needed.
+from shipping.serializers import ShipmentSerializer
 from shop.models import ProductVariant, StockMovement
 
 from .models import Order, OrderItem
@@ -42,6 +50,17 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     full_name = serializers.CharField(read_only=True)
     shipping_address_display = serializers.CharField(read_only=True)
+    shipment = serializers.SerializerMethodField()
+
+    def get_shipment(self, obj):
+        # Shipment is a Task 7.2.2.1 OneToOneField from Order — most
+        # orders won't have one yet (not booked/dispatched), so accessing
+        # obj.shipment directly would raise Shipment.DoesNotExist; getattr
+        # with a default sidesteps that without needing a try/except.
+        shipment = getattr(obj, "shipment", None)
+        if shipment is None:
+            return None
+        return ShipmentSerializer(shipment).data
 
     class Meta:
         model = Order
@@ -77,6 +96,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "total",
             # items
             "items",
+            # fulfillment
+            "shipment",
             # meta
             "notes",
             "created_at",

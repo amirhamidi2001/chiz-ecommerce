@@ -9,6 +9,7 @@ from django.utils import timezone
 from order.models import Order, OrderItem
 from rest_framework import serializers, status
 from rest_framework.test import APITestCase
+from shipping.models import Shipment, ShippingCarrier
 from shop.models import Category, Product, StockMovement
 
 from .factories import (
@@ -2091,11 +2092,41 @@ class OrderDetailAPITests(APITestCase):
             "discount",
             "total",
             "items",
+            "shipment",
             "created_at",
             "updated_at",
         ):
             with self.subTest(field=field):
                 self.assertIn(field, res.data)
+
+    def test_get_order_detail_shipment_is_null_when_not_yet_shipped(self):
+        # setUp's order is created via checkout but never booked with a
+        # carrier — Task 7.2.2.1's Shipment row doesn't exist yet.
+        res = self.client.get(self._detail_url(self.order.pk))
+
+        self.assertIsNone(res.data["shipment"])
+
+    def test_get_order_detail_shipment_data_when_present(self):
+        carrier = ShippingCarrier.objects.get(code=ShippingCarrier.Code.POST)
+        shipment = Shipment.objects.create(
+            order=self.order,
+            carrier=carrier,
+            tracking_number="TRK123456",
+            status=Shipment.Status.IN_TRANSIT,
+        )
+
+        res = self.client.get(self._detail_url(self.order.pk))
+
+        self.assertEqual(
+            res.data["shipment"],
+            {
+                "carrier_name": carrier.display_name,
+                "tracking_number": "TRK123456",
+                "status": Shipment.Status.IN_TRANSIT,
+                "status_display": shipment.get_status_display(),
+                "last_tracked_at": None,
+            },
+        )
 
     def test_get_order_detail_items_have_expected_fields(self):
         res = self.client.get(self._detail_url(self.order.pk))

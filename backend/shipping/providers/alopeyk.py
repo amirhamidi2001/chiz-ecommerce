@@ -135,6 +135,10 @@ from decimal import Decimal, InvalidOperation
 import requests
 from django.conf import settings
 
+# Safe top-level import — same reasoning as shipping/providers/snapbox.py's
+# identical import (shipping/models.py imports nothing from this package,
+# and concrete providers are only ever resolved lazily by dotted path).
+from ..models import Shipment
 from .base import CarrierProvider, RateQuoteResult, ShipmentCreateResult, TrackingResult
 
 # Source: digiato.com company-news article (see module docstring, point 2).
@@ -168,6 +172,39 @@ _STATUS_DESCRIPTIONS = {
     "STOPPED": "The order was stopped",
     "REMOVED": "The order was removed",
 }
+
+# Task 7.2.2.1 (poll_shipment_tracking): maps AloPeyk's own status
+# vocabulary onto THIS platform's Shipment.Status values — an interpretive
+# approximation (like SnapBox's equivalent _STATUS_MAP), not something
+# AloPeyk documents as a formal mapping, since several of these raw
+# statuses are themselves inferred rather than confirmed (see
+# _STATUS_DESCRIPTIONS above and module docstring point b).
+#   - NEW/ACCEPTED/PICKING all map to PENDING: the package hasn't left
+#     the pickup point yet in any of these.
+#   - DELIVERING maps to OUT_FOR_DELIVERY: a direct semantic match for an
+#     on-demand courier actively en route to the destination.
+#   - DELIVERED and FINISHED (completed + rated, a terminal state that
+#     follows DELIVERED) both map to DELIVERED.
+#   - STOPPED/REMOVED/CANCELLED all map to FAILED.
+#   - Anything unrecognized maps to IN_TRANSIT rather than treated as a
+#     failure, same reasoning as SnapBox's default: the order genuinely
+#     exists and has *some* non-terminal status.
+_STATUS_MAP = {
+    "NEW": Shipment.Status.PENDING,
+    "ACCEPTED": Shipment.Status.PENDING,
+    "PICKING": Shipment.Status.PENDING,
+    "DELIVERING": Shipment.Status.OUT_FOR_DELIVERY,
+    "DELIVERED": Shipment.Status.DELIVERED,
+    "FINISHED": Shipment.Status.DELIVERED,
+    "STOPPED": Shipment.Status.FAILED,
+    "REMOVED": Shipment.Status.FAILED,
+    "CANCELLED": Shipment.Status.FAILED,
+}
+
+
+def _normalize_status(raw_status):
+    """Maps a raw AloPeyk status string to a Shipment.Status value."""
+    return _STATUS_MAP.get(raw_status.upper(), Shipment.Status.IN_TRANSIT)
 
 
 def _to_float(value):
@@ -508,6 +545,6 @@ class AloPeykCarrierProvider(CarrierProvider):
         raw_status = str(raw_status)
         return TrackingResult(
             success=True,
-            status=raw_status,
+            status=_normalize_status(raw_status),
             status_description=_STATUS_DESCRIPTIONS.get(raw_status.upper(), ""),
         )

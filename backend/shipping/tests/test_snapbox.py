@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import requests
 import responses
 from django.test import SimpleTestCase, override_settings
+from shipping.models import Shipment
 from shipping.providers import get_carrier_provider
 from shipping.providers.snapbox import SnapBoxCarrierProvider
 
@@ -602,7 +603,9 @@ class SnapBoxTrackTests(SnapBoxTestCase):
         result = self.provider.track("1422")
 
         self.assertTrue(result.success)
-        self.assertEqual(result.status, "PICKED_UP")
+        # Task 7.2.2.1: normalized to this platform's Shipment.Status, not
+        # SnapBox's raw "PICKED_UP" string — see snapbox.py's _STATUS_MAP.
+        self.assertEqual(result.status, Shipment.Status.IN_TRANSIT)
         self.assertEqual(result.status_description, "The package has been picked up")
         request = responses.calls[0].request
         self.assertEqual(request.headers["Authorization"], "test-token")
@@ -618,10 +621,10 @@ class SnapBoxTrackTests(SnapBoxTestCase):
         result = self.provider.track("1422")
 
         self.assertTrue(result.success)
-        self.assertEqual(result.status, "DELIVERED")
+        self.assertEqual(result.status, Shipment.Status.DELIVERED)
 
     @responses.activate
-    def test_unknown_status_is_passed_through_with_empty_description(self):
+    def test_unrecognized_status_defaults_to_in_transit_with_empty_description(self):
         responses.add(
             responses.GET, self._details_url("7"), json={"status": "SOMETHING_NEW"}
         )
@@ -629,11 +632,37 @@ class SnapBoxTrackTests(SnapBoxTestCase):
         result = self.provider.track("7")
 
         self.assertTrue(result.success)
-        self.assertEqual(result.status, "SOMETHING_NEW")
+        # Unmapped raw status -> safe default (not a failure, not assumed
+        # delivered/failed) — see snapbox.py's _normalize_status().
+        self.assertEqual(result.status, Shipment.Status.IN_TRANSIT)
         self.assertEqual(result.status_description, "")
 
     @responses.activate
-    def test_response_without_a_status_is_an_explicit_failure(self):
+    def test_full_status_mapping_table(self):
+        # Exercises every entry in snapbox.py's _STATUS_MAP explicitly, not
+        # just a couple of spot checks — this table is this file's own
+        # judgment call (see its documentation), so a change to it should
+        # show up here as a deliberate, visible diff.
+        expected = {
+            "PREPENDING": Shipment.Status.PENDING,
+            "PENDING": Shipment.Status.PENDING,
+            "ACCEPTED": Shipment.Status.PENDING,
+            "ARRIVED": Shipment.Status.PENDING,
+            "ARRIVIED": Shipment.Status.PENDING,
+            "PICKED_UP": Shipment.Status.IN_TRANSIT,
+            "DELIVERED": Shipment.Status.DELIVERED,
+            "CANCELLED": Shipment.Status.FAILED,
+        }
+        for raw_status, expected_status in expected.items():
+            responses.add(
+                responses.GET, self._details_url("1"), json={"status": raw_status}
+            )
+
+        for raw_status, expected_status in expected.items():
+            with self.subTest(raw_status=raw_status):
+                result = self.provider.track("1")
+                self.assertEqual(result.status, expected_status)
+
         # The endpoint's response body is undocumented in the spec; an
         # unrecognized shape must fail loudly, not be guessed at.
         responses.add(responses.GET, self._details_url("1422"), json={"id": 1422})
