@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.db.models import Sum
 from order.models import Order, OrderItem
+from order.services.state_machine import is_valid_transition
 from rest_framework import serializers
 from shop.models import Brand, Category, Product, Review, StockMovement
 
@@ -577,6 +578,10 @@ class AdminOrderStatusSerializer(serializers.ModelSerializer):
         if value not in valid:
             raise serializers.ValidationError(
                 f"'{value}' is not a valid status. Choose from: {valid}"
+            )
+        if self.instance and not is_valid_transition(self.instance.status, value):
+            raise serializers.ValidationError(
+                f"Cannot change status from '{self.instance.status}' to '{value}'."
             )
         return value
 

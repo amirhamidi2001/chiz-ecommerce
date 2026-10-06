@@ -15,6 +15,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# System libraries for WeasyPrint (PDF invoices, Task 8.1.2.1). A pip install
+# alone is NOT enough: WeasyPrint loads Pango/HarfBuzz through the OS at
+# runtime. Current WeasyPrint (>= 53) no longer needs cairo or gdk-pixbuf;
+# only Pango, HarfBuzz-subset and a font are required.
+#   fonts-dejavu-core: python:3.11-slim ships NO fonts, so without one the PDF
+#   text would render blank. DejaVu Sans also covers Arabic-script glyphs.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libharfbuzz-subset0 \
+        fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip config --user set global.index https://mirror-pypi.runflare.com/simple \
     && pip config --user set global.index-url https://mirror-pypi.runflare.com/simple \

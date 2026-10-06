@@ -1,3 +1,6 @@
+import csv
+import re
+
 from accounts.models import Profile
 from blog.models import Category as BlogCategory
 from blog.models import Comment as BlogComment
@@ -5,13 +8,20 @@ from blog.models import Post as BlogPost
 from contact.models import ContactMessage
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order
+from order.services.cancellation import cancel_order
+from order.services.state_machine import is_valid_transition
 from rest_framework import filters, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from shop.models import Brand, Category, Product, ProductVariant, Review, StockMovement
@@ -453,6 +463,43 @@ class AdminBrandViewSet(viewsets.ModelViewSet):
         return Brand.objects.prefetch_related("products")
 
 
+class Echo:
+    """Write-target that just returns what it's given, for streaming CSV."""
+
+    def write(self, value):
+        return value
+
+
+class CSVPassthroughRenderer(BaseRenderer):
+    """
+    Exists only so DRF's content negotiation accepts `Accept: text/csv` on the
+    export action (otherwise scripted clients asking for CSV get a 406). The
+    CSV itself is a StreamingHttpResponse and never goes through a renderer;
+    this only ever renders error responses (403, 400...), as JSON.
+    """
+
+    media_type = "text/csv"
+    format = "csv"
+    charset = "utf-8"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return JSONRenderer().render(data, accepted_media_type, renderer_context)
+
+
+# Spreadsheet apps execute cells that start with these as formulas. Customer
+# names/emails are user-supplied, so such cells are prefixed with a quote.
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+# ...but a plain number/phone like "+989121234567" or "-12.50" is not a formula.
+_PLAIN_NUMBER_RE = re.compile(r"[+-]?[\d\s().-]+")
+
+
+def _csv_safe(value):
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+        if not _PLAIN_NUMBER_RE.fullmatch(value):
+            return "'" + value
+    return value
+
+
 class AdminOrderViewSet(viewsets.ModelViewSet):
     """
     Admin order management.
@@ -488,6 +535,104 @@ class AdminOrderViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        """
+        Cancelling must go through the shared cancel_order() service so an
+        admin cancellation restores stock exactly like the customer path
+        (a bare serializer.save() would flip the status with no stock
+        consequence). Every other transition is re-validated under a row
+        lock, so a concurrent change can't be silently overwritten.
+        """
+        order = serializer.instance
+        new_status = serializer.validated_data.get("status")
+
+        if (
+            new_status == Order.Status.CANCELLED
+            and order.status != Order.Status.CANCELLED
+        ):
+            try:
+                cancel_order(
+                    order,
+                    actor=self.request.user,
+                    note=f"Cancelled by admin: order {order.order_number}",
+                )
+            except ValueError as exc:
+                raise ValidationError({"status": [str(exc)]})
+            return
+
+        with transaction.atomic():
+            locked = Order.objects.select_for_update().get(pk=order.pk)
+            if new_status is not None and not is_valid_transition(
+                locked.status, new_status
+            ):
+                raise ValidationError(
+                    {
+                        "status": [
+                            f"Cannot change status from '{locked.status}' to '{new_status}'."
+                        ]
+                    }
+                )
+            serializer.save()
+
+    CSV_EXPORT_FIELDS = [
+        "order_number",
+        "created_at",
+        "status",
+        "first_name",
+        "last_name",
+        "email",
+        "phone",
+        "shipping_city",
+        "shipping_state",
+        "shipping_country",
+        "payment_method",
+        "subtotal",
+        "shipping_cost",
+        "tax",
+        "discount",
+        "total",
+    ]
+
+    @action(
+        detail=False,
+        methods=["get"],
+        renderer_classes=[JSONRenderer, CSVPassthroughRenderer],
+    )
+    def export_csv(self, request):
+        """
+        Stream the orders matching the list endpoint's filters/search/ordering
+        as a CSV download (no pagination: the whole filtered set).
+        """
+        # filter_queryset runs eagerly, so a bad query param is a normal 400
+        # before any streaming starts. The list view's joins/prefetches
+        # (user, profile, items) aren't used by the CSV, so drop them.
+        queryset = (
+            self.filter_queryset(self.get_queryset())
+            .select_related(None)
+            .prefetch_related(None)
+        )
+        fields = self.CSV_EXPORT_FIELDS
+
+        def row_generator():
+            writer = csv.writer(Echo())
+            # BOM so Excel reads the UTF-8 file correctly (Persian names).
+            yield "\ufeff" + writer.writerow(fields)
+            for order in queryset.only(*fields).iterator(chunk_size=500):
+                row = []
+                for name in fields:
+                    value = getattr(order, name)
+                    if name == "created_at":
+                        value = value.isoformat()
+                    row.append(_csv_safe(value))
+                yield writer.writerow(row)
+
+        filename = f"orders_export_{timezone.now().strftime('%Y-%m-%d')}.csv"
+        response = StreamingHttpResponse(
+            row_generator(), content_type="text/csv; charset=utf-8"
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class AdminReviewViewSet(viewsets.ModelViewSet):

@@ -1,0 +1,103 @@
+{% load order_invoice %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoice {{ order.order_number }}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm;
+          @bottom-center { content: "{{ store.name }} — Invoice {{ order.order_number }} — Page " counter(page) " of " counter(pages);
+                           font-family: "DejaVu Sans", sans-serif; font-size: 8pt; color: #888; } }
+  /* DejaVu Sans also covers Arabic-script glyphs, so Persian names render
+     before the full RTL work of Epic 14. */
+  body { font-family: "DejaVu Sans", sans-serif; font-size: 9.5pt; color: #222; }
+  h1 { font-size: 22pt; margin: 0; letter-spacing: 1px; color: #0f766e; }
+  .header { display: flex; justify-content: space-between; border-bottom: 2px solid #0f766e; padding-bottom: 10px; }
+  .store { text-align: right; font-size: 9pt; color: #444; line-height: 1.5; }
+  .store strong { font-size: 12pt; color: #222; }
+  .meta { margin: 16px 0; width: 100%; border-collapse: collapse; }
+  .meta td { vertical-align: top; width: 50%; padding: 0; line-height: 1.55; }
+  .label { font-size: 8pt; text-transform: uppercase; color: #777; letter-spacing: .5px; margin-bottom: 3px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 8px; font-size: 8pt; background: #e5e7eb; text-transform: capitalize; }
+  .badge.cancelled { background: #fee2e2; color: #b91c1c; }
+  table.items { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  table.items th { background: #f1f5f9; text-align: left; font-size: 8pt; text-transform: uppercase; padding: 7px 8px; border-bottom: 1px solid #cbd5e1; }
+  table.items td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  table.items tr { page-break-inside: avoid; }
+  .num { text-align: right; white-space: nowrap; }
+  .sub { color: #777; font-size: 8pt; }
+  table.totals { margin-top: 14px; margin-left: auto; width: 55%; border-collapse: collapse; page-break-inside: avoid; }
+  table.totals td { padding: 4px 8px; }
+  table.totals tr.grand td { border-top: 2px solid #0f766e; font-weight: bold; font-size: 11pt; padding-top: 8px; }
+  .notes { margin-top: 22px; font-size: 8.5pt; color: #666; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>INVOICE</h1>
+      <div style="margin-top:6px">
+        {{ order.order_number }}<br>
+        <span class="badge {{ order.status }}">{{ order.status }}</span>
+      </div>
+    </div>
+    <div class="store">
+      <strong>{{ store.name }}</strong><br>
+      {{ store.address }}<br>
+      {{ store.email }} · {{ store.phone }}<br>
+      {{ store.tax_id }}
+    </div>
+  </div>
+
+  <table class="meta">
+    <tr>
+      <td>
+        <div class="label">Billed / shipped to</div>
+        {{ order.full_name }}<br>
+        {{ order.shipping_address }}{% if order.shipping_apartment %}, {{ order.shipping_apartment }}{% endif %}<br>
+        {{ order.shipping_city }}, {{ order.shipping_state }} {{ order.shipping_zip }}<br>
+        {{ order.shipping_country }}<br>
+        {% if order.email %}{{ order.email }}<br>{% endif %}{% if order.phone %}{{ order.phone }}{% endif %}
+      </td>
+      <td>
+        <div class="label">Invoice details</div>
+        Order date: {{ order.created_at|date:"Y-m-d" }}<br>
+        Payment: {{ order.get_payment_method_display }}{% if order.card_last_four %} (**** {{ order.card_last_four }}){% endif %}<br>
+        {% if order.shipping_carrier %}Carrier: {{ order.shipping_carrier }}<br>{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="items">
+    <thead>
+      <tr><th>Item</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Line total</th></tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>
+          {{ item.product_name }}
+          {% with attrs=item.variant_attributes_json|invoice_attributes %}
+            {% if attrs or item.variant_sku %}
+              <div class="sub">{{ attrs }}{% if attrs and item.variant_sku %} · {% endif %}{% if item.variant_sku %}SKU {{ item.variant_sku }}{% endif %}</div>
+            {% endif %}
+          {% endwith %}
+        </td>
+        <td class="num">{{ item.quantity }}</td>
+        <td class="num">{{ item.unit_price|floatformat:2 }}</td>
+        <td class="num">{{ item.subtotal|floatformat:2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <table class="totals">
+    <tr><td>Subtotal</td><td class="num">{{ order.subtotal|floatformat:2 }}</td></tr>
+    <tr><td>Shipping</td><td class="num">{{ order.shipping_cost|floatformat:2 }}</td></tr>
+    <tr><td>Tax</td><td class="num">{{ order.tax|floatformat:2 }}</td></tr>
+    {% if order.discount %}<tr><td>Discount</td><td class="num">-{{ order.discount|floatformat:2 }}</td></tr>{% endif %}
+    <tr class="grand"><td>Total</td><td class="num">{{ order.total|floatformat:2 }}</td></tr>
+  </table>
+
+  <p class="notes">All amounts are as charged at the time of the order. Thank you for your purchase.</p>
+</body>
+</html>

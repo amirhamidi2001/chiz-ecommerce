@@ -1,14 +1,18 @@
-from django.db import transaction
+from accounts.models import UserType
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from payments.models import PaymentTransaction, RefundRequest
 from payments.serializers import RefundRequestCreateSerializer, RefundRequestSerializer
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Order
 from .serializers import OrderCreateSerializer, OrderListSerializer, OrderSerializer
-from .services.stock import release_reserved_stock
+from .services.cancellation import cancel_order
+from .services.invoice import generate_invoice_pdf
 
 
 class OrderListCreateView(APIView):
@@ -83,32 +87,17 @@ class OrderDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if order.status in (Order.Status.SHIPPED, Order.Status.DELIVERED):
+        # Shared with the admin endpoint (dashboard.views.AdminOrderViewSet)
+        # via order.services.cancellation.cancel_order — one authoritative
+        # implementation of the status change + atomic stock restoration.
+        try:
+            cancel_order(order, actor=request.user)
+        except ValueError:
             return Response(
                 {
                     "detail": "Cannot cancel an order that has already been shipped or delivered."
                 },
                 status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        with transaction.atomic():
-            order.status = Order.Status.CANCELLED
-            order.save(update_fields=["status", "updated_at"])
-
-            # ── Restore stock for each item ──────────────────────────────
-            # ProductVariant.stock is the real, authoritative inventory
-            # count now (Tasks 3.1.1.1–3.1.1.4); Product.stock is
-            # superseded and unused in the order flow — candidate for
-            # removal in a future cleanup task.
-            #
-            # Shared with the payment-failure path (Task 6.2.1.4) via
-            # order.services.stock.release_reserved_stock — see that
-            # module for why this is a shared helper rather than two
-            # independently-maintained copies.
-            release_reserved_stock(
-                order,
-                actor=self.request.user,
-                note=f"Cancellation of order {order.order_number}",
             )
 
         serializer = OrderSerializer(order, context={"request": request})
@@ -200,3 +189,45 @@ class RefundRequestCreateView(APIView):
 
         response_serializer = RefundRequestSerializer(refund_request)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class PDFPassthroughRenderer(BaseRenderer):
+    """
+    Lets content negotiation accept `Accept: application/pdf` (otherwise DRF
+    answers 406 before the view runs). The PDF is returned as a plain
+    HttpResponse and never rendered; this only renders error bodies, as JSON.
+    """
+
+    media_type = "application/pdf"
+    format = "pdf"
+    charset = None
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return JSONRenderer().render(data, accepted_media_type, renderer_context)
+
+
+class OrderInvoiceView(APIView):
+    """
+    GET /api/orders/<id>/invoice/ → PDF invoice for an order.
+    Allowed for the order's owner and for staff/admin users.
+    """
+
+    permission_classes = [IsAuthenticated]
+    renderer_classes = [JSONRenderer, PDFPassthroughRenderer]
+
+    def get(self, request, pk):
+        order = get_object_or_404(Order.objects.prefetch_related("items"), pk=pk)
+        user = request.user
+        if order.user_id != user.id and not (
+            user.is_staff or user.type in (UserType.ADMIN, UserType.SUPERUSER)
+        ):
+            return Response(
+                {"detail": "You do not have permission to view this invoice."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        pdf_bytes = generate_invoice_pdf(order)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = (
+            f'attachment; filename="invoice_{order.order_number}.pdf"'
+        )
+        return response

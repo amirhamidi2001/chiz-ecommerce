@@ -433,3 +433,455 @@ class TestAdminVariantAdjustStockView:
 
         variant.refresh_from_db()
         assert variant.stock == 10
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AdminOrderViewSet — status state machine + shared cancellation
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def admin_order_url(pk):
+    return f"/api/dashboard/admin/orders/{pk}/"
+
+
+@pytest.fixture
+def make_order_with_items(make_order, make_variant):
+    """
+    Factory: order in `status` containing one OrderItem per (variant, qty).
+    Mirrors checkout, which has already decremented stock — each variant's
+    stock is reduced by qty so cancellation has something real to restore.
+    """
+    from order.models import OrderItem
+
+    def _make(items, status="pending", user=None):
+        order = make_order(status=status, user=user)
+        for variant, qty in items:
+            variant.stock -= qty
+            variant.save(update_fields=["stock"])
+            OrderItem.objects.create(
+                order=order,
+                product=variant.product,
+                variant=variant,
+                product_name=variant.product.name,
+                product_slug=f"slug-{variant.pk}",
+                variant_sku=variant.sku,
+                unit_price=variant.price,
+                quantity=qty,
+            )
+        return order
+
+    return _make
+
+
+@pytest.mark.django_db
+class TestAdminOrderStatusTransitions:
+
+    def test_invalid_transition_delivered_to_pending_returns_400(
+        self, admin_client, make_order
+    ):
+        order = make_order(status="delivered")
+        res = admin_client.patch(
+            admin_order_url(order.pk), {"status": "pending"}, format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Cannot change status from 'delivered' to 'pending'" in str(
+            res.data["status"]
+        )
+        order.refresh_from_db()
+        assert order.status == "delivered"
+
+    def test_invalid_transition_cancelled_to_shipped_returns_400(
+        self, admin_client, make_order
+    ):
+        order = make_order(status="cancelled")
+        res = admin_client.patch(
+            admin_order_url(order.pk), {"status": "shipped"}, format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        order.refresh_from_db()
+        assert order.status == "cancelled"
+
+    def test_unknown_status_value_still_rejected(self, admin_client, make_order):
+        order = make_order(status="pending")
+        res = admin_client.patch(
+            admin_order_url(order.pk), {"status": "teleported"}, format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        order.refresh_from_db()
+        assert order.status == "pending"
+
+    def test_valid_transition_processing_to_shipped_succeeds(
+        self, admin_client, make_order
+    ):
+        order = make_order(status="processing")
+        res = admin_client.patch(
+            admin_order_url(order.pk), {"status": "shipped"}, format="json"
+        )
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["status"] == "shipped"
+        order.refresh_from_db()
+        assert order.status == "shipped"
+
+    def test_processing_to_delivered_allowed_for_carrier_confirmed_delivery(
+        self, admin_client, make_order
+    ):
+        # shipping.tasks.poll_shipment_tracking performs this exact
+        # transition in production, so the map must allow it.
+        order = make_order(status="processing")
+        res = admin_client.patch(
+            admin_order_url(order.pk), {"status": "delivered"}, format="json"
+        )
+        assert res.status_code == status.HTTP_200_OK
+
+    def test_non_admin_cannot_change_status(self, customer_client, make_order):
+        order = make_order(status="pending")
+        res = customer_client.patch(
+            admin_order_url(order.pk), {"status": "processing"}, format="json"
+        )
+        assert res.status_code == status.HTTP_403_FORBIDDEN
+        order.refresh_from_db()
+        assert order.status == "pending"
+
+
+@pytest.mark.django_db
+class TestAdminOrderCancellation:
+
+    @pytest.mark.parametrize("start_status", ["pending", "processing"])
+    def test_admin_cancel_restores_stock_and_logs_movements_with_actor(
+        self,
+        admin_client,
+        admin_user,
+        make_variant,
+        make_order_with_items,
+        start_status,
+    ):
+        from shop.models import StockMovement
+
+        v1 = make_variant(stock=10)
+        v2 = make_variant(stock=20)
+        order = make_order_with_items([(v1, 3), (v2, 5)], status=start_status)
+
+        v1.refresh_from_db()
+        v2.refresh_from_db()
+        assert (v1.stock, v2.stock) == (7, 15)  # reserved at "checkout"
+
+        res = admin_client.patch(
+            admin_order_url(order.pk), {"status": "cancelled"}, format="json"
+        )
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["status"] == "cancelled"
+
+        order.refresh_from_db()
+        v1.refresh_from_db()
+        v2.refresh_from_db()
+        assert order.status == "cancelled"
+        assert (v1.stock, v2.stock) == (10, 20)
+
+        movements = StockMovement.objects.filter(
+            related_order=order, reason=StockMovement.Reason.CANCELLATION
+        )
+        assert movements.count() == 2
+        m1 = movements.get(variant=v1)
+        m2 = movements.get(variant=v2)
+        assert (m1.quantity_delta, m1.stock_after) == (3, 10)
+        assert (m2.quantity_delta, m2.stock_after) == (5, 20)
+        assert m1.actor_id == admin_user.id
+        assert m2.actor_id == admin_user.id
+
+    def test_admin_cancel_shipped_order_rejected_and_stock_untouched(
+        self, admin_client, make_variant, make_order_with_items
+    ):
+        from shop.models import StockMovement
+
+        variant = make_variant(stock=10)
+        order = make_order_with_items([(variant, 4)], status="shipped")
+
+        res = admin_client.patch(
+            admin_order_url(order.pk), {"status": "cancelled"}, format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        order.refresh_from_db()
+        variant.refresh_from_db()
+        assert order.status == "shipped"
+        assert variant.stock == 6
+        assert not StockMovement.objects.filter(related_order=order).exists()
+
+    def test_resubmitting_cancelled_status_is_noop_and_does_not_double_restore(
+        self, admin_client, make_variant, make_order_with_items
+    ):
+        from shop.models import StockMovement
+
+        variant = make_variant(stock=10)
+        order = make_order_with_items([(variant, 4)], status="pending")
+
+        first = admin_client.patch(
+            admin_order_url(order.pk), {"status": "cancelled"}, format="json"
+        )
+        assert first.status_code == status.HTTP_200_OK
+        variant.refresh_from_db()
+        assert variant.stock == 10
+
+        second = admin_client.patch(
+            admin_order_url(order.pk), {"status": "cancelled"}, format="json"
+        )
+        assert second.status_code == status.HTTP_200_OK
+
+        variant.refresh_from_db()
+        assert variant.stock == 10  # not 14
+        assert (
+            StockMovement.objects.filter(
+                related_order=order, reason=StockMovement.Reason.CANCELLATION
+            ).count()
+            == 1
+        )
+
+    def test_noop_resubmission_of_non_cancelled_status_succeeds(
+        self, admin_client, make_order
+    ):
+        order = make_order(status="processing")
+        res = admin_client.patch(
+            admin_order_url(order.pk), {"status": "processing"}, format="json"
+        )
+        assert res.status_code == status.HTTP_200_OK
+        order.refresh_from_db()
+        assert order.status == "processing"
+
+    def test_cancel_order_service_is_idempotent_for_customer_path_too(
+        self, customer_client, make_variant, make_order_with_items
+    ):
+        # Pre-refactor, a customer re-cancelling an already-cancelled order
+        # restored stock a second time; the shared service must not.
+        variant = make_variant(stock=10)
+        order = make_order_with_items([(variant, 4)], status="pending")
+        url = f"/api/orders/{order.pk}/"
+
+        for _ in range(2):
+            res = customer_client.patch(url, {"status": "cancelled"}, format="json")
+            assert res.status_code == status.HTTP_200_OK
+
+        variant.refresh_from_db()
+        assert variant.stock == 10
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AdminOrderViewSet — CSV export
+# ══════════════════════════════════════════════════════════════════════════════
+
+EXPORT_URL = "/api/dashboard/admin/orders/export_csv/"
+EXPORT_HEADER = [
+    "order_number", "created_at", "status", "first_name", "last_name",
+    "email", "phone", "shipping_city", "shipping_state", "shipping_country",
+    "payment_method", "subtotal", "shipping_cost", "tax", "discount", "total",
+]  # fmt: skip
+
+
+def read_csv(response):
+    """Consume a streaming CSV response -> list of rows (BOM stripped)."""
+    import csv
+    import io
+
+    body = b"".join(response.streaming_content).decode("utf-8-sig")
+    return list(csv.reader(io.StringIO(body)))
+
+
+def export_rows(response):
+    """Rows as dicts keyed by header, keyed again by order_number."""
+    rows = read_csv(response)
+    assert rows[0] == EXPORT_HEADER
+    return {r[0]: dict(zip(rows[0], r)) for r in rows[1:]}
+
+
+@pytest.mark.django_db
+class TestAdminOrderCsvExport:
+
+    def test_returns_streamed_csv_with_header_and_one_row_per_order(
+        self, admin_client, make_order
+    ):
+        from order.models import Order
+
+        o1 = make_order(status="delivered", total=Decimal("120.50"))
+        o2 = make_order(status="pending", total=Decimal("30.00"))
+        Order.objects.filter(pk=o1.pk).update(
+            first_name="Alice", last_name="Rahimi", email="alice@example.com",
+            phone="09121111111", shipping_city="Tehran", shipping_state="tehran",
+            shipping_country="IR", payment_method="paypal",
+            subtotal=Decimal("100.00"), shipping_cost=Decimal("15.50"),
+            tax=Decimal("10.00"), discount=Decimal("5.00"),
+        )  # fmt: skip
+
+        res = admin_client.get(EXPORT_URL)
+
+        assert res.status_code == 200
+        assert res.streaming is True
+        assert res["Content-Type"].startswith("text/csv")
+        rows = export_rows(res)
+        assert set(rows) == {o1.order_number, o2.order_number}
+
+        row = rows[o1.order_number]
+        assert row["status"] == "delivered"
+        assert row["first_name"] == "Alice"
+        assert row["last_name"] == "Rahimi"
+        assert row["email"] == "alice@example.com"
+        assert row["phone"] == "09121111111"
+        assert row["shipping_city"] == "Tehran"
+        assert row["shipping_state"] == "tehran"
+        assert row["shipping_country"] == "IR"
+        assert row["payment_method"] == "paypal"
+        assert Decimal(row["subtotal"]) == Decimal("100.00")
+        assert Decimal(row["shipping_cost"]) == Decimal("15.50")
+        assert Decimal(row["tax"]) == Decimal("10.00")
+        assert Decimal(row["discount"]) == Decimal("5.00")
+        assert Decimal(row["total"]) == Decimal("120.50")
+        # ISO-8601, parseable, timezone-aware
+        o1.refresh_from_db()
+        assert row["created_at"] == o1.created_at.isoformat()
+
+    def test_empty_result_is_just_the_header(self, admin_client):
+        res = admin_client.get(EXPORT_URL)
+        assert res.status_code == 200
+        assert read_csv(res) == [EXPORT_HEADER]
+
+    def test_status_filter_limits_rows(self, admin_client, make_order):
+        d1 = make_order(status="delivered")
+        d2 = make_order(status="delivered")
+        make_order(status="pending")
+        make_order(status="cancelled")
+
+        res = admin_client.get(EXPORT_URL, {"status": "delivered"})
+
+        assert set(export_rows(res)) == {d1.order_number, d2.order_number}
+
+    def test_date_range_search_and_ordering_are_respected(
+        self, admin_client, make_order
+    ):
+        from datetime import datetime
+        from datetime import timezone as tz
+
+        from order.models import Order
+
+        old = make_order()
+        mid = make_order()
+        new = make_order()
+        for order, day in ((old, 1), (mid, 15), (new, 28)):
+            Order.objects.filter(pk=order.pk).update(
+                created_at=datetime(2026, 1, day, 12, tzinfo=tz.utc)
+            )
+
+        res = admin_client.get(
+            EXPORT_URL, {"date_from": "2026-01-10", "date_to": "2026-01-31"}
+        )
+        assert set(export_rows(res)) == {mid.order_number, new.order_number}
+
+        res = admin_client.get(EXPORT_URL, {"search": old.order_number})
+        assert set(export_rows(res)) == {old.order_number}
+
+        res = admin_client.get(EXPORT_URL, {"ordering": "created_at"})
+        assert [r[0] for r in read_csv(res)[1:]] == [
+            old.order_number, mid.order_number, new.order_number,
+        ]  # fmt: skip
+
+    def test_export_is_not_paginated(self, admin_client, make_order):
+        # DashboardPagination.page_size is 10; the export must return all.
+        numbers = {make_order().order_number for _ in range(25)}
+        assert set(export_rows(admin_client.get(EXPORT_URL))) == numbers
+
+    def test_query_count_does_not_grow_with_row_count(self, admin_client, make_order):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        make_order()
+        make_order()
+        with CaptureQueriesContext(connection) as small:
+            read_csv(admin_client.get(EXPORT_URL))
+        for _ in range(25):
+            make_order()
+        with CaptureQueriesContext(connection) as large:
+            read_csv(admin_client.get(EXPORT_URL))
+        assert len(large) == len(small)
+
+    def test_invalid_filter_value_is_a_400_not_a_broken_download(self, admin_client):
+        res = admin_client.get(EXPORT_URL, {"date_from": "not-a-date"})
+        assert res.status_code == 400
+        assert not res.streaming
+
+    @pytest.mark.parametrize("accept", ["text/csv", "application/json", "*/*"])
+    def test_accept_header_variants(self, admin_client, make_order, accept):
+        make_order()
+        res = admin_client.get(EXPORT_URL, HTTP_ACCEPT=accept)
+        assert res.status_code == 200
+
+    def test_content_disposition_triggers_download_with_dated_filename(
+        self, admin_client
+    ):
+        from django.utils import timezone
+
+        res = admin_client.get(EXPORT_URL)
+        today = timezone.now().strftime("%Y-%m-%d")
+        assert res["Content-Disposition"] == (
+            f'attachment; filename="orders_export_{today}.csv"'
+        )
+
+    def test_utf8_bom_and_persian_text_round_trip(self, admin_client, make_order):
+        from order.models import Order
+
+        order = make_order()
+        Order.objects.filter(pk=order.pk).update(
+            first_name="علی", last_name="رحیمی", shipping_city="تهران"
+        )
+        res = admin_client.get(EXPORT_URL)
+        raw = b"".join(res.streaming_content)
+        assert raw.startswith(b"\xef\xbb\xbf")  # BOM, so Excel reads UTF-8
+        rows = {r[0]: r for r in read_csv_bytes(raw)}
+        assert rows[order.order_number][3:5] == ["علی", "رحیمی"]
+        assert rows[order.order_number][7] == "تهران"
+
+    def test_spreadsheet_formulas_in_customer_text_are_neutralised(
+        self, admin_client, make_order
+    ):
+        from order.models import Order
+
+        evil = make_order()
+        plain = make_order()
+        Order.objects.filter(pk=evil.pk).update(
+            first_name='=HYPERLINK("http://evil.example","x")',
+            last_name="@SUM(1+1)",
+            email="-2+3@example.com",
+            phone="+98 912 123 4567",  # a legitimate phone must stay untouched
+            shipping_city="+cmd|' /C calc'!A0",
+        )
+        rows = export_rows(admin_client.get(EXPORT_URL))
+        row = rows[evil.order_number]
+        assert row["first_name"].startswith("'=")
+        assert row["last_name"].startswith("'@")
+        assert row["email"].startswith("'-")
+        assert row["shipping_city"].startswith("'+")
+        assert row["phone"] == "+98 912 123 4567"
+        assert rows[plain.order_number]["first_name"] == "Test"
+
+    # ── Permissions ──────────────────────────────────────────────────────────
+
+    def test_customer_is_forbidden(self, customer_client, make_order):
+        make_order()
+        res = customer_client.get(EXPORT_URL)
+        assert res.status_code == 403
+        assert not res.streaming
+
+    def test_customer_is_forbidden_even_with_csv_accept_header(self, customer_client):
+        res = customer_client.get(EXPORT_URL, HTTP_ACCEPT="text/csv")
+        assert res.status_code == 403
+
+    def test_anonymous_is_unauthorised(self, db):
+        from rest_framework.test import APIClient
+
+        assert APIClient().get(EXPORT_URL).status_code == 401
+
+    def test_superuser_can_export(self, superuser_client, make_order):
+        order = make_order()
+        assert order.order_number in export_rows(superuser_client.get(EXPORT_URL))
+
+
+def read_csv_bytes(raw):
+    import csv
+    import io
+
+    return list(csv.reader(io.StringIO(raw.decode("utf-8-sig"))))

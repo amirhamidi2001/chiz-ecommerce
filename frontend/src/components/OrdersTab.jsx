@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { dashboardAPI } from "../services/api";
+import { dashboardAPI, downloadOrderInvoice } from "../services/api";
+import { saveBlob } from "../utils/download";
 import ShipmentTrackingWidget from "./ShipmentTrackingWidget";
 
 const STATUS_STYLES = {
@@ -17,6 +18,26 @@ const fmt = (n) =>
 const OrderDetailModal = ({ orderId, onClose }) => {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
+  const [invoiceError, setInvoiceError] = useState("");
+
+  // Authenticated PDF download (Task 8.1.2.1): fetched via axios so the
+  // Bearer token is attached, then saved from an object URL.
+  const handleDownloadInvoice = async () => {
+    setInvoiceBusy(true);
+    setInvoiceError("");
+    try {
+      const { data } = await downloadOrderInvoice(orderId);
+      saveBlob(
+        new Blob([data], { type: "application/pdf" }),
+        `invoice_${order?.order_number || orderId}.pdf`,
+      );
+    } catch {
+      setInvoiceError("Could not download the invoice. Please try again.");
+    } finally {
+      setInvoiceBusy(false);
+    }
+  };
 
   useEffect(() => {
     dashboardAPI
@@ -60,7 +81,22 @@ const OrderDetailModal = ({ orderId, onClose }) => {
               <span className="text-sm text-gray-500">
                 Placed {new Date(order.created_at).toLocaleDateString()}
               </span>
+              <button
+                type="button"
+                data-testid="download-invoice"
+                onClick={handleDownloadInvoice}
+                disabled={invoiceBusy}
+                className="ml-auto text-sm font-medium text-teal-700 hover:text-teal-900 disabled:opacity-50 flex items-center gap-1"
+              >
+                <i className="bi bi-file-earmark-pdf"></i>
+                {invoiceBusy ? "Preparing…" : "Download Invoice"}
+              </button>
             </div>
+            {invoiceError && (
+              <p role="alert" className="text-sm text-red-600 -mt-3">
+                {invoiceError}
+              </p>
+            )}
 
             {/* Shipment tracking (Task 7.2.2.3) */}
             <div>

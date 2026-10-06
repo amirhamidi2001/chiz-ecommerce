@@ -313,6 +313,14 @@ export const getOrderDetail = (orderId) =>
 export const cancelOrder = (orderId) =>
   api.patch(`/orders/${orderId}/`, { status: 'cancelled' });
 
+// Task 8.1.2.1: PDF invoice. The endpoint is authenticated with a Bearer
+// header (see the request interceptor above), which a plain
+// <a href="/api/orders/1/invoice/"> would NOT send — the browser would hit
+// it unauthenticated and get a 401. So the PDF is fetched through this axios
+// instance as a Blob and saved client-side (see utils/download.js).
+export const downloadOrderInvoice = (orderId) =>
+  api.get(`/orders/${orderId}/invoice/`, { responseType: 'blob' });
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SHIPPING  →  /api/shipping/
 // ═══════════════════════════════════════════════════════════════════════════

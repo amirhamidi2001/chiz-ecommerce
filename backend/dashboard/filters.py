@@ -23,6 +23,15 @@ class AdminOrderFilter(django_filters.FilterSet):
     )
     min_total = django_filters.NumberFilter(field_name="total", lookup_expr="gte")
     max_total = django_filters.NumberFilter(field_name="total", lookup_expr="lte")
+    # All orders belonging to one specific customer (e.g. from an admin's
+    # customer-detail page) — distinct from free-text `search`.
+    user_id = django_filters.NumberFilter(field_name="user_id")
+    # Destination province. Order.shipping_state is an unconstrained snapshot
+    # CharField that checkout fills with the IranProvince slug (e.g. "tehran");
+    # iexact keeps "Tehran" from silently returning nothing.
+    shipping_province = django_filters.CharFilter(
+        field_name="shipping_state", lookup_expr="iexact"
+    )
 
     class Meta:
         model = Order
@@ -33,6 +42,8 @@ class AdminOrderFilter(django_filters.FilterSet):
             "date_to",
             "min_total",
             "max_total",
+            "user_id",
+            "shipping_province",
         ]
 
 
