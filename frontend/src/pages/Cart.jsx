@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
+import CouponInput from '../components/CouponInput';
 import { isAuthenticated } from '../services/api';
 
 // ─── Shipping options ──────────────────────────────────────────────────────
@@ -157,15 +158,14 @@ const CartItemRow = ({ item, onUpdateQty, onRemove, updatingId }) => {
 // ─── Main Cart Page ────────────────────────────────────────────────────────
 const Cart = () => {
   const navigate = useNavigate();
-  const { cart, loading, error, fetchCart, updateItem, removeItem, clearCart } = useCart();
+  const {
+    cart, loading, error, fetchCart, updateItem, removeItem, clearCart, applyCoupon, removeCoupon,
+  } = useCart();
 
   const [shippingMethod, setShippingMethod] = useState('standard');
   const [updatingId, setUpdatingId] = useState(null);  // item being updated
   const [clearing, setClearing] = useState(false);
   const [toast, setToast] = useState(null);  // { message, type }
-  const [couponCode, setCouponCode] = useState('');
-  const [discount, setDiscount] = useState(0);
-  const [couponApplied, setCouponApplied] = useState(false);
 
   const showToast = (message, type = 'success') => setToast({ message, type });
   const hideToast = () => setToast(null);
@@ -191,6 +191,14 @@ const Cart = () => {
 
   const shippingCost = getShippingCost();
   const tax = subtotal * TAX_RATE;
+
+  // The coupon lives on the server-side cart; everything below is read from
+  // what GET /cart/ says right now (recomputed there on every fetch), never
+  // tracked locally. A coupon that has since become invalid (coupon_error)
+  // is still attached but must NOT reduce the total.
+  const couponCode = cart?.coupon_code ?? null;
+  const couponError = cart?.coupon_error ?? null;
+  const discount = couponCode && !couponError ? Number(cart?.coupon_discount) || 0 : 0;
   const total = subtotal + shippingCost + tax - discount;
 
   // ── Handlers ─────────────────────────────────────────────────────────────
@@ -219,26 +227,23 @@ const Cart = () => {
     setClearing(false);
     if (result.success) {
       showToast('Cart cleared.');
-      setDiscount(0);
-      setCouponApplied(false);
-      setCouponCode('');
     } else {
       showToast(result.message, 'error');
     }
   };
 
-  const applyCoupon = () => {
-    if (couponApplied) {
-      showToast('A coupon is already applied.', 'error');
-      return;
-    }
-    if (couponCode.toUpperCase() === 'DISCOUNT20') {
-      setDiscount(20);
-      setCouponApplied(true);
-      showToast('Coupon applied! $20 discount added.');
-    } else {
-      showToast('Invalid coupon code.', 'error');
-    }
+  // The input component shows failures inline (the backend's own message),
+  // so only successes get a toast here.
+  const handleApplyCoupon = async (code) => {
+    const result = await applyCoupon(code);
+    if (result.success) showToast('Coupon applied.');
+    return result;
+  };
+
+  const handleRemoveCoupon = async () => {
+    const result = await removeCoupon();
+    if (result.success) showToast('Coupon removed.');
+    return result;
   };
 
   const items = cart?.items ?? [];
@@ -334,25 +339,13 @@ const Cart = () => {
                 {!loading && items.length > 0 && (
                   <div className="flex flex-col md:flex-row justify-between gap-4 mt-6 pt-4 border-t border-gray-100">
                     {/* Coupon */}
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Coupon code"
-                        value={couponCode}
-                        onChange={(e) => setCouponCode(e.target.value)}
-                        disabled={couponApplied}
-                        className="border border-gray-300 rounded-lg px-4 py-2 text-sm w-36 focus:outline-none focus:border-teal-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      />
-                      <button
-                        onClick={applyCoupon}
-                        disabled={couponApplied}
-                        className="border border-teal-600 text-teal-600 px-4 py-2 rounded-lg text-sm hover:bg-teal-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {couponApplied ? (
-                          <><i className="bi bi-check-circle me-1"></i>Applied</>
-                        ) : 'Apply Coupon'}
-                      </button>
-                    </div>
+                    <CouponInput
+                      couponCode={couponCode}
+                      couponDiscount={cart.coupon_discount}
+                      couponError={couponError}
+                      onApply={handleApplyCoupon}
+                      onRemove={handleRemoveCoupon}
+                    />
 
                     {/* Clear / Continue */}
                     <div className="flex gap-2 flex-wrap">
@@ -447,7 +440,7 @@ const Cart = () => {
                     {discount > 0 && (
                       <div className="flex justify-between text-teal-600">
                         <span className="flex items-center gap-1">
-                          <i className="bi bi-tag-fill"></i> Coupon Discount
+                          <i className="bi bi-tag-fill"></i> Coupon ({couponCode})
                         </span>
                         <span className="font-semibold">-${discount.toFixed(2)}</span>
                       </div>

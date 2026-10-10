@@ -6,9 +6,10 @@ Signal receivers for the shop app. Wired via ShopConfig.ready()
 """
 
 from django.core.cache import cache
-from django.db.models.signals import post_delete, post_save, pre_save
+from django.db.models.signals import m2m_changed, post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django_redis import get_redis_connection
+from promotions.models import FlashSale
 
 from .models import Category, Product, ProductVariant, StockMovement
 from .tasks import notify_stock_alert_subscribers
@@ -48,6 +49,25 @@ def invalidate_product_list_cache():
     keys = redis_conn.keys("*product_list_v1:*")
     if keys:
         redis_conn.delete(*keys)
+
+
+@receiver([post_save, post_delete], sender=FlashSale)
+def invalidate_cache_on_flash_sale_change(sender, **kwargs):
+    """
+    Cached list pages carry each product's flash-sale fields, so creating,
+    editing (discount, dates, is_active) or deleting a sale must clear them —
+    same reasoning as a variant price change above. A sale simply STARTING or
+    ENDING on schedule fires no signal; that is bounded by the 60s TTL.
+    """
+    invalidate_product_list_cache()
+
+
+@receiver(m2m_changed, sender=FlashSale.products.through)
+def invalidate_cache_on_flash_sale_products_change(sender, action, **kwargs):
+    """Adding/removing products to a sale changes which cards show the sale
+    (fires from either side: sale.products.add(...) or product.flash_sales.add(...))."""
+    if action in ("post_add", "post_remove", "post_clear"):
+        invalidate_product_list_cache()
 
 
 @receiver(post_save, sender=Product)

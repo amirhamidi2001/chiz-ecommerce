@@ -26,6 +26,18 @@ class Cart(models.Model):
         unique=True,
         db_index=True,
     )
+    # Coupon currently applied to this cart (Task 9.1.1.5 — added here as a
+    # prerequisite; Task 9.1.1.6's apply/remove endpoints set and clear it).
+    # This is only a pointer: it is RE-VALIDATED at checkout and never
+    # trusted as proof the coupon is still usable. SET_NULL so deleting a
+    # coupon just detaches it from carts.
+    coupon = models.ForeignKey(
+        "promotions.Coupon",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="carts",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -51,6 +63,18 @@ class Cart(models.Model):
     def subtotal(self):
         """Sum of all item subtotals."""
         return sum(item.subtotal for item in self.items.all())
+
+    def clear(self):
+        """
+        Empty the cart: delete every item AND detach any applied coupon, so
+        a stale coupon reference can't linger on an empty cart. Used by
+        every path that clears a cart (confirmed payment success, the
+        "clear cart" endpoint).
+        """
+        self.items.all().delete()
+        if self.coupon_id is not None:
+            self.coupon = None
+            self.save(update_fields=["coupon", "updated_at"])
 
     @property
     def total_items(self):

@@ -15,6 +15,7 @@ status transition, locking and idempotency around it.
 from django.db import transaction
 from order.models import Order
 
+from .coupon import release_coupon_redemption
 from .state_machine import is_valid_transition
 from .stock import release_reserved_stock
 
@@ -26,6 +27,8 @@ def cancel_order(order, actor=None, *, note=None):
 
     * Raises ValueError if the order's status cannot move to CANCELLED
       (SHIPPED / DELIVERED).
+    * Deletes the order's CouponRedemption (if any), so the cancelled
+      order no longer counts toward the coupon's usage limits.
     * Idempotent: an already-CANCELLED order is returned untouched, so
       stock can never be restored twice (e.g. customer and admin
       cancelling at the same moment, or a double-submitted request).
@@ -55,6 +58,10 @@ def cancel_order(order, actor=None, *, note=None):
             actor=actor,
             note=note or f"Cancellation of order {locked.order_number}",
         )
+
+        # Cancelling frees up the coupon use too (Task 9.1.1.5), inside the
+        # same atomic block as the status change and stock restoration.
+        release_coupon_redemption(locked)
 
     order.status = locked.status
     order.updated_at = locked.updated_at

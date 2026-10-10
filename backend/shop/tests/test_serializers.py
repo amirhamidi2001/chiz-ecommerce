@@ -1,8 +1,14 @@
-from unittest.mock import MagicMock
+from datetime import timedelta
+from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+from promotions.models import FlashSale
+from rest_framework import serializers
 from shop.models import ProductGender
 from shop.serializers import (
     BrandSerializer,
@@ -280,6 +286,106 @@ class TestProductListSerializer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ProductListSerializer — flash-sale card fields
+# ═══════════════════════════════════════════════════════════════════════════════
+FLASH_FIELDS = {
+    "is_on_flash_sale",
+    "flash_sale_price",
+    "flash_sale_original_price",
+    "flash_sale_price_varies",
+    "flash_sale_discount_percent",
+    "flash_sale_ends_at",
+}
+
+
+@pytest.mark.django_db
+class TestProductListSerializerFlashSale:
+    def _data(self, product):
+        return ProductListSerializer(product, context={"request": make_request()}).data
+
+    def test_flash_fields_are_present(self):
+        assert FLASH_FIELDS <= set(self._data(ProductFactory()).keys())
+
+    def test_product_not_on_sale(self):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        data = self._data(variant.product)
+        assert data["is_on_flash_sale"] is False
+        assert data["flash_sale_price"] is None
+        assert data["flash_sale_original_price"] is None
+        assert data["flash_sale_price_varies"] is False
+        assert data["flash_sale_discount_percent"] is None
+        assert data["flash_sale_ends_at"] is None
+
+    def test_product_on_sale_shows_starting_at_price(self):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        ProductVariantFactory(product=variant.product, price=Decimal("120.00"))
+        sale = _serializer_sale(variant.product, percent="25.00")
+
+        data = self._data(variant.product)
+
+        assert data["is_on_flash_sale"] is True
+        assert str(data["flash_sale_price"]) == "60.00"
+        assert str(data["flash_sale_original_price"]) == "80.00"
+        assert data["flash_sale_price_varies"] is True
+        assert Decimal(str(data["flash_sale_discount_percent"])) == Decimal("25.00")
+        assert parse_datetime(data["flash_sale_ends_at"]) == sale.ends_at
+
+    def test_plain_product_price_fields_are_untouched_by_a_sale(self):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant.product.price = Decimal("90.00")
+        variant.product.save()
+        _serializer_sale(variant.product, percent="25.00")
+        data = self._data(variant.product)
+        assert Decimal(str(data["price"])) == Decimal("90.00")
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"start_h": 1, "end_h": 2}, {"start_h": -2, "end_h": -1}, {"active": False}],
+        ids=["upcoming", "ended", "deactivated"],
+    )
+    def test_sale_that_is_not_current_is_not_on_sale(self, kwargs):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        _serializer_sale(variant.product, **kwargs)
+        data = self._data(variant.product)
+        assert data["is_on_flash_sale"] is False
+        assert data["flash_sale_price"] is None
+
+    def test_resolves_the_sale_once_per_product_not_once_per_field(self):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        _serializer_sale(variant.product)
+        serializer = ProductListSerializer(
+            variant.product, context={"request": make_request()}
+        )
+        with patch.object(
+            type(variant.product),
+            "flash_sale_card_pricing",
+            autospec=True,
+            side_effect=type(variant.product).flash_sale_card_pricing,
+        ) as spy:
+            serializer.data
+        assert spy.call_count == 1
+
+    def test_many_products_in_a_list_each_get_their_own_pricing(self):
+        a = ProductVariantFactory(price=Decimal("100.00"))
+        b = ProductVariantFactory(price=Decimal("40.00"))
+        c = ProductVariantFactory(price=Decimal("10.00"))
+        _serializer_sale(a.product, percent="50.00")
+        _serializer_sale(b.product, percent="25.00")
+        data = ProductListSerializer(
+            [a.product, b.product, c.product],
+            many=True,
+            context={"request": make_request()},
+        ).data
+        assert [
+            str(d["flash_sale_price"]) if d["flash_sale_price"] else None for d in data
+        ] == [
+            "50.00",
+            "30.00",
+            None,
+        ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ProductVariantSerializer
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.django_db
@@ -295,6 +401,9 @@ class TestProductVariantSerializer:
             "color",
             "price",
             "original_price",
+            "effective_price",
+            "is_on_flash_sale",
+            "flash_sale_ends_at",
             "stock",
             "volume_ml",
             "weight_g",
@@ -341,6 +450,110 @@ class TestProductVariantSerializer:
         data = ProductVariantSerializer(variant).data
         assert data["sku"] == "FOUND-320"
         assert data["barcode"] == "4006381333931"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ProductVariantSerializer — flash-sale-aware price fields
+# ═══════════════════════════════════════════════════════════════════════════════
+def _serializer_sale(*products, percent="25.00", start_h=-1, end_h=1, active=True):
+    now = timezone.now()
+    sale = FlashSale.objects.create(
+        name="Sale",
+        discount_percent=Decimal(percent),
+        starts_at=now + timedelta(hours=start_h),
+        ends_at=now + timedelta(hours=end_h),
+        is_active=active,
+    )
+    sale.products.add(*products)
+    return sale
+
+
+@pytest.mark.django_db
+class TestProductVariantSerializerFlashSale:
+    def test_active_sale_exposes_discounted_price_flag_and_end_time(self):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        sale = _serializer_sale(variant.product, percent="25.00")
+
+        data = ProductVariantSerializer(variant).data
+
+        assert Decimal(str(data["effective_price"])) == Decimal("60.00")
+        assert data["is_on_flash_sale"] is True
+        assert data[
+            "flash_sale_ends_at"
+        ] == serializers.DateTimeField().to_representation(sale.ends_at)
+        # ...and the string round-trips to the exact stored instant.
+        assert parse_datetime(data["flash_sale_ends_at"]) == sale.ends_at
+
+    def test_plain_price_fields_are_not_altered_by_a_sale(self):
+        variant = ProductVariantFactory(
+            price=Decimal("80.00"), original_price=Decimal("100.00")
+        )
+        _serializer_sale(variant.product, percent="25.00")
+
+        data = ProductVariantSerializer(variant).data
+
+        assert Decimal(str(data["price"])) == Decimal("80.00")
+        assert Decimal(str(data["original_price"])) == Decimal("100.00")
+
+    def test_effective_price_is_formatted_to_two_decimal_places(self):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        _serializer_sale(variant.product, percent="25.00")
+        assert str(ProductVariantSerializer(variant).data["effective_price"]) == "60.00"
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param(None, id="no-sale-exists"),
+            pytest.param({"start_h": 1, "end_h": 2}, id="upcoming"),
+            pytest.param({"start_h": -2, "end_h": -1}, id="ended"),
+            pytest.param({"active": False}, id="deactivated"),
+        ],
+    )
+    def test_no_current_sale_leaves_price_unchanged(self, kwargs):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        if kwargs is not None:
+            _serializer_sale(variant.product, **kwargs)
+
+        data = ProductVariantSerializer(variant).data
+
+        assert Decimal(str(data["effective_price"])) == Decimal("80.00")
+        assert Decimal(str(data["effective_price"])) == Decimal(str(data["price"]))
+        assert data["is_on_flash_sale"] is False
+        assert data["flash_sale_ends_at"] is None
+
+    def test_upcoming_sale_is_treated_as_not_on_sale_even_alongside_a_current_one_elsewhere(
+        self,
+    ):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        other = ProductVariantFactory(price=Decimal("80.00"))
+        _serializer_sale(variant.product, start_h=2, end_h=3)  # upcoming
+        _serializer_sale(other.product)  # current, different product
+
+        data = ProductVariantSerializer(variant).data
+
+        assert data["is_on_flash_sale"] is False
+        assert Decimal(str(data["effective_price"])) == Decimal("80.00")
+
+    def test_overlapping_sales_report_the_winning_sales_end_time(self):
+        variant = ProductVariantFactory(price=Decimal("100.00"))
+        _serializer_sale(variant.product, percent="50.00", start_h=-5, end_h=9)
+        newer = _serializer_sale(variant.product, percent="10.00", start_h=-1, end_h=3)
+
+        data = ProductVariantSerializer(variant).data
+
+        # Most recently STARTED wins (not the biggest discount): 10% off.
+        assert Decimal(str(data["effective_price"])) == Decimal("90.00")
+        assert parse_datetime(data["flash_sale_ends_at"]) == newer.ends_at
+
+    def test_nested_in_the_product_detail_serializer(self):
+        variant = ProductVariantFactory(price=Decimal("80.00"))
+        _serializer_sale(variant.product, percent="25.00")
+
+        data = ProductDetailSerializer(variant.product).data
+
+        nested = data["variants"][0]
+        assert Decimal(str(nested["effective_price"])) == Decimal("60.00")
+        assert nested["is_on_flash_sale"] is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

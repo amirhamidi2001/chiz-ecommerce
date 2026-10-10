@@ -59,8 +59,25 @@ class ProductColorSerializer(serializers.ModelSerializer):
         fields = ("id", "color")
 
 
+def _money(value):
+    """Format like every other DecimalField in the API (honours DRF settings)."""
+    return serializers.DecimalField(max_digits=10, decimal_places=2).to_representation(
+        value
+    )
+
+
 class ProductVariantSerializer(serializers.ModelSerializer):
     color = ColorSerializer(read_only=True)
+    # `price` / `original_price` stay the plain stored values; `effective_price`
+    # is `price` with any current flash-sale discount applied (equal to
+    # `price` when there is none). Flash-sale resolution lives on the model
+    # (ProductVariant.active_flash_sale).
+    effective_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, read_only=True
+    )
+    is_on_flash_sale = serializers.SerializerMethodField()
+    # Lets the frontend render a countdown without a second request.
+    flash_sale_ends_at = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductVariant
@@ -71,6 +88,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "color",
             "price",
             "original_price",
+            "effective_price",
+            "is_on_flash_sale",
+            "flash_sale_ends_at",
             "stock",
             "volume_ml",
             "weight_g",
@@ -79,6 +99,16 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "batch_number",
             "is_active",
         )
+
+    def get_is_on_flash_sale(self, obj):
+        return obj.active_flash_sale is not None
+
+    def get_flash_sale_ends_at(self, obj):
+        sale = obj.active_flash_sale
+        if sale is None:
+            return None
+        # Same ISO-8601 formatting as every other datetime in the API.
+        return serializers.DateTimeField().to_representation(sale.ends_at)
 
 
 # ─── Review — read (used inside product detail & review list responses) ───────
@@ -183,6 +213,18 @@ class ProductListSerializer(serializers.ModelSerializer):
     brand = BrandSerializer(read_only=True)
     thumbnail_url = serializers.SerializerMethodField()
     discount_percent = serializers.ReadOnlyField()
+    # Flash-sale display for the CARD. Real prices are per-variant, so these
+    # are "starting at" figures: the cheapest active variant's price with the
+    # sale applied (flash_sale_price) against that same variant's regular
+    # price (flash_sale_original_price). `flash_sale_price_varies` is true
+    # when variants differ in price, i.e. the UI should say "From $X". All
+    # null/false when the product isn't currently on sale.
+    is_on_flash_sale = serializers.SerializerMethodField()
+    flash_sale_price = serializers.SerializerMethodField()
+    flash_sale_original_price = serializers.SerializerMethodField()
+    flash_sale_price_varies = serializers.SerializerMethodField()
+    flash_sale_discount_percent = serializers.SerializerMethodField()
+    flash_sale_ends_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -199,6 +241,12 @@ class ProductListSerializer(serializers.ModelSerializer):
             "reviews_count",
             "is_new",
             "is_sale",
+            "is_on_flash_sale",
+            "flash_sale_price",
+            "flash_sale_original_price",
+            "flash_sale_price_varies",
+            "flash_sale_discount_percent",
+            "flash_sale_ends_at",
             "thumbnail_url",
             "category",
             "brand",
@@ -222,6 +270,43 @@ class ProductListSerializer(serializers.ModelSerializer):
         if obj.thumbnail and request:
             return request.build_absolute_uri(obj.thumbnail.url)
         return None
+
+    def _flash_pricing(self, obj):
+        """Resolve the product's sale pricing once per serialization, however
+        many of the flash_sale_* fields ask for it."""
+        cache = self.__dict__.setdefault("_flash_pricing_cache", {})
+        if obj.pk not in cache:
+            cache[obj.pk] = obj.flash_sale_card_pricing()
+        return cache[obj.pk]
+
+    def get_is_on_flash_sale(self, obj):
+        return self._flash_pricing(obj) is not None
+
+    def get_flash_sale_price(self, obj):
+        pricing = self._flash_pricing(obj)
+        return _money(pricing.price) if pricing else None
+
+    def get_flash_sale_original_price(self, obj):
+        pricing = self._flash_pricing(obj)
+        return _money(pricing.original_price) if pricing else None
+
+    def get_flash_sale_price_varies(self, obj):
+        pricing = self._flash_pricing(obj)
+        return pricing.price_varies if pricing else False
+
+    def get_flash_sale_discount_percent(self, obj):
+        pricing = self._flash_pricing(obj)
+        if not pricing:
+            return None
+        return serializers.DecimalField(
+            max_digits=5, decimal_places=2
+        ).to_representation(pricing.sale.discount_percent)
+
+    def get_flash_sale_ends_at(self, obj):
+        pricing = self._flash_pricing(obj)
+        if not pricing:
+            return None
+        return serializers.DateTimeField().to_representation(pricing.sale.ends_at)
 
 
 # ─── Product detail serializer — full with nested relations ───────────────────

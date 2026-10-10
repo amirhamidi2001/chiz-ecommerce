@@ -56,6 +56,9 @@ import {
   updateCartItem,
   removeCartItem,
   clearCart,
+  applyCoupon,
+  removeCoupon,
+  getActiveFlashSales,
   createOrder,
   getOrders,
   getOrderDetail,
@@ -657,12 +660,37 @@ describe('cartAPI', () => {
     expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/cart/clear/');
   });
 
-  it('cartAPI object exposes all five methods', () => {
+  it('getActiveFlashSales() — GETs /promotions/active-flash-sales/ with no params', async () => {
+    mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith([]));
+    await getActiveFlashSales();
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/promotions/active-flash-sales/');
+  });
+
+  it('applyCoupon() — POSTs { code } to /cart/apply-coupon/', async () => {
+    mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith({ code: 'SUMMER20', discount_amount: '10.00' }));
+    await cartAPI.applyCoupon('SUMMER20');
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/cart/apply-coupon/', { code: 'SUMMER20' });
+  });
+
+  it('removeCoupon() — DELETEs /cart/apply-coupon/', async () => {
+    mockAxiosInstance.delete.mockResolvedValueOnce(resolvedWith(undefined));
+    await cartAPI.removeCoupon();
+    expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/cart/apply-coupon/');
+  });
+
+  it('applyCoupon / removeCoupon are exported as standalone functions too', () => {
+    expect(typeof applyCoupon).toBe('function');
+    expect(typeof removeCoupon).toBe('function');
+  });
+
+  it('cartAPI object exposes all seven methods', () => {
     expect(typeof cartAPI.getCart).toBe('function');
     expect(typeof cartAPI.addToCart).toBe('function');
     expect(typeof cartAPI.updateCartItem).toBe('function');
     expect(typeof cartAPI.removeCartItem).toBe('function');
     expect(typeof cartAPI.clearCart).toBe('function');
+    expect(typeof cartAPI.applyCoupon).toBe('function');
+    expect(typeof cartAPI.removeCoupon).toBe('function');
   });
 });
 
@@ -1036,6 +1064,45 @@ describe('adminAPI', () => {
     expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/dashboard/admin/brands/8/');
   });
 
+  // ── Coupons ───────────────────────────────────────────────────────────────
+  it('getCoupons() — GETs /dashboard/admin/coupons/ with params', async () => {
+    mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith({ results: [] }));
+    await adminAPI.getCoupons({ search: 'sum', page: 2 });
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard/admin/coupons/', {
+      params: { search: 'sum', page: 2 },
+    });
+  });
+
+  it('getCoupons() — defaults params to an empty object', async () => {
+    mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith({ results: [] }));
+    await adminAPI.getCoupons();
+    expect(mockAxiosInstance.get).toHaveBeenCalledWith('/dashboard/admin/coupons/', {
+      params: {},
+    });
+  });
+
+  it('createCoupon() — POSTs JSON to /dashboard/admin/coupons/', async () => {
+    mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith({ id: 1 }));
+    const data = { code: 'SUMMER20', discount_type: 'percent', value: '20' };
+    await adminAPI.createCoupon(data);
+    // Plain JSON body: no multipart header (there are no file fields).
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith('/dashboard/admin/coupons/', data);
+  });
+
+  it('updateCoupon() — PATCHes /dashboard/admin/coupons/<id>/ (used by deactivate)', async () => {
+    mockAxiosInstance.patch.mockResolvedValueOnce(resolvedWith({ id: 4 }));
+    await adminAPI.updateCoupon(4, { is_active: false });
+    expect(mockAxiosInstance.patch).toHaveBeenCalledWith('/dashboard/admin/coupons/4/', {
+      is_active: false,
+    });
+  });
+
+  it('deleteCoupon() — DELETEs /dashboard/admin/coupons/<id>/', async () => {
+    mockAxiosInstance.delete.mockResolvedValueOnce(resolvedWith({}));
+    await adminAPI.deleteCoupon(4);
+    expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/dashboard/admin/coupons/4/');
+  });
+
   // ── Orders ────────────────────────────────────────────────────────────────
   it('getOrders() — GETs /dashboard/admin/orders/ with params', async () => {
     mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith([]));
@@ -1333,7 +1400,7 @@ describe('Module exports', () => {
       'authAPI',
       'getProducts', 'getProductDetails', 'getRelatedProducts', 'createReview',
       'getCategories', 'getBrands', 'getColors',
-      'getCart', 'addToCart', 'updateCartItem', 'removeCartItem', 'clearCart', 'cartAPI',
+      'getCart', 'addToCart', 'updateCartItem', 'removeCartItem', 'clearCart', 'applyCoupon', 'removeCoupon', 'getActiveFlashSales', 'cartAPI',
       'createOrder', 'getOrders', 'getOrderDetail', 'cancelOrder',
       'dashboardAPI',
       'chatAPI',

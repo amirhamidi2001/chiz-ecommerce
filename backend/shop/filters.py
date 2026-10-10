@@ -1,4 +1,5 @@
 import django_filters
+from django.utils import timezone
 
 from .models import Product
 
@@ -27,6 +28,14 @@ class ProductFilter(django_filters.FilterSet):
     # filter.
     skin_type = django_filters.CharFilter(method="filter_skin_type")
     hair_type = django_filters.CharFilter(method="filter_hair_type")
+
+    # Products in one flash sale that is CURRENTLY running, e.g. ?flash_sale=3.
+    # A queryset-level filter (is_on_flash_sale on the serializers is a
+    # per-instance value and can't be filtered in SQL). A sale that is not
+    # active right now — upcoming, ended, or switched off — matches nothing,
+    # so a stale link to a finished sale shows an empty list rather than
+    # products presented as on sale at full price.
+    flash_sale = django_filters.NumberFilter(method="filter_flash_sale")
 
     # Gender — kept as a simple single-value filter (mirroring
     # min_price/is_new style): rarely useful to select multiple
@@ -65,6 +74,16 @@ class ProductFilter(django_filters.FilterSet):
             "is_new",
             "is_sale",
         ]
+
+    def filter_flash_sale(self, queryset, name, value):
+        now = timezone.now()
+        # One filter() call, so all four conditions apply to the SAME sale row.
+        return queryset.filter(
+            flash_sales__pk=value,
+            flash_sales__is_active=True,
+            flash_sales__starts_at__lte=now,
+            flash_sales__ends_at__gte=now,
+        ).distinct()
 
     def filter_category(self, queryset, name, value):
         """Accept category slug or numeric id."""

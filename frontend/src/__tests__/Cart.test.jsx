@@ -59,6 +59,8 @@ const defaultUseCartValue = {
     updateItem: vi.fn(),
     removeItem: vi.fn(),
     clearCart: vi.fn(),
+    applyCoupon: vi.fn(),
+    removeCoupon: vi.fn(),
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -70,16 +72,21 @@ const renderCart = () =>
         </MemoryRouter>
     );
 
-const setupAuthenticated = (cartOverrides = {}) => {
+const setupAuthenticated = (cartOverrides = {}, contextOverrides = {}) => {
     isAuthenticated.mockReturnValue(true);
-    useCart.mockReturnValue({
+    const value = {
         ...defaultUseCartValue,
         cart: makeCart(cartOverrides),
         fetchCart: vi.fn(),
         updateItem: vi.fn().mockResolvedValue({ success: true }),
         removeItem: vi.fn().mockResolvedValue({ success: true }),
         clearCart: vi.fn().mockResolvedValue({ success: true }),
-    });
+        applyCoupon: vi.fn().mockResolvedValue({ success: true }),
+        removeCoupon: vi.fn().mockResolvedValue({ success: true }),
+        ...contextOverrides,
+    };
+    useCart.mockReturnValue(value);
+    return value;
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -473,89 +480,178 @@ describe('Cart', () => {
         });
     });
 
-    // ── Coupon ────────────────────────────────────────────────────────────────
+    // ── Coupon (server-backed; Task 9.1.1.9) ─────────────────────────────────
+    // The page holds no coupon state of its own: it reads coupon_code /
+    // coupon_discount / coupon_error from the cart and calls the context's
+    // applyCoupon / removeCoupon.
 
     describe('coupon', () => {
-        it('applies a $20 discount for the valid coupon DISCOUNT20', async () => {
-            const user = userEvent.setup();
-            setupAuthenticated({ subtotal: '100.00', total_items: 1 });
-
-            renderCart();
-
-            await user.type(screen.getByPlaceholderText(/coupon code/i), 'DISCOUNT20');
+        const typeAndApply = async (user, code) => {
+            await user.type(screen.getByPlaceholderText(/coupon code/i), code);
             await user.click(screen.getByRole('button', { name: /apply coupon/i }));
+        };
 
-            expect(await screen.findByText(/coupon applied/i)).toBeInTheDocument();
-            expect(screen.getByText('-$20.00')).toBeInTheDocument();
-        });
-
-        it('shows a success toast when a valid coupon is applied', async () => {
-            const user = userEvent.setup();
-            setupAuthenticated({ subtotal: '100.00', total_items: 1 });
-
-            renderCart();
-
-            await user.type(screen.getByPlaceholderText(/coupon code/i), 'DISCOUNT20');
-            await user.click(screen.getByRole('button', { name: /apply coupon/i }));
-
-            expect(
-                await screen.findByText('Coupon applied! $20 discount added.')
-            ).toBeInTheDocument();
-        });
-
-        it('shows an error toast for an invalid coupon code', async () => {
-            const user = userEvent.setup();
+        it('shows the coupon entry form when no coupon is attached', () => {
             setupAuthenticated();
 
             renderCart();
 
-            await user.type(screen.getByPlaceholderText(/coupon code/i), 'BADCODE');
-            await user.click(screen.getByRole('button', { name: /apply coupon/i }));
+            expect(screen.getByPlaceholderText(/coupon code/i)).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: /apply coupon/i })).toBeInTheDocument();
+            expect(screen.queryByText(/^Coupon \(/)).not.toBeInTheDocument();
+        });
+
+        it('sends the typed code through the context applyCoupon (not a client-side check)', async () => {
+            const user = userEvent.setup();
+            const ctx = setupAuthenticated({ subtotal: '100.00', total_items: 1 });
+
+            renderCart();
+            await typeAndApply(user, 'SUMMER20');
+
+            expect(ctx.applyCoupon).toHaveBeenCalledTimes(1);
+            expect(ctx.applyCoupon).toHaveBeenCalledWith('SUMMER20');
+        });
+
+        it('shows a success toast after a coupon is applied', async () => {
+            const user = userEvent.setup();
+            setupAuthenticated();
+
+            renderCart();
+            await typeAndApply(user, 'SUMMER20');
+
+            expect(await screen.findByText('Coupon applied.')).toBeInTheDocument();
+        });
+
+        it('no longer accepts the old hardcoded DISCOUNT20 code on its own', async () => {
+            const user = userEvent.setup();
+            // The server (mocked here) is the only authority on validity.
+            setupAuthenticated(
+                { subtotal: '100.00', total_items: 1 },
+                {
+                    applyCoupon: vi.fn().mockResolvedValue({
+                        success: false,
+                        message: 'Invalid coupon code.',
+                    }),
+                },
+            );
+
+            renderCart();
+            await typeAndApply(user, 'DISCOUNT20');
 
             expect(await screen.findByText('Invalid coupon code.')).toBeInTheDocument();
+            expect(screen.queryByText('-$20.00')).not.toBeInTheDocument();
         });
 
-        it('does not apply a discount for an invalid coupon code', async () => {
+        it('shows the backend’s specific rejection message inline, without applying anything', async () => {
             const user = userEvent.setup();
-            setupAuthenticated();
+            setupAuthenticated(
+                { subtotal: '100.00', total_items: 1 },
+                {
+                    applyCoupon: vi.fn().mockResolvedValue({
+                        success: false,
+                        message: 'This coupon has expired.',
+                    }),
+                },
+            );
 
             renderCart();
+            await typeAndApply(user, 'OLDCODE');
 
-            await user.type(screen.getByPlaceholderText(/coupon code/i), 'BADCODE');
-            await user.click(screen.getByRole('button', { name: /apply coupon/i }));
+            expect(await screen.findByRole('alert')).toHaveTextContent('This coupon has expired.');
+            expect(screen.queryByText(/^Coupon \(/)).not.toBeInTheDocument();
+            expect(screen.queryByText('Coupon applied.')).not.toBeInTheDocument();
+        });
 
-            await waitFor(() => {
-                expect(screen.queryByText(/-\$20\.00/)).not.toBeInTheDocument();
+        it('shows the applied code, a discount line and the reduced total', () => {
+            // subtotal 100, standard shipping 4.99, tax 10.00, discount 10.00
+            setupAuthenticated({
+                subtotal: '100.00',
+                total_items: 1,
+                coupon_code: 'SUMMER20',
+                coupon_discount: '10.00',
+                coupon_error: null,
             });
-        });
-
-        it('disables the coupon button after successful application instead of allowing a second click', async () => {
-            const user = userEvent.setup();
-            setupAuthenticated({ subtotal: '100.00', total_items: 1 });
 
             renderCart();
 
-            // Apply once
-            await user.type(screen.getByPlaceholderText(/coupon code/i), 'DISCOUNT20');
-            await user.click(screen.getByRole('button', { name: /apply coupon/i }));
-            await screen.findByText('Coupon applied! $20 discount added.');
-
-            // Assert it is disabled so it can't be clicked again
-            expect(screen.getByRole('button', { name: /applied/i })).toBeDisabled();
+            expect(screen.getByText(/SUMMER20/, { selector: 'strong' })).toBeInTheDocument();
+            expect(screen.getByText('Coupon (SUMMER20)')).toBeInTheDocument();
+            expect(screen.getByText('-$10.00')).toBeInTheDocument();
+            expect(screen.getByText('$104.99')).toBeInTheDocument();
+            // Entry form is replaced by the applied state.
+            expect(screen.queryByPlaceholderText(/coupon code/i)).not.toBeInTheDocument();
         });
 
-        it('disables the coupon input and button after successful application', async () => {
-            const user = userEvent.setup();
-            setupAuthenticated({ subtotal: '100.00', total_items: 1 });
+        it('restores the undiscounted total when the cart has no coupon', () => {
+            setupAuthenticated({
+                subtotal: '100.00',
+                total_items: 1,
+                coupon_code: null,
+                coupon_discount: '0',
+                coupon_error: null,
+            });
 
             renderCart();
 
-            await user.type(screen.getByPlaceholderText(/coupon code/i), 'DISCOUNT20');
-            await user.click(screen.getByRole('button', { name: /apply coupon/i }));
-            await screen.findByText('Coupon applied! $20 discount added.');
+            expect(screen.queryByText('-$10.00')).not.toBeInTheDocument();
+            expect(screen.getByText('$114.99')).toBeInTheDocument(); // 100 + 4.99 + 10.00
+        });
 
-            expect(screen.getByPlaceholderText(/coupon code/i)).toBeDisabled();
-            expect(screen.getByRole('button', { name: /applied/i })).toBeDisabled();
+        it('removes the coupon through the context and shows a toast', async () => {
+            const user = userEvent.setup();
+            const ctx = setupAuthenticated({
+                subtotal: '100.00',
+                total_items: 1,
+                coupon_code: 'SUMMER20',
+                coupon_discount: '10.00',
+                coupon_error: null,
+            });
+
+            renderCart();
+            await user.click(screen.getByRole('button', { name: /remove coupon SUMMER20/i }));
+
+            expect(ctx.removeCoupon).toHaveBeenCalledTimes(1);
+            expect(await screen.findByText('Coupon removed.')).toBeInTheDocument();
+        });
+
+        describe('attached coupon that has since become invalid', () => {
+            const invalidCart = {
+                subtotal: '100.00',
+                total_items: 1,
+                coupon_code: 'SUMMER20',
+                coupon_discount: '0',
+                coupon_error: 'This coupon has expired.',
+            };
+
+            it('shows the reason clearly instead of ignoring it', () => {
+                setupAuthenticated(invalidCart);
+
+                renderCart();
+
+                expect(screen.getByText(/SUMMER20 can.t be applied/)).toBeInTheDocument();
+                expect(screen.getByText('This coupon has expired.')).toBeInTheDocument();
+            });
+
+            it('does not subtract anything from the total', () => {
+                setupAuthenticated({ ...invalidCart, coupon_discount: '10.00' });
+
+                renderCart();
+
+                expect(screen.queryByText(/^Coupon \(/)).not.toBeInTheDocument();
+                expect(screen.queryByText('-$10.00')).not.toBeInTheDocument();
+                expect(screen.getByText('$114.99')).toBeInTheDocument();
+            });
+
+            it('offers a way to remove it, which calls removeCoupon', async () => {
+                const user = userEvent.setup();
+                const ctx = setupAuthenticated(invalidCart);
+
+                renderCart();
+                await user.click(screen.getByRole('button', { name: /remove coupon/i }));
+
+                expect(ctx.removeCoupon).toHaveBeenCalledTimes(1);
+                expect(await screen.findByText('Coupon removed.')).toBeInTheDocument();
+            });
         });
     });
 

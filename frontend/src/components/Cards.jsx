@@ -1,5 +1,7 @@
 // src/components/Cards.jsx
 import { useState, useEffect } from 'react';
+import { FlashSaleBadge, FlashSalePrice } from './FlashSalePrice';
+import { isOnFlashSale } from '../utils/flashSale';
 import { Link } from 'react-router-dom';
 import { getProducts } from '../services/api';
 
@@ -64,16 +66,23 @@ const ProductRow = ({ product }) => {
           <Stars rating={product.rating} />
           <span className="text-gray-400 text-xs">({product.reviews_count})</span>
         </div>
-        <div className="flex items-center gap-2 mt-1">
-          <span className="font-bold text-gray-900 text-sm">
-            ${Number(product.price).toFixed(2)}
-          </span>
-          {product.original_price && (
-            <span className="text-xs text-gray-400 line-through">
-              ${Number(product.original_price).toFixed(2)}
+        {isOnFlashSale(product) ? (
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <FlashSalePrice product={product} size="sm" />
+            <FlashSaleBadge product={product} showPercent={false} className="!px-1.5 !py-0.5" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 mt-1">
+            <span className="font-bold text-gray-900 text-sm">
+              ${Number(product.price).toFixed(2)}
             </span>
-          )}
-        </div>
+            {product.original_price && (
+              <span className="text-xs text-gray-400 line-through">
+                ${Number(product.original_price).toFixed(2)}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

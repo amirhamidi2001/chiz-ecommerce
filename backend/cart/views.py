@@ -1,3 +1,4 @@
+from promotions.services import validate_coupon
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -5,7 +6,7 @@ from rest_framework.views import APIView
 from shop.models import ProductVariant
 
 from .models import Cart, CartItem
-from .serializers import CartItemSerializer, CartSerializer
+from .serializers import CartApplyCouponSerializer, CartItemSerializer, CartSerializer
 
 
 def get_or_create_cart(request):
@@ -179,6 +180,52 @@ class CartClearView(APIView):
 
     def delete(self, request):
         cart = get_or_create_cart(request)
-        cart.items.all().delete()
+        cart.clear()
         cart_serializer = CartSerializer(cart, context={"request": request})
         return Response(cart_serializer.data, status=status.HTTP_200_OK)
+
+
+class CartApplyCouponView(APIView):
+    """
+    POST   /api/cart/apply-coupon/ {"code": "..."} → attach a coupon to the
+                                     requesting cart, if it validates now
+    DELETE /api/cart/apply-coupon/               → detach any coupon
+
+    AllowAny only so a guest gets the proper "please log in" 400 from
+    validate_coupon() rather than a bare 401: coupons are authenticated-only
+    (decision on CouponRedemption, Task 9.1.1.3), so a guest cart can never
+    hold one.
+
+    Applying is a convenience pre-check, not a reservation: nothing is
+    recorded against the coupon's usage limits here, and checkout
+    re-validates authoritatively (Task 9.1.1.5).
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = CartApplyCouponSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        cart = get_or_create_cart(request)
+        result = validate_coupon(serializer.validated_data["code"], request.user, cart)
+        if not result.valid:
+            # List form, matching the {"coupon": ["..."]} shape checkout
+            # returns for the same failures.
+            return Response(
+                {"coupon": [result.error]}, status=status.HTTP_400_BAD_REQUEST
+            )
+        cart.coupon = result.coupon
+        cart.save(update_fields=["coupon", "updated_at"])
+        return Response(
+            {
+                "code": result.coupon.code,
+                "discount_amount": str(result.discount_amount),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request):
+        cart = get_or_create_cart(request)
+        cart.coupon = None
+        cart.save(update_fields=["coupon", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -1,5 +1,7 @@
 // src/components/BestSellers.jsx
 import { useState, useEffect } from 'react';
+import { FlashSalePrice } from './FlashSalePrice';
+import { isOnFlashSale } from '../utils/flashSale';
 import { Link } from 'react-router-dom';
 import { getProducts } from '../services/api';
 
@@ -51,7 +53,8 @@ const ProductCard = ({ product }) => {
   // Badge logic
   let badge = null;
   let badgeClass = '';
-  if (product.is_new) { badge = 'New'; badgeClass = 'bg-teal-600 text-white'; }
+  if (isOnFlashSale(product)) { badge = 'Flash Sale'; badgeClass = 'bg-red-600 text-white'; }
+  else if (product.is_new) { badge = 'New'; badgeClass = 'bg-teal-600 text-white'; }
   else if (product.is_sale && product.discount_percent > 0) {
     badge = `-${product.discount_percent}%`;
     badgeClass = 'bg-red-500 text-white';
@@ -110,13 +113,19 @@ const ProductCard = ({ product }) => {
         </div>
 
         <div className="mt-2">
-          <span className="text-lg font-bold text-gray-900">
-            ${Number(product.price).toFixed(2)}
-          </span>
-          {product.original_price && (
-            <span className="text-sm text-gray-400 line-through ml-2">
-              ${Number(product.original_price).toFixed(2)}
-            </span>
+          {isOnFlashSale(product) ? (
+            <FlashSalePrice product={product} size="lg" />
+          ) : (
+            <>
+              <span className="text-lg font-bold text-gray-900">
+                ${Number(product.price).toFixed(2)}
+              </span>
+              {product.original_price && (
+                <span className="text-sm text-gray-400 line-through ml-2">
+                  ${Number(product.original_price).toFixed(2)}
+                </span>
+              )}
+            </>
           )}
         </div>
 

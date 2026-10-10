@@ -3,6 +3,8 @@ from decimal import Decimal
 from dashboard.models import Address, IranProvince, iran_postal_code_validator
 from django.db import transaction
 from django.utils import timezone
+from promotions.models import Coupon, CouponRedemption
+from promotions.services import CouponLine, validate_coupon
 from rest_framework import serializers
 from shipping.models import ShippingRate
 
@@ -280,6 +282,26 @@ class OrderCreateSerializer(serializers.Serializer):
 
         attrs["cart"] = cart
 
+        # ── Re-validate the cart's coupon (Task 9.1.1.5) ───────────────────
+        # Never trust that a coupon which validated when it was applied to
+        # the cart is still valid now: it may have expired, been
+        # deactivated, or hit its usage limit through another checkout in
+        # the meantime — the same "always re-validate at final checkout"
+        # principle used for stock (Epic 5 Task 5.2.1.1) and price (Epic 5
+        # Task 5.2.1.2).
+        #
+        # This is the EARLY, non-locking pre-check: it gives a clean 400
+        # before any row locks are taken. It is deliberately not the
+        # source of truth for the discount — create() re-validates under a
+        # row lock against the locked price snapshot and computes the
+        # discount from that (the cart's prices here are read before the
+        # variant price locks, so a percentage discount computed from
+        # them could disagree with the final Order.subtotal).
+        if cart.coupon_id:
+            coupon_result = validate_coupon(cart.coupon.code, user, cart)
+            if not coupon_result.valid:
+                raise serializers.ValidationError({"coupon": coupon_result.error})
+
         # ── Resolve + re-validate the shipping rate (Task 7.1.1.4) ──────────
         # SECURITY: never trust the client's earlier quote request matched
         # what's actually being submitted now — the same "never trust
@@ -436,20 +458,61 @@ class OrderCreateSerializer(serializers.Serializer):
                 priced_items.append((cart_item, locked_variant, unit_price))
                 subtotal += unit_price * cart_item.quantity
 
-            # SECURITY: discount is intentionally NOT read from client input.
-            # There is no coupon/promo system yet (tracked separately as
-            # Epic 9), so discount is hardcoded to zero here rather than
-            # trusted from the checkout payload — previously a client could
-            # submit an arbitrary `discount` value directly in the POST body
-            # and have it applied at checkout with no server-side validation.
-            # TODO: Epic 9 — replace with server-validated coupon discount
+            # ── Server-validated coupon discount (Task 9.1.1.5) ─────────────
+            # SECURITY: discount is never read from client input — a
+            # client previously could POST an arbitrary `discount`. It is
+            # derived here, server-side, from the coupon applied to the
+            # cart, and only if that coupon passes validation RIGHT NOW.
+            #
+            # Authoritative re-validation: done inside this atomic block,
+            # after locking the Coupon row, against the LOCKED price
+            # snapshot computed above (passed as `lines`, so eligibility
+            # and the discount are derived from exactly the same prices
+            # and items as Order.subtotal and the OrderItem snapshots —
+            # not from a second, independent read of the cart). The
+            # coupon's category/product restrictions are applied to those
+            # lines. Locking serializes concurrent checkouts that
+            # use the same coupon, so two of them can't both pass a
+            # max_uses / uses_per_user check before either has recorded
+            # its redemption (a bare pre-check can't guarantee that).
+            # Lock order is always variants first, then coupon.
+            discount = Decimal("0")
+            coupon_result = None
+            if cart.coupon_id:
+                try:
+                    locked_coupon = Coupon.objects.select_for_update().get(
+                        pk=cart.coupon_id
+                    )
+                except Coupon.DoesNotExist:
+                    raise serializers.ValidationError(
+                        {"coupon": ["Invalid coupon code."]}
+                    )
+                coupon_result = validate_coupon(
+                    locked_coupon.code,
+                    request.user,
+                    cart,
+                    lines=[
+                        CouponLine(
+                            product_id=locked_variant.product_id,
+                            category_id=locked_variant.product.category_id,
+                            amount=unit_price * cart_item.quantity,
+                        )
+                        for cart_item, locked_variant, unit_price in priced_items
+                    ],
+                )
+                if not coupon_result.valid:
+                    # List form, so the response shape matches the early
+                    # validate() pre-check ({"coupon": ["..."]}).
+                    raise serializers.ValidationError({"coupon": [coupon_result.error]})
+                discount = coupon_result.discount_amount
+
             shipping_rate = validated_data["shipping_rate"]
 
             try:
                 totals = calculate_order_totals(
                     subtotal=subtotal,
                     shipping_cost=shipping_rate.price,
-                    discount=Decimal("0"),
+                    discount=discount,
                 )
             except (PricingError, ValueError) as e:
                 raise serializers.ValidationError({"discount": str(e)})
@@ -478,6 +541,18 @@ class OrderCreateSerializer(serializers.Serializer):
                 notes=validated_data.get("notes", ""),
                 status=Order.Status.PENDING,
             )
+
+            # Record the redemption in the same transaction as the order,
+            # so the usage count and the order commit (or roll back)
+            # together. It is deleted again if the order is cancelled or
+            # its payment fails (order.services.coupon).
+            if coupon_result is not None:
+                CouponRedemption.objects.create(
+                    coupon=coupon_result.coupon,
+                    user=order.user,
+                    order=order,
+                    discount_amount=coupon_result.discount_amount,
+                )
 
             # ── Snapshot each cart item, decrement stock ────────────────────
             for cart_item, locked_variant, unit_price in priced_items:
@@ -544,7 +619,8 @@ class OrderCreateSerializer(serializers.Serializer):
             # (payments.views.PaymentCallbackView._mark_failed). The cart is
             # now cleared only on CONFIRMED payment success, in
             # PaymentCallbackView.get()'s success branch — see that view for
-            # the corresponding cart.items.all().delete() call.
+            # the corresponding cart.clear() call (which also detaches the
+            # cart's coupon, Task 9.1.1.5).
 
             # ── Save this address for next time ──────────────────────────────
             # Only when checkout used manually-typed fields (not an

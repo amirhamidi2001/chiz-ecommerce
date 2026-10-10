@@ -3,9 +3,11 @@ from blog.models import Comment, Post
 from contact.models import ContactMessage
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Sum
 from order.models import Order, OrderItem
 from order.services.state_machine import is_valid_transition
+from promotions.models import Coupon
 from rest_framework import serializers
 from shop.models import Brand, Category, Product, Review, StockMovement
 
@@ -765,3 +767,86 @@ class AdjustStockSerializer(serializers.Serializer):
         if value == 0:
             raise serializers.ValidationError("Adjustment cannot be zero.")
         return value
+
+
+# ─── Admin: Coupons ──────────────────────────────────────────────────────────
+
+
+class AdminCouponSerializer(serializers.ModelSerializer):
+    """
+    Admin CRUD for coupons.
+
+    ModelSerializer does NOT call Model.clean(), so the rules from
+    Coupon.clean() (percent value in (0, 100], fixed value > 0, valid_until
+    after valid_from) are re-applied in validate() — otherwise the API would
+    accept data the Django admin rejects. The case-insensitive uniqueness of
+    `code` is enforced here too: Coupon.save() uppercases codes, so a plain
+    unique check on the raw input would let "summer20" through against an
+    existing "SUMMER20" and fail with an IntegrityError (a 500) on save.
+    """
+
+    # Declared explicitly to replace the auto-generated field's
+    # case-sensitive UniqueValidator with validate_code() below.
+    code = serializers.CharField(max_length=32)
+    # Read-only [{id, name}] lists so an edit form can label the selected
+    # restrictions without a lookup request per id (the writable
+    # `categories` / `products` fields carry ids only).
+    categories_detail = serializers.SerializerMethodField()
+    products_detail = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Coupon
+        fields = [
+            "id",
+            "code",
+            "discount_type",
+            "value",
+            "min_order_amount",
+            "max_uses",
+            "uses_per_user",
+            "valid_from",
+            "valid_until",
+            "is_active",
+            "categories",
+            "products",
+            "categories_detail",
+            "products_detail",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+        extra_kwargs = {
+            # A negative minimum, or a limit of 0 (an unredeemable coupon),
+            # is never intended; the model alone would accept them.
+            "min_order_amount": {"min_value": 0},
+            "max_uses": {"min_value": 1},
+            "uses_per_user": {"min_value": 1},
+        }
+
+    def get_categories_detail(self, obj):
+        # .all() uses the viewset's prefetch_related cache (no extra queries).
+        return [{"id": c.id, "name": c.name} for c in obj.categories.all()]
+
+    def get_products_detail(self, obj):
+        return [{"id": p.id, "name": p.name} for p in obj.products.all()]
+
+    def validate_code(self, value):
+        value = value.upper().strip()
+        duplicates = Coupon.objects.filter(code=value)
+        if self.instance is not None:
+            duplicates = duplicates.exclude(pk=self.instance.pk)
+        if duplicates.exists():
+            raise serializers.ValidationError("A coupon with this code already exists.")
+        return value
+
+    def validate(self, attrs):
+        # Merge with the stored values so a partial update (e.g. PATCH of
+        # only valid_until) is checked against the fields it didn't send.
+        merged = {
+            field: attrs.get(field, getattr(self.instance, field, None))
+            for field in ("discount_type", "value", "valid_from", "valid_until")
+        }
+        try:
+            Coupon(**merged).clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict)
+        return attrs

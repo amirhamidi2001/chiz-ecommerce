@@ -15,6 +15,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order
 from order.services.cancellation import cancel_order
 from order.services.state_machine import is_valid_transition
+from promotions.models import Coupon
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -45,6 +46,7 @@ from .serializers import (
     AdminCategorySerializer,
     AdminCommentSerializer,
     AdminContactMessageSerializer,
+    AdminCouponSerializer,
     AdminOrderDetailSerializer,
     AdminOrderListSerializer,
     AdminOrderStatusSerializer,
@@ -772,3 +774,47 @@ class AdminBlogCommentViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
+
+
+# ─── Admin: Coupons ────────────────────────────────────────────────────────────
+
+
+class AdminCouponViewSet(viewsets.ModelViewSet):
+    """
+    Admin CRUD for coupons.
+    GET    /dashboard/admin/coupons/
+    POST   /dashboard/admin/coupons/
+    GET    /dashboard/admin/coupons/{id}/
+    PATCH  /dashboard/admin/coupons/{id}/   (PATCH {"is_active": false} deactivates)
+    DELETE /dashboard/admin/coupons/{id}/   (only if the coupon was never redeemed)
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+    pagination_class = DashboardPagination
+    serializer_class = AdminCouponSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["code"]
+    ordering_fields = ["created_at", "valid_from", "valid_until"]
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        return Coupon.objects.prefetch_related("categories", "products")
+
+    def destroy(self, request, *args, **kwargs):
+        coupon = self.get_object()
+        # CouponRedemption.coupon is on_delete=CASCADE, so deleting a used
+        # coupon would silently erase its usage history (and with it the
+        # max_uses / uses_per_user counts and the order <-> coupon link).
+        # Deactivating is the way to retire a coupon that has been used.
+        if coupon.redemptions.exists():
+            return Response(
+                {
+                    "detail": (
+                        "This coupon has been redeemed and can't be deleted "
+                        "without erasing its usage history. Deactivate it instead."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        self.perform_destroy(coupon)
+        return Response(status=status.HTTP_204_NO_CONTENT)

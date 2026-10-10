@@ -207,6 +207,14 @@ export const authAPI = {
 export const getProducts = (params = {}) =>
   api.get('/products/', { params });
 
+/**
+ * GET /promotions/active-flash-sales/ → [{ id, name, discount_percent,
+ * starts_at, ends_at, product_count, products: [...preview] }], soonest-ending
+ * first. Public. An empty array means no sale is running.
+ */
+export const getActiveFlashSales = () =>
+  api.get('/promotions/active-flash-sales/');
+
 export const getProductDetails = (slug) =>
   api.get(`/products/${slug}/`);
 
@@ -289,12 +297,27 @@ export const removeCartItem = (itemId) =>
 export const clearCart = () =>
   api.delete('/cart/clear/');
 
+/**
+ * POST /cart/apply-coupon/  Body: { code }
+ * 200 → { code, discount_amount }; 400 → { coupon: ["<specific reason>"] }
+ * (e.g. "This coupon has expired."). Does not return the cart — callers
+ * re-fetch it to get the recomputed coupon_* fields.
+ */
+export const applyCoupon = (code) =>
+  api.post('/cart/apply-coupon/', { code });
+
+/** DELETE /cart/apply-coupon/ → 204; detaches any coupon from the cart. */
+export const removeCoupon = () =>
+  api.delete('/cart/apply-coupon/');
+
 export const cartAPI = {
   getCart,
   addToCart,
   updateCartItem,
   removeCartItem,
   clearCart,
+  applyCoupon,
+  removeCoupon,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -453,6 +476,12 @@ export const adminAPI = {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
   deleteBrand: (id) => api.delete(`/dashboard/admin/brands/${id}/`),
+
+  // Coupons (JSON, not multipart — no file fields)
+  getCoupons: (params = {}) => api.get('/dashboard/admin/coupons/', { params }),
+  createCoupon: (data) => api.post('/dashboard/admin/coupons/', data),
+  updateCoupon: (id, data) => api.patch(`/dashboard/admin/coupons/${id}/`, data),
+  deleteCoupon: (id) => api.delete(`/dashboard/admin/coupons/${id}/`),
 
   // Orders
   getOrders: (params = {}) => api.get('/dashboard/admin/orders/', { params }),

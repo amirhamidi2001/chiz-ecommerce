@@ -1,9 +1,14 @@
 import time
+from datetime import timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
 from django.core.cache import cache
 from django.urls import reverse
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+from promotions.models import FlashSale
 from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework.throttling import AnonRateThrottle
@@ -494,6 +499,202 @@ class TestProductDetailView:
     def test_no_auth_required(self, api_client, product):
         res = api_client.get(url("product-detail", slug=product.slug))
         assert res.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.django_db
+class TestProductDetailViewFlashSale:
+    """Sale-aware variant prices in the real endpoint response."""
+
+    def _sale(self, *products, percent="25.00", start_h=-1, end_h=1, active=True):
+        now = timezone.now()
+        sale = FlashSale.objects.create(
+            name="Sale",
+            discount_percent=Decimal(percent),
+            starts_at=now + timedelta(hours=start_h),
+            ends_at=now + timedelta(hours=end_h),
+            is_active=active,
+        )
+        sale.products.add(*products)
+        return sale
+
+    def test_variants_show_the_flash_price_and_countdown_target(
+        self, api_client, product
+    ):
+        variant = ProductVariantFactory(product=product, price=Decimal("80.00"))
+        sale = self._sale(product, percent="25.00")
+
+        res = api_client.get(url("product-detail", slug=product.slug))
+
+        item = next(v for v in res.data["variants"] if v["id"] == variant.id)
+        assert Decimal(str(item["effective_price"])) == Decimal("60.00")
+        assert Decimal(str(item["price"])) == Decimal("80.00")
+        assert item["is_on_flash_sale"] is True
+        assert parse_datetime(item["flash_sale_ends_at"]) == sale.ends_at
+
+    def test_variants_are_unchanged_when_no_sale_is_current(self, api_client, product):
+        variant = ProductVariantFactory(product=product, price=Decimal("80.00"))
+        self._sale(product, start_h=1, end_h=2)  # upcoming
+        self._sale(product, start_h=-2, end_h=-1)  # ended
+        self._sale(product, active=False)  # switched off
+
+        res = api_client.get(url("product-detail", slug=product.slug))
+
+        item = next(v for v in res.data["variants"] if v["id"] == variant.id)
+        assert Decimal(str(item["effective_price"])) == Decimal("80.00")
+        assert item["is_on_flash_sale"] is False
+        assert item["flash_sale_ends_at"] is None
+
+    def test_query_count_does_not_grow_with_the_number_of_variants(
+        self, api_client, product
+    ):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        # color=None on purpose: ProductVariantSerializer's nested `color`
+        # costs one (pre-existing, unrelated) query per coloured variant, which
+        # would mask what this test is about — that resolving each variant's
+        # flash-sale price adds NO per-variant queries.
+        self._sale(product, percent="25.00")
+        ProductVariantFactory(product=product, color=None, price=Decimal("10.00"))
+
+        def count_queries():
+            with CaptureQueriesContext(connection) as ctx:
+                res = api_client.get(url("product-detail", slug=product.slug))
+            assert res.status_code == status.HTTP_200_OK
+            return len(ctx), res
+
+        baseline, _ = count_queries()
+        for _ in range(5):
+            ProductVariantFactory(product=product, color=None, price=Decimal("10.00"))
+        after, res = count_queries()
+
+        assert len(res.data["variants"]) == 6
+        assert all(v["is_on_flash_sale"] for v in res.data["variants"])
+        assert after == baseline
+
+
+@pytest.mark.django_db
+class TestProductListFlashSale:
+    """Sale-aware cards and the ?flash_sale=<id> filter on GET /api/products/."""
+
+    def _sale(
+        self, *products, percent="25.00", start_h=-1, end_h=1, active=True, name="Sale"
+    ):
+        now = timezone.now()
+        sale = FlashSale.objects.create(
+            name=name,
+            discount_percent=Decimal(percent),
+            starts_at=now + timedelta(hours=start_h),
+            ends_at=now + timedelta(hours=end_h),
+            is_active=active,
+        )
+        sale.products.add(*products)
+        return sale
+
+    def _results(self, res):
+        return {p["id"]: p for p in res.data["results"]}
+
+    def test_cards_carry_the_sale_fields(self, api_client):
+        on_sale = ProductVariantFactory(price=Decimal("80.00")).product
+        plain = ProductVariantFactory(price=Decimal("80.00")).product
+        self._sale(on_sale, percent="25.00")
+
+        results = self._results(api_client.get(url("product-list")))
+
+        assert results[on_sale.id]["is_on_flash_sale"] is True
+        assert str(results[on_sale.id]["flash_sale_price"]) == "60.00"
+        assert str(results[on_sale.id]["flash_sale_original_price"]) == "80.00"
+        assert results[plain.id]["is_on_flash_sale"] is False
+        assert results[plain.id]["flash_sale_price"] is None
+
+    def test_query_count_does_not_grow_with_the_number_of_products(self, api_client):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def build(n):
+            sale = self._sale(name=f"S{n}")
+            for _ in range(n):
+                v = ProductVariantFactory(price=Decimal("10.00"), color=None)
+                sale.products.add(v.product)
+
+        def count():
+            cache.clear()
+            with CaptureQueriesContext(connection) as ctx:
+                res = api_client.get(url("product-list"))
+            assert res.status_code == status.HTTP_200_OK
+            return len(ctx), res
+
+        build(2)
+        baseline, _ = count()
+        build(6)
+        after, res = count()
+
+        assert res.data["count"] == 8
+        assert all(p["is_on_flash_sale"] for p in res.data["results"])
+        assert after == baseline
+
+    # ── ?flash_sale=<id> ────────────────────────────────────────────────────
+    def test_filter_returns_only_that_sales_products(self, api_client):
+        a = ProductFactory()
+        b = ProductFactory()
+        other = ProductFactory()
+        outsider = ProductFactory()
+        sale = self._sale(a, b, name="Weekend")
+        self._sale(other, name="Other")
+
+        res = api_client.get(url("product-list"), {"flash_sale": sale.id})
+
+        assert set(self._results(res)) == {a.id, b.id}
+        assert outsider.id not in self._results(res)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"start_h": 1, "end_h": 2}, {"start_h": -2, "end_h": -1}, {"active": False}],
+        ids=["upcoming", "ended", "deactivated"],
+    )
+    def test_filter_matches_nothing_for_a_sale_that_is_not_running(
+        self, api_client, kwargs
+    ):
+        product = ProductFactory()
+        sale = self._sale(product, **kwargs)
+        res = api_client.get(url("product-list"), {"flash_sale": sale.id})
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["count"] == 0
+
+    def test_filter_with_an_unknown_id_matches_nothing(self, api_client):
+        ProductFactory()
+        res = api_client.get(url("product-list"), {"flash_sale": 999999})
+        assert res.data["count"] == 0
+
+    def test_filter_does_not_duplicate_products_in_several_sales(self, api_client):
+        product = ProductFactory()
+        sale = self._sale(product, name="One")
+        self._sale(product, name="Two")
+        res = api_client.get(url("product-list"), {"flash_sale": sale.id})
+        assert res.data["count"] == 1
+
+    def test_filter_combines_with_other_filters(self, api_client):
+        cheap = ProductFactory(price=Decimal("10.00"))
+        pricey = ProductFactory(price=Decimal("500.00"))
+        sale = self._sale(cheap, pricey)
+        res = api_client.get(
+            url("product-list"), {"flash_sale": sale.id, "max_price": "100"}
+        )
+        assert set(self._results(res)) == {cheap.id}
+
+    def test_related_products_also_carry_the_sale_fields(self, api_client):
+        category = CategoryFactory()
+        main = ProductFactory(category=category)
+        sibling = ProductVariantFactory(
+            price=Decimal("80.00"), product__category=category
+        ).product
+        self._sale(sibling, percent="25.00")
+
+        res = api_client.get(url("product-related", slug=main.slug))
+
+        item = next(p for p in res.data if p["id"] == sibling.id)
+        assert item["is_on_flash_sale"] is True
+        assert str(item["flash_sale_price"]) == "60.00"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

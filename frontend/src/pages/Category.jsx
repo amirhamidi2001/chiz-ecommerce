@@ -1,5 +1,7 @@
 // src/pages/Category.jsx
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { FlashSaleBadge, FlashSalePrice } from '../components/FlashSalePrice';
+import { isOnFlashSale } from '../utils/flashSale';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getProducts, getCategories, getBrands, getColors } from '../services/api';
 import { useCart } from '../context/CartContext';
@@ -129,6 +131,7 @@ const ProductCard = ({ product, onAddToCart }) => {
             -{product.discount_percent}%
           </span>
         )}
+        <FlashSaleBadge product={product} className="absolute top-11 left-3" />
         {product.stock === 0 && (
           <span className="absolute top-3 left-3 bg-gray-600 text-white text-xs font-semibold px-2 py-1 rounded">
             Out of Stock
@@ -146,7 +149,9 @@ const ProductCard = ({ product, onAddToCart }) => {
         </h4>
         <div className="flex justify-between items-center mt-2">
           <div>
-            {product.original_price ? (
+            {isOnFlashSale(product) ? (
+              <FlashSalePrice product={product} size="lg" />
+            ) : product.original_price ? (
               <>
                 <span className="text-lg font-bold text-teal-700">${Number(product.price).toFixed(2)}</span>
                 <span className="text-sm text-gray-400 line-through ml-2">${Number(product.original_price).toFixed(2)}</span>
@@ -390,6 +395,8 @@ const BrandFilter = ({ brands, selectedBrands, onToggle, onClear, loading }) => 
 // ─── Main Category Page ───────────────────────────────────────────────────────
 const Category = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  // ?flash_sale=<id> (from the homepage banner): only that running sale's products.
+  const flashSaleId = searchParams.get('flash_sale') || '';
   const { addToCart } = useCart();
 
   // ── Filter state ────────────────────────────────────────────────────────────
@@ -459,6 +466,7 @@ const Category = () => {
       if (selectedColors.length) params.color = selectedColors.join(',');
       if (priceRange.min > 0) params.min_price = priceRange.min;
       if (priceRange.max < 1000) params.max_price = priceRange.max;
+      if (flashSaleId) params.flash_sale = flashSaleId;
 
       const res = await getProducts(params);
       const data = res.data;
@@ -469,7 +477,7 @@ const Category = () => {
     } finally {
       setLoadingProducts(false);
     }
-  }, [currentPage, itemsPerPage, sortBy, selectedCategory, searchQuery, selectedBrands, selectedColors, priceRange]);
+  }, [currentPage, itemsPerPage, sortBy, selectedCategory, searchQuery, selectedBrands, selectedColors, priceRange, flashSaleId]);
 
   useEffect(() => {
     fetchProducts();
@@ -642,6 +650,29 @@ const Category = () => {
 
             {/* ── Main Content ─────────────────────────────────────────────── */}
             <main className="flex-1 min-w-0">
+              {flashSaleId && (
+                <div
+                  role="status"
+                  className="mb-4 flex items-center justify-between gap-3 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm"
+                >
+                  <span className="flex items-center gap-2 font-medium">
+                    <i className="bi bi-lightning-charge-fill" aria-hidden="true"></i>
+                    Showing flash sale products
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = new URLSearchParams(searchParams);
+                      next.delete('flash_sale');
+                      setSearchParams(next);
+                      setCurrentPage(1);
+                    }}
+                    className="underline font-semibold hover:text-red-900"
+                  >
+                    Show all products
+                  </button>
+                </div>
+              )}
               {/* Sort & View Controls */}
               <div className="bg-gray-50 rounded-xl p-4 mb-6">
                 <div className="flex flex-col sm:flex-row gap-3">
@@ -757,7 +788,10 @@ const Category = () => {
                             <span className="text-sm text-gray-400">({product.reviews_count} reviews)</span>
                           </div>
                           <div className="mt-2">
-                            {product.original_price ? (
+                            <FlashSaleBadge product={product} className="mb-1" />
+                            {isOnFlashSale(product) ? (
+                              <div><FlashSalePrice product={product} size="xl" /></div>
+                            ) : product.original_price ? (
                               <>
                                 <span className="text-xl font-bold text-teal-700">${Number(product.price).toFixed(2)}</span>
                                 <span className="text-gray-400 line-through ml-2">${Number(product.original_price).toFixed(2)}</span>

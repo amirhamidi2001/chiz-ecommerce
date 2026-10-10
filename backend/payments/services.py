@@ -42,6 +42,7 @@ first wins, and the other sees status != PENDING and applies nothing.
 
 from django.db import transaction
 from order.models import Order
+from order.services.coupon import release_coupon_redemption
 from order.services.stock import release_reserved_stock
 
 
@@ -71,9 +72,11 @@ def finalize_transaction_success(txn, result):
     # rather than request.user/session, since this function is called
     # from both an AllowAny HTTP view (no reliable session state) and a
     # Celery task (no request/session at all).
+    # Cart.clear() also detaches any applied coupon (Task 9.1.1.5) so a
+    # stale coupon reference doesn't linger on the now-empty cart.
     cart = getattr(txn.order.user, "cart", None)
     if cart is not None:
-        cart.items.all().delete()
+        cart.clear()
 
 
 def finalize_transaction_failure(txn):
@@ -99,6 +102,9 @@ def finalize_transaction_failure(txn):
             actor=None,  # system-triggered, not an admin/user action
             note=f"Payment failed for order {order.order_number}",
         )
+        # A failed payment must not consume the customer's coupon use —
+        # same rule as an explicit cancellation (see cancel_order()).
+        release_coupon_redemption(order)
 
 
 def process_verification_result(gateway, authority, success, result=None):

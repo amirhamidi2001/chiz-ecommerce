@@ -23,8 +23,8 @@ vi.mock('../components/Cards', () => ({
   default: () => <div data-testid="mock-cards">Cards Section</div>,
 }));
 
-vi.mock('../components/Countdown', () => ({
-  default: () => <div data-testid="mock-countdown">Countdown Section</div>,
+vi.mock('../components/FlashSaleBanner', () => ({
+  default: () => <div data-testid="mock-flashsalebanner">Flash Sale Banner</div>,
 }));
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ describe('Home Page', () => {
       expect(screen.getByTestId('mock-promocards')).toBeInTheDocument();
       expect(screen.getByTestId('mock-bestsellers')).toBeInTheDocument();
       expect(screen.getByTestId('mock-cards')).toBeInTheDocument();
-      expect(screen.getByTestId('mock-countdown')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-flashsalebanner')).toBeInTheDocument();
     });
 
     it('should render each section exactly once', () => {
@@ -52,7 +52,7 @@ describe('Home Page', () => {
       expect(screen.getAllByTestId('mock-promocards')).toHaveLength(1);
       expect(screen.getAllByTestId('mock-bestsellers')).toHaveLength(1);
       expect(screen.getAllByTestId('mock-cards')).toHaveLength(1);
-      expect(screen.getAllByTestId('mock-countdown')).toHaveLength(1);
+      expect(screen.getAllByTestId('mock-flashsalebanner')).toHaveLength(1);
     });
 
     it('should render sections in the correct document order', () => {
@@ -60,18 +60,23 @@ describe('Home Page', () => {
 
       // Collect all mocked section nodes in DOM order
       const sections = within(container).getAllByTestId(
-        /^mock-(hero|promocards|bestsellers|cards|countdown)$/,
+        /^mock-(flashsalebanner|hero|promocards|bestsellers|cards)$/,
       );
 
       const orderedIds = sections.map((el) => el.dataset.testid);
 
       expect(orderedIds).toEqual([
+        'mock-flashsalebanner',
         'mock-hero',
         'mock-promocards',
         'mock-bestsellers',
         'mock-cards',
-        'mock-countdown',
       ]);
+    });
+
+    it('no longer renders the old hardcoded sale section', () => {
+      render(<Home />);
+      expect(screen.queryByText(/Countdown Section/)).not.toBeInTheDocument();
     });
   });
 });

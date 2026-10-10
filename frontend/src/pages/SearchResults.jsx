@@ -1,5 +1,7 @@
 // src/pages/SearchResults.jsx
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
+import { FlashSaleBadge, FlashSalePrice } from '../components/FlashSalePrice';
+import { isOnFlashSale } from '../utils/flashSale';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { getProducts, getCategories, getBrands } from '../services/api';
 import { useCart } from '../context/CartContext';
@@ -125,6 +127,7 @@ const ProductCard = memo(({ product }) => {
           {product.is_new && (
             <span className="bg-teal-500 text-white text-xs font-semibold px-2 py-0.5 rounded">New</span>
           )}
+          <FlashSaleBadge product={product} showPercent={false} className="!px-2 !py-0.5 !font-semibold" />
           {discount && (
             <span className="bg-red-500 text-white text-xs font-semibold px-2 py-0.5 rounded">-{discount}%</span>
           )}
@@ -173,12 +176,16 @@ const ProductCard = memo(({ product }) => {
         )}
 
         <div className="mt-auto pt-2 flex items-center justify-between gap-2">
-          <div className="flex items-baseline gap-2">
-            <span className="text-base font-bold text-teal-700">${displayPrice.toFixed(2)}</span>
-            {salePrice && (
-              <span className="text-xs text-gray-400 line-through">${price.toFixed(2)}</span>
-            )}
-          </div>
+          {isOnFlashSale(product) ? (
+            <FlashSalePrice product={product} />
+          ) : (
+            <div className="flex items-baseline gap-2">
+              <span className="text-base font-bold text-teal-700">${displayPrice.toFixed(2)}</span>
+              {salePrice && (
+                <span className="text-xs text-gray-400 line-through">${price.toFixed(2)}</span>
+              )}
+            </div>
+          )}
           <StarRating rating={product.rating ?? 0} count={product.reviews_count} compact />
         </div>
       </div>

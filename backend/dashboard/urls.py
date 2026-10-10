@@ -22,6 +22,7 @@ router.register(
 router.register(r"admin/brands", views.AdminBrandViewSet, basename="admin-brand")
 router.register(r"admin/orders", views.AdminOrderViewSet, basename="admin-order")
 router.register(r"admin/reviews", views.AdminReviewViewSet, basename="admin-review")
+router.register(r"admin/coupons", views.AdminCouponViewSet, basename="admin-coupon")
 router.register(
     r"admin/messages", views.AdminContactMessageViewSet, basename="admin-message"
 )

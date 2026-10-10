@@ -66,6 +66,8 @@ const CART_LOADING_STATE = {
   loading: true,
   error: null,
   fetchCart: vi.fn(),
+  refreshCart: vi.fn(),
+  removeCoupon: vi.fn(),
   clearCart: vi.fn(),
 };
 
@@ -74,6 +76,8 @@ const CART_READY_STATE = {
   loading: false,
   error: null,
   fetchCart: vi.fn(),
+  refreshCart: vi.fn(),
+  removeCoupon: vi.fn(),
   clearCart: vi.fn(),
 };
 
@@ -82,6 +86,8 @@ const CART_EMPTY_STATE = {
   loading: false,
   error: null,
   fetchCart: vi.fn(),
+  refreshCart: vi.fn(),
+  removeCoupon: vi.fn(),
   clearCart: vi.fn(),
 };
 
@@ -391,10 +397,9 @@ describe('Checkout', () => {
       expect(checkbox).not.toBeChecked();
     });
 
-    // Promo/coupon UI was removed as part of the discount security fix
-    // (Epic 9 will introduce a real, server-validated coupon system and
-    // its own tests at that point) — see backend/order/serializers.py
-    // and this component's Epic 9 TODO comment.
+    // Checkout has no coupon INPUT by design: coupons are applied on the
+    // Cart page and re-validated server-side at order creation. What
+    // checkout shows (read-only) is covered under 'coupon' below.
   });
 
   // ── Submission success ─────────────────────────────────────────────────────
@@ -853,4 +858,181 @@ describe('Checkout', () => {
       ).not.toBeDisabled();
     });
   });
+
+  // ── Coupon (server-backed; Task 9.1.1.9) ───────────────────────────────────
+  // Applied on the Cart page; here it is shown read-only in the summary. The
+  // server re-validates it when the order is created and computes the
+  // discount, so the client never sends one.
+
+  describe('coupon', () => {
+    // 89.97 subtotal, no shipping chosen yet, 10% tax (8.997).
+    const cartWith = (couponFields) => ({
+      ...CART_READY_STATE,
+      cart: { ...MOCK_CART, ...couponFields },
+    });
+
+    const APPLIED = {
+      coupon_code: 'SUMMER20',
+      coupon_discount: '10.00',
+      coupon_error: null,
+    };
+    const INVALID = {
+      coupon_code: 'SUMMER20',
+      coupon_discount: '0',
+      coupon_error: 'This coupon has expired.',
+    };
+
+    it('shows no coupon line when none is attached', () => {
+      useCart.mockReturnValue(
+        cartWith({ coupon_code: null, coupon_discount: '0', coupon_error: null }),
+      );
+      renderCheckout();
+
+      expect(screen.queryByText(/^Coupon \(/)).not.toBeInTheDocument();
+      // 89.97 + 8.997 tax = 98.967
+      expect(screen.getAllByText('$98.97').length).toBeGreaterThan(0);
+    });
+
+    it('shows the applied coupon as a read-only line item and reduces the total', () => {
+      useCart.mockReturnValue(cartWith(APPLIED));
+      renderCheckout();
+
+      expect(screen.getByText('Coupon (SUMMER20)')).toBeInTheDocument();
+      expect(screen.getByText('-$10.00')).toBeInTheDocument();
+      // 89.97 + 8.997 - 10 = 88.967; the undiscounted total is gone.
+      expect(screen.getAllByText('$88.97').length).toBeGreaterThan(0);
+      expect(screen.queryByText('$98.97')).not.toBeInTheDocument();
+    });
+
+    it('has no coupon input — application happens on the cart page', () => {
+      useCart.mockReturnValue(cartWith(APPLIED));
+      renderCheckout();
+
+      expect(screen.queryByPlaceholderText(/coupon code/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /apply coupon/i })).not.toBeInTheDocument();
+    });
+
+    it('never sends a coupon or discount in the createOrder payload', async () => {
+      useCart.mockReturnValue(cartWith(APPLIED));
+      createOrder.mockResolvedValueOnce({ data: { id: 42, discount: '10.00' } });
+      initiatePayment.mockResolvedValueOnce({ data: { redirect_url: 'https://gw.example/pay' } });
+      delete window.location;
+      window.location = { href: '' };
+
+      const user = userEvent.setup();
+      renderCheckout();
+      await fillValidForm(user);
+      await user.click(screen.getByRole('button', { name: /place order/i }));
+
+      await waitFor(() => expect(createOrder).toHaveBeenCalledOnce());
+      const [payload] = createOrder.mock.calls[0];
+      expect(payload).not.toHaveProperty('discount');
+      expect(payload).not.toHaveProperty('coupon');
+      expect(payload).not.toHaveProperty('coupon_code');
+    });
+
+    describe('attached coupon that has since become invalid', () => {
+      it('warns with the backend’s reason and does not subtract it', () => {
+        useCart.mockReturnValue(cartWith(INVALID));
+        renderCheckout();
+
+        const alert = screen.getByRole('alert');
+        expect(alert).toHaveTextContent(/SUMMER20 can.t be applied/);
+        expect(alert).toHaveTextContent('This coupon has expired.');
+        expect(screen.queryByText(/^Coupon \(/)).not.toBeInTheDocument();
+        expect(screen.getAllByText('$98.97').length).toBeGreaterThan(0);
+      });
+
+      it('lets the shopper remove it right here', async () => {
+        const removeCoupon = vi.fn().mockResolvedValue({ success: true });
+        useCart.mockReturnValue({ ...cartWith(INVALID), removeCoupon });
+
+        const user = userEvent.setup();
+        renderCheckout();
+        await user.click(screen.getByRole('button', { name: /remove coupon/i }));
+
+        expect(removeCoupon).toHaveBeenCalledTimes(1);
+      });
+
+      it('shows why when removal fails', async () => {
+        const removeCoupon = vi
+          .fn()
+          .mockResolvedValue({ success: false, message: 'Could not remove coupon. Please try again.' });
+        useCart.mockReturnValue({ ...cartWith(INVALID), removeCoupon });
+
+        const user = userEvent.setup();
+        renderCheckout();
+        await user.click(screen.getByRole('button', { name: /remove coupon/i }));
+
+        expect(
+          await screen.findByText('Could not remove coupon. Please try again.'),
+        ).toBeInTheDocument();
+      });
+
+      it('links back to the cart', () => {
+        useCart.mockReturnValue(cartWith(INVALID));
+        renderCheckout();
+
+        expect(screen.getByRole('link', { name: /back to cart/i })).toHaveAttribute('href', '/cart');
+      });
+    });
+
+    describe('when the server rejects the coupon at order time', () => {
+      it('shows the backend message in the banner, refreshes the cart, and does not start payment', async () => {
+        const refreshCart = vi.fn();
+        useCart.mockReturnValue({ ...cartWith(APPLIED), refreshCart });
+        createOrder.mockRejectedValueOnce({
+          response: { data: { coupon: ['This coupon has reached its usage limit.'] } },
+        });
+
+        const user = userEvent.setup();
+        renderCheckout();
+        await fillValidForm(user);
+        await user.click(screen.getByRole('button', { name: /place order/i }));
+
+        expect(
+          await screen.findByText('This coupon has reached its usage limit.'),
+        ).toBeInTheDocument();
+        expect(refreshCart).toHaveBeenCalledTimes(1);
+        expect(initiatePayment).not.toHaveBeenCalled();
+        expect(
+          await screen.findByRole('button', { name: /place order/i }),
+        ).not.toBeDisabled();
+      });
+    });
+
+    describe('after the order exists but payment could not be started', () => {
+      it('keeps showing the placed order’s discount even though the cart now reports the coupon as used', async () => {
+        // Once the order exists, its redemption counts against the coupon's
+        // per-user limit, so the cart's live check flips to "already used".
+        // The order itself still carries the discount.
+        const state = { current: cartWith(APPLIED) };
+        useCart.mockImplementation(() => state.current);
+        createOrder.mockImplementationOnce(async () => {
+          state.current = cartWith({
+            coupon_code: 'SUMMER20',
+            coupon_discount: '0',
+            coupon_error: 'You have already used this coupon.',
+          });
+          return { data: { id: 42, discount: '10.00' } };
+        });
+        initiatePayment.mockRejectedValueOnce({
+          response: { data: { detail: 'Gateway is down.' } },
+        });
+
+        const user = userEvent.setup();
+        renderCheckout();
+        await fillValidForm(user);
+        await user.click(screen.getByRole('button', { name: /place order/i }));
+
+        expect(await screen.findByText('Gateway is down.')).toBeInTheDocument();
+        // Discount still in the summary and total; no misleading warning.
+        expect(screen.getByText('Coupon (SUMMER20)')).toBeInTheDocument();
+        expect(screen.getByText('-$10.00')).toBeInTheDocument();
+        expect(screen.queryByText(/can.t be applied/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/already used/i)).not.toBeInTheDocument();
+      });
+    });
+  });
+
 });

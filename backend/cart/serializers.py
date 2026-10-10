@@ -1,4 +1,5 @@
 from django.utils import timezone
+from promotions.services import validate_coupon
 from rest_framework import serializers
 from shop.serializers import ColorSerializer
 
@@ -107,10 +108,23 @@ class CartItemSerializer(serializers.ModelSerializer):
         return value
 
 
+class CartApplyCouponSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=32)
+
+
 class CartSerializer(serializers.ModelSerializer):
     items = CartItemSerializer(many=True, read_only=True)
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     total_items = serializers.IntegerField(read_only=True)
+    # Coupon display (Task 9.1.1.6). All three are recomputed live on every
+    # serialization, so the cart always reflects the coupon's CURRENT
+    # validity for THIS requester (e.g. it expired since being applied, or
+    # items were removed and the cart fell below min_order_amount). They
+    # are for display only — checkout re-validates authoritatively
+    # (Task 9.1.1.5).
+    coupon_code = serializers.SerializerMethodField()
+    coupon_discount = serializers.SerializerMethodField()
+    coupon_error = serializers.SerializerMethodField()
 
     class Meta:
         model = Cart
@@ -119,7 +133,38 @@ class CartSerializer(serializers.ModelSerializer):
             "items",
             "subtotal",
             "total_items",
+            "coupon_code",
+            "coupon_discount",
+            "coupon_error",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def _coupon_check(self, obj):
+        """
+        validate_coupon() result for the cart's applied coupon (None if
+        there isn't one). Computed once per cart per serializer instance,
+        so the three coupon fields don't each repeat its DB queries; a
+        serializer instance serves a single response, so the result can't
+        go stale.
+        """
+        if obj.coupon_id is None:
+            return None
+        cache = self.__dict__.setdefault("_coupon_checks", {})
+        if obj.pk not in cache:
+            request = self.context.get("request")
+            user = request.user if request else None
+            cache[obj.pk] = validate_coupon(obj.coupon.code, user, obj)
+        return cache[obj.pk]
+
+    def get_coupon_code(self, obj):
+        return obj.coupon.code if obj.coupon_id is not None else None
+
+    def get_coupon_discount(self, obj):
+        result = self._coupon_check(obj)
+        return str(result.discount_amount) if result and result.valid else "0"
+
+    def get_coupon_error(self, obj):
+        result = self._coupon_check(obj)
+        return result.error if result and not result.valid else None

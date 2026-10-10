@@ -1,10 +1,12 @@
 import hashlib
 
 from django.core.cache import cache
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Prefetch
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order, OrderItem
+from promotions.models import FlashSale
 from rest_framework import filters, generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -95,6 +97,21 @@ PRODUCT_LIST_CACHE_TTL = 60  # seconds
 # — a pre-existing consideration that also applies to the category cache.
 
 
+def _current_flash_sale_prefetches():
+    """Prefetches that let ProductListSerializer resolve each product's current
+    flash sale and its cheapest active variant without a query per product."""
+    now = timezone.now()
+    return [
+        Prefetch(
+            "flash_sales",
+            queryset=FlashSale.objects.filter(
+                is_active=True, starts_at__lte=now, ends_at__gte=now
+            ),
+        ),
+        Prefetch("variants", queryset=ProductVariant.objects.filter(is_active=True)),
+    ]
+
+
 class ProductListView(generics.ListAPIView):
     permission_classes = [AllowAny]
     serializer_class = ProductListSerializer
@@ -118,7 +135,7 @@ class ProductListView(generics.ListAPIView):
     def get_queryset(self):
         return (
             Product.objects.select_related("category", "brand")
-            .prefetch_related("colors__color")
+            .prefetch_related("colors__color", *_current_flash_sale_prefetches())
             .all()
         )
 
@@ -156,8 +173,18 @@ class ProductDetailView(generics.RetrieveAPIView):
     lookup_field = "slug"
 
     def get_queryset(self):
+        # Prefetch only the flash sales that are current right now, so
+        # resolving each variant's sale-aware price (ProductVariantSerializer)
+        # costs no extra query per variant.
+        now = timezone.now()
+        current_sales = FlashSale.objects.filter(
+            is_active=True, starts_at__lte=now, ends_at__gte=now
+        )
         return Product.objects.select_related("category", "brand").prefetch_related(
-            "images", "colors__color", "reviews"
+            "images",
+            "colors__color",
+            "reviews",
+            Prefetch("flash_sales", queryset=current_sales),
         )
 
 
@@ -180,6 +207,7 @@ class RelatedProductsView(generics.ListAPIView):
             Product.objects.filter(category=product.category)
             .exclude(slug=slug)
             .select_related("category", "brand")
+            .prefetch_related(*_current_flash_sale_prefetches())
             .order_by("-rating")[:8]
         )
 

@@ -885,3 +885,390 @@ def read_csv_bytes(raw):
     import io
 
     return list(csv.reader(io.StringIO(raw.decode("utf-8-sig"))))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AdminCouponViewSet  (Task 9.1.1.8)
+# ══════════════════════════════════════════════════════════════════════════════
+
+COUPONS_URL = "/api/dashboard/admin/coupons/"
+
+
+def coupon_detail(pk):
+    return f"/api/dashboard/admin/coupons/{pk}/"
+
+
+def _coupon_payload(**override):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    now = timezone.now()
+    return {
+        "code": "SUMMER20",
+        "discount_type": "percent",
+        "value": "20.00",
+        "min_order_amount": "0.00",
+        "max_uses": None,
+        "uses_per_user": 1,
+        "valid_from": (now - timedelta(days=1)).isoformat(),
+        "valid_until": (now + timedelta(days=30)).isoformat(),
+        "is_active": True,
+        "categories": [],
+        "products": [],
+        **override,
+    }
+
+
+@pytest.fixture
+def make_coupon(db):
+    from promotions.tests.factories import make_saved_coupon
+
+    _counter = [0]
+
+    def _make(**overrides):
+        _counter[0] += 1
+        overrides.setdefault("code", f"CODE{_counter[0]}")
+        return make_saved_coupon(**overrides)
+
+    return _make
+
+
+@pytest.mark.django_db
+class TestAdminCouponCrud:
+    """Full create / list / retrieve / update / deactivate cycle as an admin."""
+
+    def test_full_crud_cycle(self, admin_client, make_category, make_product):
+        category = make_category("Skincare")
+        product = make_product(name="Serum")
+
+        # create
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(categories=[category.id], products=[product.id]),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED, res.data
+        coupon_id = res.data["id"]
+        assert res.data["code"] == "SUMMER20"
+        assert res.data["categories"] == [category.id]
+        assert res.data["products"] == [product.id]
+        assert res.data["categories_detail"] == [
+            {"id": category.id, "name": "Skincare"}
+        ]
+        assert res.data["products_detail"] == [{"id": product.id, "name": "Serum"}]
+        assert res.data["created_at"]
+
+        # list (paginated)
+        res = admin_client.get(COUPONS_URL)
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["count"] == 1
+        assert [c["id"] for c in res.data["results"]] == [coupon_id]
+
+        # retrieve
+        res = admin_client.get(coupon_detail(coupon_id))
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["code"] == "SUMMER20"
+        assert res.data["is_active"] is True
+
+        # update
+        res = admin_client.patch(
+            coupon_detail(coupon_id),
+            {"value": "25.00", "max_uses": 100},
+            format="json",
+        )
+        assert res.status_code == status.HTTP_200_OK, res.data
+        assert res.data["value"] == "25.00"
+        assert res.data["max_uses"] == 100
+        assert res.data["code"] == "SUMMER20"  # untouched by a partial update
+
+        # deactivate
+        res = admin_client.patch(
+            coupon_detail(coupon_id), {"is_active": False}, format="json"
+        )
+        assert res.status_code == status.HTTP_200_OK, res.data
+        assert res.data["is_active"] is False
+
+        from promotions.models import Coupon
+
+        coupon = Coupon.objects.get(pk=coupon_id)
+        assert coupon.is_active is False
+        assert coupon.value == Decimal("25.00")
+
+    def test_deactivated_coupon_is_rejected_by_validate_coupon(
+        self, admin_client, customer, make_coupon
+    ):
+        from promotions.services import validate_coupon
+        from promotions.tests.factories import make_priced_cart
+
+        coupon = make_coupon(code="LIVE")
+        cart = make_priced_cart(customer, "100.00")
+        assert validate_coupon("LIVE", customer, cart).valid
+
+        admin_client.patch(
+            coupon_detail(coupon.id), {"is_active": False}, format="json"
+        )
+
+        result = validate_coupon("LIVE", customer, cart)
+        assert not result.valid
+        assert result.error == "This coupon is no longer active."
+
+    def test_superuser_has_access(self, superuser_client):
+        assert superuser_client.get(COUPONS_URL).status_code == status.HTTP_200_OK
+
+    def test_restrictions_can_be_cleared(
+        self, admin_client, make_coupon, make_category
+    ):
+        coupon = make_coupon()
+        coupon.categories.add(make_category("Skincare"))
+
+        res = admin_client.patch(
+            coupon_detail(coupon.id), {"categories": []}, format="json"
+        )
+
+        assert res.status_code == status.HTTP_200_OK, res.data
+        assert res.data["categories"] == []
+        assert res.data["categories_detail"] == []
+
+    def test_search_by_code(self, admin_client, make_coupon):
+        make_coupon(code="SUMMER20")
+        make_coupon(code="WINTER10")
+
+        res = admin_client.get(COUPONS_URL, {"search": "summer"})
+
+        assert [c["code"] for c in res.data["results"]] == ["SUMMER20"]
+
+    def test_default_ordering_is_newest_first_and_overridable(
+        self, admin_client, make_coupon
+    ):
+        first = make_coupon(code="FIRST")
+        second = make_coupon(code="SECOND")
+
+        res = admin_client.get(COUPONS_URL)
+        assert [c["id"] for c in res.data["results"]] == [second.id, first.id]
+
+        res = admin_client.get(COUPONS_URL, {"ordering": "created_at"})
+        assert [c["id"] for c in res.data["results"]] == [first.id, second.id]
+
+    def test_list_query_count_does_not_grow_with_restrictions(
+        self, admin_client, make_coupon, make_category, make_product
+    ):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def count_list_queries():
+            with CaptureQueriesContext(connection) as ctx:
+                assert admin_client.get(COUPONS_URL).status_code == 200
+            return len(ctx)
+
+        first = make_coupon()
+        first.categories.add(make_category())
+        first.products.add(make_product())
+        baseline = count_list_queries()
+
+        for _ in range(5):
+            coupon = make_coupon()
+            coupon.categories.add(make_category(), make_category())
+            coupon.products.add(make_product(), make_product())
+
+        assert count_list_queries() == baseline
+
+
+@pytest.mark.django_db
+class TestAdminCouponValidation:
+    """The API must enforce the Coupon.clean() rules itself."""
+
+    @pytest.mark.parametrize("value", ["0", "-5", "100.01", "150"])
+    def test_percent_value_outside_range_rejected(self, admin_client, value):
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(discount_type="percent", value=value),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "value" in res.data
+
+    def test_percent_value_of_exactly_100_accepted(self, admin_client):
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(discount_type="percent", value="100"),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED, res.data
+
+    @pytest.mark.parametrize("value", ["0", "-10"])
+    def test_fixed_value_not_positive_rejected(self, admin_client, value):
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(discount_type="fixed", value=value),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "value" in res.data
+
+    def test_valid_until_not_after_valid_from_rejected(self, admin_client):
+        from django.utils import timezone
+
+        now = timezone.now().isoformat()
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(valid_from=now, valid_until=now),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "valid_until" in res.data
+
+    def test_partial_update_is_validated_against_stored_fields(
+        self, admin_client, make_coupon
+    ):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        coupon = make_coupon()  # valid_from = yesterday
+        # PATCH sends only valid_until, earlier than the STORED valid_from.
+        res = admin_client.patch(
+            coupon_detail(coupon.id),
+            {"valid_until": (timezone.now() - timedelta(days=5)).isoformat()},
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "valid_until" in res.data
+
+    def test_changing_type_to_percent_rechecks_the_stored_value(
+        self, admin_client, make_coupon
+    ):
+        from decimal import Decimal
+
+        coupon = make_coupon(discount_type="fixed", value=Decimal("500.00"))
+        res = admin_client.patch(
+            coupon_detail(coupon.id), {"discount_type": "percent"}, format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "value" in res.data
+
+    @pytest.mark.parametrize(
+        "field,bad",
+        [
+            ("min_order_amount", "-1.00"),
+            ("uses_per_user", 0),
+            ("max_uses", 0),
+        ],
+    )
+    def test_nonsensical_limits_rejected(self, admin_client, field, bad):
+        res = admin_client.post(
+            COUPONS_URL, _coupon_payload(**{field: bad}), format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert field in res.data
+
+    def test_missing_required_fields_rejected(self, admin_client):
+        res = admin_client.post(COUPONS_URL, {"code": "X"}, format="json")
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        for field in ("discount_type", "value", "valid_from", "valid_until"):
+            assert field in res.data
+
+
+@pytest.mark.django_db
+class TestAdminCouponCode:
+    def test_code_is_normalised_to_uppercase(self, admin_client):
+        res = admin_client.post(
+            COUPONS_URL, _coupon_payload(code="  summer20 "), format="json"
+        )
+        assert res.status_code == status.HTTP_201_CREATED, res.data
+        assert res.data["code"] == "SUMMER20"
+
+    def test_case_variant_of_existing_code_is_a_400_not_a_500(
+        self, admin_client, make_coupon
+    ):
+        make_coupon(code="SUMMER20")
+        res = admin_client.post(
+            COUPONS_URL, _coupon_payload(code="summer20"), format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "code" in res.data
+
+    def test_resaving_a_coupons_own_code_is_allowed(self, admin_client, make_coupon):
+        coupon = make_coupon(code="SUMMER20")
+        res = admin_client.patch(
+            coupon_detail(coupon.id), {"code": "summer20"}, format="json"
+        )
+        assert res.status_code == status.HTTP_200_OK, res.data
+
+    def test_renaming_to_another_coupons_code_is_rejected(
+        self, admin_client, make_coupon
+    ):
+        make_coupon(code="TAKEN")
+        coupon = make_coupon(code="MINE")
+        res = admin_client.patch(
+            coupon_detail(coupon.id), {"code": "taken"}, format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "code" in res.data
+
+
+@pytest.mark.django_db
+class TestAdminCouponDelete:
+    def test_unused_coupon_can_be_deleted(self, admin_client, make_coupon):
+        coupon = make_coupon()
+        res = admin_client.delete(coupon_detail(coupon.id))
+        assert res.status_code == status.HTTP_204_NO_CONTENT
+
+        from promotions.models import Coupon
+
+        assert not Coupon.objects.filter(pk=coupon.pk).exists()
+
+    def test_redeemed_coupon_cannot_be_deleted(
+        self, admin_client, make_coupon, customer
+    ):
+        from promotions.models import Coupon, CouponRedemption
+        from promotions.tests.factories import make_completed_redemption
+
+        coupon = make_coupon()
+        make_completed_redemption(coupon, customer)
+
+        res = admin_client.delete(coupon_detail(coupon.id))
+
+        assert res.status_code == status.HTTP_409_CONFLICT
+        assert "Deactivate" in res.data["detail"]
+        assert Coupon.objects.filter(pk=coupon.pk).exists()
+        assert CouponRedemption.objects.filter(coupon=coupon).count() == 1
+
+
+@pytest.mark.django_db
+class TestAdminCouponPermissions:
+    def test_customer_gets_403_on_every_endpoint(self, customer_client, make_coupon):
+        coupon = make_coupon()
+        calls = [
+            customer_client.get(COUPONS_URL),
+            customer_client.post(COUPONS_URL, _coupon_payload(), format="json"),
+            customer_client.get(coupon_detail(coupon.id)),
+            customer_client.patch(
+                coupon_detail(coupon.id), {"is_active": False}, format="json"
+            ),
+            customer_client.delete(coupon_detail(coupon.id)),
+        ]
+        assert [r.status_code for r in calls] == [status.HTTP_403_FORBIDDEN] * 5
+
+        coupon.refresh_from_db()
+        assert coupon.is_active is True  # the forbidden PATCH changed nothing
+
+    def test_forbidden_create_and_delete_leave_data_untouched(
+        self, customer_client, make_coupon
+    ):
+        from promotions.models import Coupon
+
+        coupon = make_coupon()
+        customer_client.post(COUPONS_URL, _coupon_payload(code="NEW"), format="json")
+        customer_client.delete(coupon_detail(coupon.id))
+        assert list(Coupon.objects.values_list("code", flat=True)) == [coupon.code]
+
+    def test_anonymous_gets_401(self, anon_client, make_coupon):
+        coupon = make_coupon()
+        assert anon_client.get(COUPONS_URL).status_code == status.HTTP_401_UNAUTHORIZED
+        assert (
+            anon_client.patch(
+                coupon_detail(coupon.id), {"is_active": False}, format="json"
+            ).status_code
+            == status.HTTP_401_UNAUTHORIZED
+        )

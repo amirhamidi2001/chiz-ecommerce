@@ -1,10 +1,29 @@
+from decimal import Decimal
+from typing import NamedTuple
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 from .validators import validate_ean13
+
+
+def discounted_price(price, sale):
+    """`price` reduced by `sale.discount_percent`, rounded to 2 places."""
+    multiplier = (Decimal("100") - sale.discount_percent) / Decimal("100")
+    return (price * multiplier).quantize(Decimal("0.01"))
+
+
+class FlashSaleCardPricing(NamedTuple):
+    """What a product CARD shows for a product that is currently on sale."""
+
+    sale: object  # promotions.FlashSale
+    original_price: Decimal  # lowest regular price among the product's variants
+    price: Decimal  # that price with the sale applied ("starting at")
+    price_varies: bool  # variants differ in price, so "from" is the honest label
 
 
 class Category(models.Model):
@@ -245,6 +264,62 @@ class Product(models.Model):
         return self.name
 
     @property
+    def active_flash_sale(self):
+        """
+        The FlashSale currently discounting this product, or None.
+
+        A sale is current when is_active is set and now is within
+        [starts_at, ends_at]. If several current sales cover the same
+        product (an admin configuration edge case), the one that STARTED
+        most recently wins; if they started at the same instant, the most
+        recently created one wins. That is deliberately simple — it is NOT
+        "highest discount wins".
+
+        Resolves from a prefetched `flash_sales` when present (the product
+        views prefetch the current ones), costing no query; otherwise issues
+        one query. Both paths apply the same rule.
+        """
+        now = timezone.now()
+        if "flash_sales" in getattr(self, "_prefetched_objects_cache", {}):
+            current = [
+                sale
+                for sale in self.flash_sales.all()
+                if sale.is_active and sale.starts_at <= now <= sale.ends_at
+            ]
+            return max(
+                current, key=lambda sale: (sale.starts_at, sale.pk), default=None
+            )
+        return (
+            self.flash_sales.filter(
+                is_active=True, starts_at__lte=now, ends_at__gte=now
+            )
+            .order_by("-starts_at", "-pk")
+            .first()
+        )
+
+    def flash_sale_card_pricing(self):
+        """
+        Product-card pricing for a product on sale, or None if it isn't.
+
+        Real prices live on variants, and a card can't show one badge per
+        shade/size, so a card shows "starting at": the cheapest active
+        variant's price, with the sale applied, against that same price
+        struck through. (Falls back to `price` if there are no active
+        variants.) Uses prefetched `variants` when available.
+        """
+        sale = self.active_flash_sale
+        if sale is None:
+            return None
+        prices = [v.price for v in self.variants.all() if v.is_active] or [self.price]
+        lowest, highest = min(prices), max(prices)
+        return FlashSaleCardPricing(
+            sale=sale,
+            original_price=lowest,
+            price=discounted_price(lowest, sale),
+            price_varies=lowest != highest,
+        )
+
+    @property
     def discount_percent(self):
         if self.original_price and self.original_price > self.price:
             return round((1 - self.price / self.original_price) * 100)
@@ -395,6 +470,20 @@ class ProductVariant(models.Model):
 
     def __str__(self):
         return f"{self.product.name} — {self.sku or 'unsaved'}"
+
+    @property
+    def active_flash_sale(self):
+        """The FlashSale currently discounting this variant's product, or None.
+        See Product.active_flash_sale for the rules (incl. overlapping sales)."""
+        return self.product.active_flash_sale
+
+    @property
+    def effective_price(self):
+        """`price` with any current flash-sale discount applied, to 2 places."""
+        sale = self.active_flash_sale
+        if sale is None:
+            return self.price
+        return discounted_price(self.price, sale)
 
     @property
     def is_low_stock(self) -> bool:

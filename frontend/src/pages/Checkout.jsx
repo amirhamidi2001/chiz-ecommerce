@@ -38,7 +38,7 @@ const StepHeader = ({ num, title }) => (
 // ─── Main component ───────────────────────────────────────────────────────────
 const Checkout = () => {
   const navigate = useNavigate();
-  const { cart, loading: cartLoading, fetchCart } = useCart();
+  const { cart, loading: cartLoading, fetchCart, refreshCart, removeCoupon } = useCart();
 
   // ── Redirect unauthenticated users ────────────────────────────────────────
   useEffect(() => {
@@ -195,14 +195,32 @@ const Checkout = () => {
   // resubmitting the form and creating a duplicate order.
   const [pendingOrderId, setPendingOrderId] = useState(null);
   const [paymentInitError, setPaymentInitError] = useState('');
+  // The order createOrder() returned. Once it exists its discount is final
+  // (server-computed and baked into the order); the cart's own live coupon
+  // check can no longer be trusted for display, because the new order's
+  // redemption now counts against the coupon's per-user limit.
+  const [placedOrder, setPlacedOrder] = useState(null);
+  const [removingCoupon, setRemovingCoupon] = useState(false);
+  const [couponRemoveError, setCouponRemoveError] = useState('');
 
   // ── Derived totals ─────────────────────────────────────────────────────────
-  // NOTE: there is no coupon/promo system yet (tracked as Epic 9). Discount
-  // is always $0 and is not client-controlled — the server hardcodes it too.
+  // The discount is never client-controlled and never sent to the server —
+  // checkout submits no coupon field at all. The coupon is applied to the
+  // cart on the Cart page; the server re-validates it and computes the
+  // discount when the order is created. What's shown here is read-only:
+  // the cart's live coupon_discount, or — once the order exists — that
+  // order's own final discount.
   const subtotal = Number(cart?.subtotal ?? 0);
   const shippingCost = selectedShipping ? Number(selectedShipping.price) : 0;
   const tax = subtotal * TAX_RATE;
-  const total = subtotal + shippingCost + tax;
+  const couponCode = cart?.coupon_code ?? null;
+  const couponError = cart?.coupon_error ?? null;
+  const liveDiscount = couponCode && !couponError ? Number(cart?.coupon_discount) || 0 : 0;
+  const discount = placedOrder ? Number(placedOrder.discount ?? 0) || 0 : liveDiscount;
+  // An attached coupon that no longer applies is NOT reducing the total;
+  // say so (and offer removal) rather than silently showing a higher price.
+  const showCouponProblem = Boolean(couponCode && couponError && !placedOrder);
+  const total = subtotal + shippingCost + tax - discount;
   const items = cart?.items ?? [];
 
   // ── Input handlers ──────────────────────────────────────────────────────────
@@ -340,6 +358,7 @@ const Checkout = () => {
       const { data: order } = await createOrder(payload);
       orderId = order.id;
       setPendingOrderId(orderId);
+      setPlacedOrder(order);
     } catch (err) {
       const data = err.response?.data;
       if (data && typeof data === 'object') {
@@ -348,10 +367,20 @@ const Checkout = () => {
         Object.entries(data).forEach(([key, val]) => {
           mapped[key] = Array.isArray(val) ? val[0] : String(val);
         });
-        if (mapped.cart) {
-          setServerError(mapped.cart);
+        // The server re-validates the cart's coupon at order time, so it can
+        // reject one that looked fine a moment ago (expired, limit hit by
+        // another checkout…). There's no form field for it, so show the
+        // backend's message in the banner and refresh the cart so the
+        // summary reflects the coupon's real state.
+        const { coupon: couponMessage, ...fieldErrors } = mapped;
+        if (couponMessage) {
+          setServerError(couponMessage);
+          refreshCart();
+        }
+        if (fieldErrors.cart) {
+          setServerError(fieldErrors.cart);
         } else {
-          setErrors(mapped);
+          setErrors(fieldErrors);
         }
       } else {
         setServerError('Something went wrong. Please try again.');
@@ -361,6 +390,14 @@ const Checkout = () => {
     }
 
     await initiateAndRedirect(orderId);
+  };
+
+  const handleRemoveCoupon = async () => {
+    setRemovingCoupon(true);
+    setCouponRemoveError('');
+    const result = await removeCoupon();
+    setRemovingCoupon(false);
+    if (!result.success) setCouponRemoveError(result.message);
   };
 
   // ── Empty cart redirect ─────────────────────────────────────────────────────
@@ -705,10 +742,41 @@ const Checkout = () => {
                   </div>
                 )}
 
-                {/* Promo code / coupons are not implemented yet (Epic 9) —
-                    intentionally removed rather than left as non-functional
-                    UI. Do not re-add a promo input here without a real,
-                    server-validated coupon system behind it. */}
+                {/* No coupon INPUT here by design: coupons are applied on the
+                    Cart page and re-validated by the server when the order is
+                    created. Checkout only shows what's applied (read-only),
+                    plus a way out if the applied coupon has stopped working. */}
+                {showCouponProblem && (
+                  <div
+                    role="alert"
+                    className="mb-4 border border-amber-300 bg-amber-50 rounded-lg px-4 py-3 text-sm"
+                  >
+                    <p className="font-semibold text-amber-800">
+                      Coupon {couponCode} can&apos;t be applied
+                    </p>
+                    <p className="text-amber-700 mt-1">{couponError}</p>
+                    <p className="text-amber-700 mt-1">
+                      It isn&apos;t reducing your total, and your order will be rejected
+                      while it&apos;s attached.
+                    </p>
+                    <div className="flex items-center gap-3 mt-2">
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        disabled={removingCoupon}
+                        className="border border-amber-400 text-amber-800 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-amber-100 transition disabled:opacity-50"
+                      >
+                        {removingCoupon ? 'Removing…' : 'Remove coupon'}
+                      </button>
+                      <Link to="/cart" className="text-xs text-amber-800 underline">
+                        Back to cart
+                      </Link>
+                    </div>
+                    {couponRemoveError && (
+                      <p className="text-red-600 text-xs mt-2">{couponRemoveError}</p>
+                    )}
+                  </div>
+                )}
 
                 {/* Totals */}
                 <div className="space-y-2 text-sm border-t pt-4">
@@ -726,6 +794,15 @@ const Checkout = () => {
                     <span className="text-gray-600">Tax (10%)</span>
                     <span>${tax.toFixed(2)}</span>
                   </div>
+                  {discount > 0 && (
+                    <div className="flex justify-between text-teal-600">
+                      <span className="flex items-center gap-1">
+                        <i className="bi bi-tag-fill"></i>
+                        {couponCode ? `Coupon (${couponCode})` : 'Coupon discount'}
+                      </span>
+                      <span className="font-semibold">-${discount.toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-base font-bold pt-3 border-t mt-2">
                     <span>Total</span>
                     <span className="text-teal-700">${total.toFixed(2)}</span>

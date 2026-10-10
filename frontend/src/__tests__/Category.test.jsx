@@ -758,4 +758,105 @@ describe('Category', () => {
       expect(homeLink).toHaveAttribute('href', '/');
     });
   });
+
+  // ── Flash sale (Task 9.2.1.3) ───────────────────────────────────────────────
+  describe('flash sale', () => {
+    const saleProduct = (overrides = {}) =>
+      makeProduct({
+        id: 11,
+        name: 'Vitamin C Serum',
+        slug: 'vitamin-c-serum',
+        price: '80.00',
+        is_on_flash_sale: true,
+        flash_sale_price: '60.00',
+        flash_sale_original_price: '80.00',
+        flash_sale_price_varies: false,
+        flash_sale_discount_percent: '25.00',
+        ...overrides,
+      });
+
+    const lastParams = () => getProducts.mock.calls.at(-1)[0];
+
+    it('shows the badge, the discounted price and the struck-through original in grid view', async () => {
+      getProducts.mockResolvedValue(makeProductsResponse([saleProduct()]));
+      renderCategory();
+
+      expect(await screen.findByText('Vitamin C Serum')).toBeInTheDocument();
+      expect(screen.getByText(/flash sale -25%/i)).toBeInTheDocument();
+      expect(screen.getByText('$60.00')).toBeInTheDocument();
+      expect(screen.getByText('$80.00').tagName).toBe('DEL');
+    });
+
+    it('shows the same in list view', async () => {
+      getProducts.mockResolvedValue(makeProductsResponse([saleProduct()]));
+      const { user } = renderCategory();
+      await screen.findByText('Vitamin C Serum');
+
+      await user.click(document.querySelector('.bi-list-ul').closest('button'));
+
+      expect(screen.getByText(/flash sale -25%/i)).toBeInTheDocument();
+      expect(screen.getByText('$60.00')).toBeInTheDocument();
+      expect(screen.getByText('$80.00').tagName).toBe('DEL');
+    });
+
+    it('labels a price range with "From"', async () => {
+      getProducts.mockResolvedValue(
+        makeProductsResponse([saleProduct({ flash_sale_price_varies: true })]),
+      );
+      renderCategory();
+      await screen.findByText('Vitamin C Serum');
+      expect(screen.getByText('From')).toBeInTheDocument();
+    });
+
+    it('leaves a product that is not on sale exactly as before', async () => {
+      getProducts.mockResolvedValue(
+        makeProductsResponse([makeProduct({ is_on_flash_sale: false, flash_sale_price: null })]),
+      );
+      renderCategory();
+      await screen.findByText('Test Product');
+
+      expect(screen.queryByText(/flash sale/i)).not.toBeInTheDocument();
+      expect(screen.getByText('$49.99')).toBeInTheDocument();
+      expect(document.querySelector('del')).toBeNull();
+    });
+
+    it('does not fall back to the plain price when the sale price is missing', async () => {
+      getProducts.mockResolvedValue(
+        makeProductsResponse([saleProduct({ flash_sale_price: null })]),
+      );
+      renderCategory();
+      await screen.findByText('Vitamin C Serum');
+      expect(screen.queryByText(/flash sale/i)).not.toBeInTheDocument();
+    });
+
+    it('sends ?flash_sale=<id> to the API and says so', async () => {
+      getProducts.mockResolvedValue(makeProductsResponse([saleProduct()]));
+      renderCategory('?flash_sale=7');
+      await screen.findByText('Vitamin C Serum');
+
+      expect(lastParams()).toMatchObject({ flash_sale: '7' });
+      expect(screen.getByRole('status')).toHaveTextContent(/showing flash sale products/i);
+    });
+
+    it('sends no flash_sale param and shows no notice otherwise', async () => {
+      getProducts.mockResolvedValue(makeProductsResponse([makeProduct()]));
+      renderCategory();
+      await screen.findByText('Test Product');
+
+      expect(lastParams()).not.toHaveProperty('flash_sale');
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('"Show all products" drops the filter and re-fetches', async () => {
+      getProducts.mockResolvedValue(makeProductsResponse([saleProduct()]));
+      const { user } = renderCategory('?flash_sale=7');
+      await screen.findByText('Vitamin C Serum');
+
+      await user.click(screen.getByRole('button', { name: /show all products/i }));
+
+      await waitFor(() => expect(lastParams()).not.toHaveProperty('flash_sale'));
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+  });
+
 });

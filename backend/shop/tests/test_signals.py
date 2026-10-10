@@ -127,6 +127,92 @@ class TestProductListCacheInvalidation:
 # Stock-alert notification on 0→positive transitions (Task 4.1.2.3)
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.django_db
+class TestFlashSaleCacheInvalidation:
+    """Cached list pages embed each product's flash-sale fields."""
+
+    def _make_sale(self, product=None):
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from django.utils import timezone
+        from promotions.models import FlashSale
+
+        now = timezone.now()
+        sale = FlashSale.objects.create(
+            name="Sale",
+            discount_percent=Decimal("20.00"),
+            starts_at=now - timedelta(hours=1),
+            ends_at=now + timedelta(hours=1),
+        )
+        if product is not None:
+            sale.products.add(product)
+        return sale
+
+    def test_creating_a_sale_clears_cached_lists(self, api_client):
+        ProductFactory()
+        _populate_several_cached_filter_combinations(api_client)
+        assert len(_product_list_cache_keys()) == 3
+
+        self._make_sale()
+
+        assert _product_list_cache_keys() == []
+
+    def test_editing_a_sale_clears_cached_lists(self, api_client):
+        sale = self._make_sale()
+        _populate_several_cached_filter_combinations(api_client)
+
+        sale.is_active = False
+        sale.save()
+
+        assert _product_list_cache_keys() == []
+
+    def test_deleting_a_sale_clears_cached_lists(self, api_client):
+        sale = self._make_sale()
+        _populate_several_cached_filter_combinations(api_client)
+
+        sale.delete()
+
+        assert _product_list_cache_keys() == []
+
+    def test_adding_a_product_to_a_sale_clears_cached_lists(self, api_client):
+        product = ProductVariantFactory(price=10).product
+        sale = self._make_sale()
+        _populate_several_cached_filter_combinations(api_client)
+
+        sale.products.add(product)
+
+        assert _product_list_cache_keys() == []
+
+    def test_adding_from_the_product_side_also_clears(self, api_client):
+        product = ProductVariantFactory(price=10).product
+        sale = self._make_sale()
+        _populate_several_cached_filter_combinations(api_client)
+
+        product.flash_sales.add(sale)
+
+        assert _product_list_cache_keys() == []
+
+    def test_removing_a_product_from_a_sale_clears_cached_lists(self, api_client):
+        product = ProductVariantFactory(price=10).product
+        sale = self._make_sale(product)
+        _populate_several_cached_filter_combinations(api_client)
+
+        sale.products.remove(product)
+
+        assert _product_list_cache_keys() == []
+
+    def test_the_next_request_reflects_a_newly_created_sale(self, api_client):
+        product = ProductVariantFactory(price=80).product
+        before = api_client.get(url("product-list"))
+        assert before.data["results"][0]["is_on_flash_sale"] is False
+
+        self._make_sale(product)
+
+        after = api_client.get(url("product-list"))
+        assert after.data["results"][0]["is_on_flash_sale"] is True
+
+
+@pytest.mark.django_db
 class TestHandleStockIncreaseSignal:
     """
     Mocks notify_stock_alert_subscribers.delay directly — no real

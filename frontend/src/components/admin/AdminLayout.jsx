@@ -9,6 +9,7 @@ const NAV = [
   { label: "Products", to: "/admin/products", icon: "bi-bag" },
   { label: "Categories", to: "/admin/categories", icon: "bi-tag" },
   { label: "Brands", to: "/admin/brands", icon: "bi-award" },
+  { label: "Coupons", to: "/admin/coupons", icon: "bi-ticket-perforated" },
   { label: "Users", to: "/admin/users", icon: "bi-people" },
   { label: "Reviews", to: "/admin/reviews", icon: "bi-star" },
   { label: "Chats", to: "/admin/chat", icon: "bi-chat" },

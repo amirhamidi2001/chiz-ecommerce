@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "order.apps.OrderConfig",
     "payments.apps.PaymentsConfig",
     "shipping.apps.ShippingConfig",
+    "promotions.apps.PromotionsConfig",
     "dashboard.apps.DashboardConfig",
     "chat.apps.ChatConfig",
     "blog.apps.BlogConfig",

@@ -15,6 +15,8 @@ vi.mock('../services/api', () => ({
   updateCartItem: vi.fn(),
   removeCartItem: vi.fn(),
   clearCart: vi.fn(),
+  applyCoupon: vi.fn(),
+  removeCoupon: vi.fn(),
 }));
 
 import {
@@ -24,6 +26,8 @@ import {
   updateCartItem,
   removeCartItem,
   clearCart,
+  applyCoupon,
+  removeCoupon,
 } from '../services/api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -663,5 +667,196 @@ describe('useCart hook', () => {
     );
 
     consoleError.mockRestore();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// COUPONS — applyCoupon / removeCoupon / refreshCart (Task 9.1.1.9)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Renders the provider with a probe that exposes the live context value plus
+ * the bits of state these tests assert on.
+ */
+const setupProbe = async () => {
+  const probe = { ctx: null };
+  const Probe = () => {
+    const ctx = useCart();
+    probe.ctx = ctx;
+    return (
+      <div>
+        <span data-testid="loading">{String(ctx.loading)}</span>
+        <span data-testid="error">{ctx.error ?? 'null'}</span>
+        <span data-testid="coupon">{ctx.cart?.coupon_code ?? 'none'}</span>
+        <span data-testid="discount">{ctx.cart?.coupon_discount ?? 'none'}</span>
+      </div>
+    );
+  };
+  renderWithCart(<Probe />);
+  await waitFor(() => expect(getCart).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'));
+  return probe;
+};
+
+const cartWithCoupon = (code, discount) =>
+  makeCart({ coupon_code: code, coupon_discount: discount, coupon_error: null });
+
+describe('applyCoupon', () => {
+  it('posts the code, re-fetches the cart, and exposes the recomputed coupon fields', async () => {
+    const probe = await setupProbe();
+    applyCoupon.mockResolvedValueOnce({ data: { code: 'SUMMER20', discount_amount: '10.00' } });
+    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', '10.00') });
+
+    let result;
+    await act(async () => { result = await probe.ctx.applyCoupon('SUMMER20'); });
+
+    expect(applyCoupon).toHaveBeenCalledWith('SUMMER20');
+    expect(result).toEqual({ success: true });
+    expect(getCart).toHaveBeenCalledTimes(2); // mount + refresh
+    expect(screen.getByTestId('coupon').textContent).toBe('SUMMER20');
+    expect(screen.getByTestId('discount').textContent).toBe('10.00');
+  });
+
+  it('refreshes silently — never flips loading, so pages keep their content', async () => {
+    const probe = await setupProbe();
+    applyCoupon.mockResolvedValueOnce({ data: {} });
+    let resolveRefresh;
+    getCart.mockReturnValueOnce(
+      new Promise((res) => { resolveRefresh = () => res({ data: cartWithCoupon('SUMMER20', '10.00') }); }),
+    );
+
+    let pending;
+    await act(async () => { pending = probe.ctx.applyCoupon('SUMMER20'); });
+    expect(screen.getByTestId('loading').textContent).toBe('false'); // mid-refresh
+
+    await act(async () => { resolveRefresh(); await pending; });
+    expect(screen.getByTestId('loading').textContent).toBe('false');
+    expect(screen.getByTestId('coupon').textContent).toBe('SUMMER20');
+  });
+
+  it.each([
+    ['a coupon error list', { coupon: ['This coupon has expired.'] }, 'This coupon has expired.'],
+    ['a coupon error string', { coupon: 'Invalid coupon code.' }, 'Invalid coupon code.'],
+    ['a code field error', { code: ['This field may not be blank.'] }, 'This field may not be blank.'],
+    ['a detail message (e.g. throttling)', { detail: 'Request was throttled.' }, 'Request was throttled.'],
+  ])('surfaces the backend message from %s', async (_label, data, expected) => {
+    const probe = await setupProbe();
+    applyCoupon.mockRejectedValueOnce({ response: { status: 400, data } });
+
+    let result;
+    await act(async () => { result = await probe.ctx.applyCoupon('X'); });
+
+    expect(result).toEqual({ success: false, message: expected });
+  });
+
+  it.each([
+    ['no response (network error)', new Error('Network Error')],
+    ['an unrecognised error body', { response: { status: 500, data: { unexpected: true } } }],
+    ['an empty error body', { response: { status: 500, data: '' } }],
+  ])('falls back to a generic message for %s', async (_label, err) => {
+    const probe = await setupProbe();
+    applyCoupon.mockRejectedValueOnce(err);
+
+    let result;
+    await act(async () => { result = await probe.ctx.applyCoupon('X'); });
+
+    expect(result).toEqual({
+      success: false,
+      message: 'Could not apply coupon. Please try again.',
+    });
+  });
+
+  it('does not re-fetch the cart or change it when the coupon is rejected', async () => {
+    const probe = await setupProbe();
+    applyCoupon.mockRejectedValueOnce({ response: { data: { coupon: ['Nope.'] } } });
+
+    await act(async () => { await probe.ctx.applyCoupon('X'); });
+
+    expect(getCart).toHaveBeenCalledTimes(1); // only the mount fetch
+    expect(screen.getByTestId('coupon').textContent).toBe('none');
+    expect(screen.getByTestId('error').textContent).toBe('null');
+  });
+
+  it('still reports success if the follow-up refresh fails (the coupon WAS applied)', async () => {
+    const probe = await setupProbe();
+    applyCoupon.mockResolvedValueOnce({ data: {} });
+    getCart.mockRejectedValueOnce(new Error('refresh failed'));
+
+    let result;
+    await act(async () => { result = await probe.ctx.applyCoupon('SUMMER20'); });
+
+    expect(result).toEqual({ success: true });
+    expect(screen.getByTestId('error').textContent).toBe('null');
+  });
+});
+
+describe('removeCoupon', () => {
+  it('deletes the coupon, re-fetches the cart, and clears the coupon fields', async () => {
+    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', '10.00') });
+    const probe = await setupProbe();
+    expect(screen.getByTestId('coupon').textContent).toBe('SUMMER20');
+    removeCoupon.mockResolvedValueOnce({ status: 204 });
+    getCart.mockResolvedValueOnce({ data: makeCart({ coupon_code: null, coupon_discount: '0', coupon_error: null }) });
+
+    let result;
+    await act(async () => { result = await probe.ctx.removeCoupon(); });
+
+    expect(removeCoupon).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ success: true });
+    expect(getCart).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('coupon').textContent).toBe('none');
+    expect(screen.getByTestId('discount').textContent).toBe('0');
+    expect(screen.getByTestId('loading').textContent).toBe('false');
+  });
+
+  it('returns the backend message on failure and leaves the cart alone', async () => {
+    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', '10.00') });
+    const probe = await setupProbe();
+    removeCoupon.mockRejectedValueOnce({ response: { data: { detail: 'Not allowed.' } } });
+
+    let result;
+    await act(async () => { result = await probe.ctx.removeCoupon(); });
+
+    expect(result).toEqual({ success: false, message: 'Not allowed.' });
+    expect(getCart).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('coupon').textContent).toBe('SUMMER20');
+  });
+
+  it('falls back to a generic message when there is nothing specific', async () => {
+    const probe = await setupProbe();
+    removeCoupon.mockRejectedValueOnce(new Error('Network Error'));
+
+    let result;
+    await act(async () => { result = await probe.ctx.removeCoupon(); });
+
+    expect(result).toEqual({
+      success: false,
+      message: 'Could not remove coupon. Please try again.',
+    });
+  });
+});
+
+describe('refreshCart', () => {
+  it('updates the cart and returns true without touching loading', async () => {
+    const probe = await setupProbe();
+    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', '5.00') });
+
+    let ok;
+    await act(async () => { ok = await probe.ctx.refreshCart(); });
+
+    expect(ok).toBe(true);
+    expect(screen.getByTestId('coupon').textContent).toBe('SUMMER20');
+    expect(screen.getByTestId('loading').textContent).toBe('false');
+  });
+
+  it('returns false on failure and does not set the error state or throw', async () => {
+    const probe = await setupProbe();
+    getCart.mockRejectedValueOnce(new Error('boom'));
+
+    let ok;
+    await act(async () => { ok = await probe.ctx.refreshCart(); });
+
+    expect(ok).toBe(false);
+    expect(screen.getByTestId('error').textContent).toBe('null');
   });
 });
