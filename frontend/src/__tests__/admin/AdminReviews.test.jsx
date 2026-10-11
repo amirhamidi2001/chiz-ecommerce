@@ -165,6 +165,7 @@ vi.mock('../../components/admin/Toast', () => ({
 vi.mock('../../services/api', () => ({
   adminAPI: {
     getReviews: vi.fn(),
+    updateReview: vi.fn(),
     deleteReview: vi.fn(),
   },
 }));
@@ -1060,6 +1061,89 @@ describe('AdminReviews', () => {
   });
 
   // ── 16. Snapshot ─────────────────────────────────────────────────────────
+  // ── Store reply ──────────────────────────────────────────────────────────
+  describe('ReviewDrawer – store reply', () => {
+    const openDrawer = async (user, review = makeReview()) => {
+      adminAPI.getReviews.mockResolvedValue(paged([review], 1));
+      render(<AdminReviews />);
+      await waitFor(() => screen.getByText(review.name));
+      await user.click(within(screen.getByTestId('dt-row-0')).getByTitle('View'));
+      await waitFor(() => getDrawerCard());
+      return getDrawerCard();
+    };
+
+    it('shows an empty reply box with a disabled save button when there is no reply', async () => {
+      const user = setup();
+      const drawer = await openDrawer(user);
+      expect(within(drawer).getByLabelText('Store reply')).toHaveValue('');
+      expect(within(drawer).getByRole('button', { name: 'Save reply' })).toBeDisabled();
+    });
+
+    it('pre-fills an existing reply and shows when it was last updated', async () => {
+      const user = setup();
+      const drawer = await openDrawer(
+        user,
+        makeReview({ store_response: 'Thanks!', store_response_at: '2024-07-04T12:00:00Z' }),
+      );
+      expect(within(drawer).getByLabelText('Store reply')).toHaveValue('Thanks!');
+      expect(within(drawer).getByText(/last updated jul 4, 2024/i)).toBeInTheDocument();
+    });
+
+    it('PATCHes store_response (trimmed), toasts, and reflects the saved reply', async () => {
+      const user = setup();
+      const review = makeReview();
+      adminAPI.updateReview.mockResolvedValue({
+        data: { ...review, store_response: 'We are sorry!', store_response_at: '2024-07-04T12:00:00Z' },
+      });
+      const drawer = await openDrawer(user, review);
+
+      await user.type(within(drawer).getByLabelText('Store reply'), '  We are sorry!  ');
+      await user.click(within(drawer).getByRole('button', { name: 'Save reply' }));
+
+      await waitFor(() =>
+        expect(adminAPI.updateReview).toHaveBeenCalledWith(review.id, { store_response: 'We are sorry!' }),
+      );
+      expect(capturedToasts).toContainEqual({ message: 'Reply saved', type: 'success' });
+      await waitFor(() =>
+        expect(within(getDrawerCard()).getByText(/last updated jul 4, 2024/i)).toBeInTheDocument(),
+      );
+      // Saved => nothing left to save.
+      expect(within(getDrawerCard()).getByRole('button', { name: 'Save reply' })).toBeDisabled();
+    });
+
+    it('saving an emptied box removes the reply', async () => {
+      const user = setup();
+      const review = makeReview({ store_response: 'Old reply', store_response_at: '2024-07-04T12:00:00Z' });
+      adminAPI.updateReview.mockResolvedValue({
+        data: { ...review, store_response: '', store_response_at: null },
+      });
+      const drawer = await openDrawer(user, review);
+
+      await user.clear(within(drawer).getByLabelText('Store reply'));
+      await user.click(within(drawer).getByRole('button', { name: 'Save reply' }));
+
+      await waitFor(() =>
+        expect(adminAPI.updateReview).toHaveBeenCalledWith(review.id, { store_response: '' }),
+      );
+      expect(capturedToasts).toContainEqual({ message: 'Reply removed', type: 'success' });
+    });
+
+    it('shows an error toast and keeps the draft when saving fails', async () => {
+      const user = setup();
+      adminAPI.updateReview.mockRejectedValue(new Error('boom'));
+      const drawer = await openDrawer(user);
+
+      await user.type(within(drawer).getByLabelText('Store reply'), 'Draft reply');
+      await user.click(within(drawer).getByRole('button', { name: 'Save reply' }));
+
+      await waitFor(() =>
+        expect(capturedToasts).toContainEqual({ message: 'Failed to save reply', type: 'error' }),
+      );
+      expect(within(getDrawerCard()).getByLabelText('Store reply')).toHaveValue('Draft reply');
+      expect(within(getDrawerCard()).getByRole('button', { name: 'Save reply' })).toBeEnabled();
+    });
+  });
+
   describe('Snapshot', () => {
     it('matches stable snapshot after data loads', async () => {
       const { asFragment } = render(<AdminReviews />);

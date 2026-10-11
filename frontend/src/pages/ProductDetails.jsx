@@ -4,6 +4,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { getProductDetails, getRelatedProducts, createReview, subscribeStockAlert, parseErrors, isAuthenticated } from '../services/api';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
+import { STORE_NAME } from '../constants/store';
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 const Spinner = () => (
@@ -1170,6 +1171,34 @@ const ProductDetails = () => {
                           </h5>
                         )}
                         <p className="text-gray-600 mb-3">{review.comment}</p>
+                        {review.store_response && (
+                          <div
+                            data-testid="store-response"
+                            className="ml-4 sm:ml-8 mb-3 rounded-lg border-l-4 border-teal-500 bg-teal-50 p-4"
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className="text-sm font-semibold text-teal-700 flex items-center gap-1">
+                                <i className="bi bi-patch-check-fill" />
+                                Response from {STORE_NAME}
+                              </span>
+                              {review.store_response_at && (
+                                <time
+                                  dateTime={review.store_response_at}
+                                  className="text-xs text-gray-500"
+                                >
+                                  {new Date(review.store_response_at).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                  })}
+                                </time>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-700 whitespace-pre-line">
+                              {review.store_response}
+                            </p>
+                          </div>
+                        )}
                         <div className="flex gap-4">
                           <button className="text-sm text-gray-500 hover:text-teal-600 flex items-center gap-1">
                             <i className="bi bi-hand-thumbs-up" /> Helpful

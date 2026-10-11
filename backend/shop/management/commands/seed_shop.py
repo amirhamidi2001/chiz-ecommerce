@@ -265,6 +265,7 @@ class Command(BaseCommand):
                         rating=random.randint(3, 5),
                         headline=random.choice(REVIEW_HEADLINES),
                         comment=random.choice(REVIEW_COMMENTS),
+                        is_approved=True,
                     )
 
             created_products.append(product)

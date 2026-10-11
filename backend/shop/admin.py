@@ -16,6 +16,7 @@ from .models import (
     StockAlertSubscription,
     StockMovement,
 )
+from .services import refresh_product_review_stats
 
 
 @admin.register(Category)
@@ -258,8 +259,59 @@ class StockAlertSubscriptionAdmin(admin.ModelAdmin):
 
 @admin.register(Review)
 class ReviewAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "product", "rating", "headline", "created_at")
-    list_filter = ("rating", "product")
+    list_display = (
+        "id",
+        "name",
+        "product",
+        "rating",
+        "headline",
+        "is_verified_purchase",
+        "is_approved",
+        "created_at",
+    )
+    list_filter = ("is_approved", "is_verified_purchase", "rating", "product")
     search_fields = ("name", "headline", "comment", "product__name")
     ordering = ("-created_at",)
     readonly_fields = ("created_at",)
+    actions = ("approve_reviews", "unapprove_reviews")
+
+    # Product.rating / reviews_count are denormalised from APPROVED reviews, so
+    # every path that changes a review's visibility must refresh them. Bulk
+    # queryset.update() and delete() skip model signals, hence the explicit
+    # refresh of each affected product below.
+
+    @staticmethod
+    def _refresh_products(product_ids) -> None:
+        for product in Product.objects.filter(pk__in=set(product_ids)):
+            refresh_product_review_stats(product)
+
+    def _set_approval(self, request, queryset, approved: bool):
+        product_ids = list(queryset.values_list("product_id", flat=True))
+        updated = queryset.exclude(is_approved=approved).update(is_approved=approved)
+        self._refresh_products(product_ids)
+        self.message_user(
+            request,
+            f"{updated} review(s) {'approved' if approved else 'unapproved'}.",
+        )
+
+    @admin.action(description="Approve selected reviews")
+    def approve_reviews(self, request, queryset):
+        self._set_approval(request, queryset, True)
+
+    @admin.action(description="Unapprove selected reviews")
+    def unapprove_reviews(self, request, queryset):
+        self._set_approval(request, queryset, False)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        refresh_product_review_stats(obj.product)
+
+    def delete_model(self, request, obj):
+        product = obj.product
+        super().delete_model(request, obj)
+        refresh_product_review_stats(product)
+
+    def delete_queryset(self, request, queryset):
+        product_ids = list(queryset.values_list("product_id", flat=True))
+        super().delete_queryset(request, queryset)
+        self._refresh_products(product_ids)

@@ -490,6 +490,9 @@ export const adminAPI = {
 
   // Reviews
   getReviews: (params = {}) => api.get('/dashboard/admin/reviews/', { params }),
+  // PATCH accepts `is_approved` and `store_response` only; every other review
+  // field is read-only on this endpoint.
+  updateReview: (id, data) => api.patch(`/dashboard/admin/reviews/${id}/`, data),
   deleteReview: (id) => api.delete(`/dashboard/admin/reviews/${id}/`),
 
   // Contact messages

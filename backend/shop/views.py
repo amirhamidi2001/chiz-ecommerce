@@ -1,13 +1,15 @@
 import hashlib
 
+from django.conf import settings
 from django.core.cache import cache
-from django.db.models import Avg, Count, Prefetch
+from django.db import transaction
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order, OrderItem
 from promotions.models import FlashSale
-from rest_framework import filters, generics, status
+from rest_framework import filters, generics, serializers, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -19,6 +21,9 @@ from .models import (
     Color,
     Product,
     ProductVariant,
+    Review,
+    ReviewImage,
+    ReviewReport,
     StockAlertSubscription,
 )
 from .pagination import StandardResultsPagination
@@ -29,9 +34,11 @@ from .serializers import (
     ProductDetailSerializer,
     ProductListSerializer,
     ReviewCreateSerializer,
+    ReviewReportCreateSerializer,
     ReviewSerializer,
     StockAlertSubscriptionSerializer,
 )
+from .services import refresh_product_review_stats
 
 # ─── Categories ────────────────────────────────────────────────────────────────
 # Cache key carries an explicit version suffix: if CategorySerializer's output
@@ -183,7 +190,14 @@ class ProductDetailView(generics.RetrieveAPIView):
         return Product.objects.select_related("category", "brand").prefetch_related(
             "images",
             "colors__color",
-            "reviews",
+            # Public storefront: unapproved (pending/rejected) reviews are
+            # never exposed here.
+            Prefetch(
+                "reviews",
+                queryset=Review.objects.filter(is_approved=True).prefetch_related(
+                    "images"
+                ),
+            ),
             Prefetch("flash_sales", queryset=current_sales),
         )
 
@@ -219,8 +233,13 @@ class ProductReviewCreateView(generics.CreateAPIView):
 
     Create a new review for the product identified by slug.
     After saving the review, the product's denormalised `rating` and
-    `reviews_count` fields are recalculated from the full review set so
-    that all aggregated values stay consistent without a separate cron job.
+    `reviews_count` fields are recalculated from the APPROVED reviews only
+    (see shop.services.refresh_product_review_stats). Verified purchasers may
+    also attach up to 5 photos (multipart `images`); anyone else sending
+    photos gets a 400 and nothing is saved. A review is approved
+    immediately only for verified purchasers while
+    REVIEW_AUTO_APPROVE_VERIFIED_PURCHASES is on; otherwise it stays pending
+    until an admin approves it.
 
     Permissions: IsAuthenticated — reviews are now tied to a real `user`
     FK (Task 1.3.1.1) rather than a free-text `name` field, so anonymous
@@ -240,19 +259,6 @@ class ProductReviewCreateView(generics.CreateAPIView):
         if not hasattr(self, "_product"):
             self._product = get_object_or_404(Product, slug=self.kwargs["slug"])
         return self._product
-
-    def _refresh_product_stats(self, product: Product) -> None:
-        """
-        Recompute and persist the product's aggregate rating and review count.
-        Uses a single DB query against the already-saved reviews relation.
-        """
-        stats = product.reviews.aggregate(
-            avg_rating=Avg("rating"),
-            total=Count("id"),
-        )
-        product.rating = round(stats["avg_rating"] or 0.0, 1)
-        product.reviews_count = stats["total"] or 0
-        product.save(update_fields=["rating", "reviews_count"])
 
     def _is_verified_purchase(self, user, product: Product) -> bool:
         """
@@ -283,15 +289,36 @@ class ProductReviewCreateView(generics.CreateAPIView):
         return context
 
     def perform_create(self, serializer) -> None:
-        """Attach the product FK, authenticated user, and verified-purchase
-        status, then update aggregate fields."""
+        """Attach the product FK, authenticated user, verified-purchase status
+        and moderation status, store any photos, then update aggregate fields."""
         product = self._get_product()
-        serializer.save(
-            product=product,
-            user=self.request.user,
-            is_verified_purchase=self._is_verified_purchase(self.request.user, product),
-        )
-        self._refresh_product_stats(product)
+        is_verified = self._is_verified_purchase(self.request.user, product)
+
+        # `images` is a write-only input, not a Review column: it must come out
+        # of validated_data before save() (Review.objects.create() would choke
+        # on the unknown kwarg) and is stored as ReviewImage rows below.
+        images = serializer.validated_data.pop("images", [])
+        if images and not is_verified:
+            # Rejected before ANY write: no Review row, no files on disk.
+            raise serializers.ValidationError(
+                {"images": ["Only verified purchasers can attach photos to a review."]}
+            )
+
+        auto_approve = is_verified and settings.REVIEW_AUTO_APPROVE_VERIFIED_PURCHASES
+        # One transaction so a failure while storing a photo doesn't leave a
+        # published review that is silently missing its photos.
+        with transaction.atomic():
+            review = serializer.save(
+                product=product,
+                user=self.request.user,
+                is_verified_purchase=is_verified,
+                is_approved=auto_approve,
+            )
+            for image in images:
+                ReviewImage.objects.create(review=review, image=image)
+        # A pending review doesn't change the public stats, but recomputing is
+        # cheap and keeps this path correct if the approval rules ever change.
+        refresh_product_review_stats(product)
 
     def create(self, request, *args, **kwargs) -> Response:
         """
@@ -308,9 +335,67 @@ class ProductReviewCreateView(generics.CreateAPIView):
         self.perform_create(serializer)
 
         # Respond with the read serializer so the client gets all fields back.
-        response_data = ReviewSerializer(serializer.instance).data
+        response_data = ReviewSerializer(
+            serializer.instance, context={"request": request}
+        ).data
         headers = self.get_success_headers(response_data)
         return Response(response_data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+# ─── Product reviews — report ──────────────────────────────────────────────────
+# Unresolved reports at which a published review is pulled from public view
+# (is_approved -> False) until an admin looks at it.
+REVIEW_REPORT_AUTO_HIDE_THRESHOLD = 3
+
+
+class ReviewReportCreateView(APIView):
+    """
+    POST /api/reviews/<review_id>/report/
+
+    Flag a published review as spam/offensive/irrelevant. One report per user
+    per review: a repeat is a no-op answered with 200. Only approved (i.e.
+    publicly visible) reviews can be reported; anything else is a 404 so
+    pending reviews can't be probed by id.
+
+    Safety net: once a review has REVIEW_REPORT_AUTO_HIDE_THRESHOLD or more
+    unresolved reports it is un-approved automatically and the product's
+    rating/count are recomputed without it. Re-approving is an explicit admin
+    action (and admins should resolve the reports first — see
+    AdminReviewViewSet.resolve_reports).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, review_id):
+        review = get_object_or_404(
+            Review.objects.select_related("product"), pk=review_id, is_approved=True
+        )
+        serializer = ReviewReportCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        report, created = ReviewReport.objects.get_or_create(
+            review=review,
+            reported_by=request.user,
+            defaults=serializer.validated_data,
+        )
+
+        if created:
+            unresolved = review.reports.filter(resolved=False).count()
+            if unresolved >= REVIEW_REPORT_AUTO_HIDE_THRESHOLD and review.is_approved:
+                review.is_approved = False
+                review.save(update_fields=["is_approved"])
+                refresh_product_review_stats(review.product)
+
+        return Response(
+            {
+                "detail": (
+                    "Report submitted."
+                    if created
+                    else "You have already reported this review."
+                )
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 # ─── Stock alert subscriptions ─────────────────────────────────────────────────

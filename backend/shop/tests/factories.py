@@ -139,3 +139,6 @@ class ReviewFactory(DjangoModelFactory):
     rating = factory.Faker("pyint", min_value=1, max_value=5)
     headline = factory.Faker("sentence", nb_words=6)
     comment = factory.Faker("paragraph", nb_sentences=3)
+    # Approved by default so tests that exercise the public review output don't
+    # have to opt in; moderation tests pass is_approved=False explicitly.
+    is_approved = True

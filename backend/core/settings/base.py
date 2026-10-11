@@ -527,3 +527,12 @@ ALOPEYK_PICKUP_CONTACT_PHONE = config("ALOPEYK_PICKUP_CONTACT_PHONE", default=""
 REQUIRE_REGULATORY_VERIFICATION = config(
     "REQUIRE_REGULATORY_VERIFICATION", default=False, cast=bool
 )
+
+
+# ─── Reviews / moderation ─────────────────────────────────────────────────────
+# When True, a review from a verified purchaser (customer with a DELIVERED order
+# containing the product) is published immediately. Every other review — and
+# every review when this is False — waits for admin approval.
+REVIEW_AUTO_APPROVE_VERIFIED_PURCHASES = config(
+    "REVIEW_AUTO_APPROVE_VERIFIED_PURCHASES", default=True, cast=bool
+)

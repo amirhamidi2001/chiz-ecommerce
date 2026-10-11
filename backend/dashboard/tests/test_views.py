@@ -1272,3 +1272,450 @@ class TestAdminCouponPermissions:
             ).status_code
             == status.HTTP_401_UNAUTHORIZED
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Admin review moderation queue
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ADMIN_REVIEWS_URL = "/api/dashboard/admin/reviews/"
+
+
+def admin_review_detail(pk):
+    return f"/api/dashboard/admin/reviews/{pk}/"
+
+
+@pytest.fixture
+def make_review(db, make_user, make_product):
+    from shop.models import Review
+
+    def _make(product=None, rating=5, is_approved=False, user=None, **extra):
+        user = user or make_user()
+        return Review.objects.create(
+            product=product or make_product(),
+            user=user,
+            name=extra.pop("name", "Reviewer"),
+            rating=rating,
+            headline=extra.pop("headline", "Headline"),
+            comment=extra.pop("comment", "Original comment"),
+            is_approved=is_approved,
+            **extra,
+        )
+
+    return _make
+
+
+class TestAdminReviewModeration:
+    def test_status_filter_pending_and_approved(self, admin_client, make_review):
+        pending = make_review(is_approved=False)
+        approved = make_review(is_approved=True)
+
+        def ids(query):
+            res = admin_client.get(ADMIN_REVIEWS_URL + query)
+            assert res.status_code == status.HTTP_200_OK
+            return {r["id"] for r in res.data["results"]}
+
+        assert ids("?status=pending") == {pending.id}
+        assert ids("?status=approved") == {approved.id}
+        assert ids("") == {pending.id, approved.id}
+
+    def test_list_exposes_moderation_fields(self, admin_client, make_review, make_user):
+        reviewer = make_user(email="reviewer@example.com")
+        make_review(user=reviewer, is_verified_purchase=True)
+
+        row = admin_client.get(ADMIN_REVIEWS_URL).data["results"][0]
+
+        assert row["user_email"] == "reviewer@example.com"
+        assert row["is_approved"] is False
+        assert row["is_verified_purchase"] is True
+        assert "product_name" in row
+
+    def test_approving_a_pending_review_updates_product_rating_and_count(
+        self, admin_client, make_review, make_product
+    ):
+        from shop.services import refresh_product_review_stats
+
+        product = make_product()
+        make_review(product=product, rating=5, is_approved=True)
+        pending = make_review(product=product, rating=2, is_approved=False)
+        refresh_product_review_stats(product)
+        product.refresh_from_db()
+        assert (product.reviews_count, product.rating) == (1, 5.0)
+
+        res = admin_client.patch(
+            admin_review_detail(pending.id), {"is_approved": True}, format="json"
+        )
+
+        assert res.status_code == status.HTTP_200_OK
+        pending.refresh_from_db()
+        assert pending.is_approved is True
+        product.refresh_from_db()
+        assert product.reviews_count == 2
+        assert product.rating == 3.5  # (5 + 2) / 2
+
+    def test_unapproving_removes_review_from_product_rating(
+        self, admin_client, make_review, make_product
+    ):
+        from shop.services import refresh_product_review_stats
+
+        product = make_product()
+        make_review(product=product, rating=4, is_approved=True)
+        bad = make_review(product=product, rating=1, is_approved=True)
+        refresh_product_review_stats(product)
+
+        admin_client.patch(
+            admin_review_detail(bad.id), {"is_approved": False}, format="json"
+        )
+
+        product.refresh_from_db()
+        assert product.reviews_count == 1
+        assert product.rating == 4.0
+
+    def test_deleting_an_approved_review_updates_product_rating(
+        self, admin_client, make_review, make_product
+    ):
+        from shop.services import refresh_product_review_stats
+
+        product = make_product()
+        make_review(product=product, rating=4, is_approved=True)
+        spam = make_review(product=product, rating=1, is_approved=True)
+        refresh_product_review_stats(product)
+
+        res = admin_client.delete(admin_review_detail(spam.id))
+
+        assert res.status_code == status.HTTP_204_NO_CONTENT
+        product.refresh_from_db()
+        assert product.reviews_count == 1
+        assert product.rating == 4.0
+
+    def test_content_fields_cannot_be_changed_through_admin_endpoint(
+        self, admin_client, make_review
+    ):
+        review = make_review(rating=4, comment="Original comment", is_approved=False)
+
+        res = admin_client.patch(
+            admin_review_detail(review.id),
+            {
+                "comment": "Rewritten by admin",
+                "rating": 1,
+                "headline": "Rewritten",
+                "is_approved": True,
+            },
+            format="json",
+        )
+
+        assert res.status_code == status.HTTP_200_OK  # silently ignored, not rejected
+        review.refresh_from_db()
+        assert review.comment == "Original comment"
+        assert review.rating == 4
+        assert review.headline == "Headline"
+        assert review.is_approved is True  # the one writable field did apply
+
+    def test_create_and_put_are_not_allowed(self, admin_client, make_review):
+        review = make_review()
+        assert (
+            admin_client.post(ADMIN_REVIEWS_URL, {}, format="json").status_code
+            == status.HTTP_405_METHOD_NOT_ALLOWED
+        )
+        assert (
+            admin_client.put(
+                admin_review_detail(review.id), {"is_approved": True}, format="json"
+            ).status_code
+            == status.HTTP_405_METHOD_NOT_ALLOWED
+        )
+
+    def test_non_admin_gets_403_on_every_action(self, customer_client, make_review):
+        review = make_review()
+        calls = [
+            customer_client.get(ADMIN_REVIEWS_URL),
+            customer_client.get(admin_review_detail(review.id)),
+            customer_client.patch(
+                admin_review_detail(review.id), {"is_approved": True}, format="json"
+            ),
+            customer_client.delete(admin_review_detail(review.id)),
+        ]
+        assert [r.status_code for r in calls] == [status.HTTP_403_FORBIDDEN] * 4
+
+        review.refresh_from_db()
+        assert review.is_approved is False  # the forbidden PATCH changed nothing
+
+    def test_anonymous_gets_401(self, anon_client):
+        assert (
+            anon_client.get(ADMIN_REVIEWS_URL).status_code
+            == status.HTTP_401_UNAUTHORIZED
+        )
+
+
+class TestAdminReviewReports:
+    @staticmethod
+    def _report(review, user, resolved=False, reason="spam"):
+        from shop.models import ReviewReport
+
+        return ReviewReport.objects.create(
+            review=review, reported_by=user, reason=reason, resolved=resolved
+        )
+
+    def test_has_reports_filter_and_report_count(
+        self, admin_client, make_review, make_user
+    ):
+        reported_twice = make_review(is_approved=True)
+        reported_once = make_review(is_approved=True)
+        only_resolved = make_review(is_approved=True)
+        clean = make_review(is_approved=True)
+        u1, u2 = make_user(), make_user()
+        self._report(reported_twice, u1)
+        self._report(reported_twice, u2)
+        self._report(reported_once, u1)
+        self._report(only_resolved, u1, resolved=True)
+
+        res = admin_client.get(ADMIN_REVIEWS_URL + "?has_reports=true")
+
+        assert res.status_code == status.HTTP_200_OK
+        counts = {r["id"]: r["report_count"] for r in res.data["results"]}
+        assert counts == {reported_twice.id: 2, reported_once.id: 1}
+
+        # Unfiltered list reports an accurate count (unresolved only) per row.
+        all_counts = {
+            r["id"]: r["report_count"]
+            for r in admin_client.get(ADMIN_REVIEWS_URL).data["results"]
+        }
+        assert all_counts[reported_twice.id] == 2
+        assert all_counts[only_resolved.id] == 0
+        assert all_counts[clean.id] == 0
+
+    def test_has_reports_combines_with_status_filter(
+        self, admin_client, make_review, make_user
+    ):
+        hidden = make_review(is_approved=False)
+        live = make_review(is_approved=True)
+        user = make_user()
+        self._report(hidden, user)
+        self._report(live, user)
+
+        res = admin_client.get(ADMIN_REVIEWS_URL + "?has_reports=true&status=pending")
+
+        assert {r["id"] for r in res.data["results"]} == {hidden.id}
+
+    def test_resolving_reports_marks_them_resolved_without_reapproving(
+        self, admin_client, make_review, make_user, make_product
+    ):
+        from shop.models import ReviewReport
+        from shop.services import refresh_product_review_stats
+
+        product = make_product()
+        review = make_review(product=product, rating=1, is_approved=False)
+        other = make_review(is_approved=True)
+        for _ in range(3):
+            self._report(review, make_user())
+        other_report = self._report(other, make_user())
+        refresh_product_review_stats(product)
+
+        res = admin_client.post(f"{admin_review_detail(review.id)}resolve-reports/")
+
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data == {"resolved": 3}
+        assert not ReviewReport.objects.filter(review=review, resolved=False).exists()
+        other_report.refresh_from_db()
+        assert other_report.resolved is False  # other reviews' reports untouched
+
+        review.refresh_from_db()
+        assert review.is_approved is False  # NOT re-approved as a side effect
+        product.refresh_from_db()
+        assert product.reviews_count == 0  # public stats unchanged by resolving
+
+        # Re-approval is its own explicit step.
+        admin_client.patch(
+            admin_review_detail(review.id), {"is_approved": True}, format="json"
+        )
+        review.refresh_from_db()
+        product.refresh_from_db()
+        assert review.is_approved is True
+        assert product.reviews_count == 1
+
+    def test_resolved_reports_no_longer_show_in_queue(
+        self, admin_client, make_review, make_user
+    ):
+        review = make_review(is_approved=True)
+        self._report(review, make_user())
+
+        admin_client.post(f"{admin_review_detail(review.id)}resolve-reports/")
+
+        res = admin_client.get(ADMIN_REVIEWS_URL + "?has_reports=true")
+        assert res.data["results"] == []
+
+    def test_non_admin_cannot_resolve_reports(
+        self, customer_client, make_review, make_user
+    ):
+        from shop.models import ReviewReport
+
+        review = make_review(is_approved=True)
+        self._report(review, make_user())
+
+        res = customer_client.post(f"{admin_review_detail(review.id)}resolve-reports/")
+
+        assert res.status_code == status.HTTP_403_FORBIDDEN
+        assert ReviewReport.objects.filter(review=review, resolved=False).count() == 1
+
+    def test_post_to_collection_is_still_405(self, admin_client):
+        res = admin_client.post(ADMIN_REVIEWS_URL, {}, format="json")
+        assert res.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+
+class TestAdminReviewStoreResponse:
+    def test_setting_store_response_stamps_current_time(
+        self, admin_client, make_review
+    ):
+        from django.utils import timezone
+
+        review = make_review(is_approved=True)
+        assert review.store_response == ""
+        assert review.store_response_at is None
+
+        before = timezone.now()
+        res = admin_client.patch(
+            admin_review_detail(review.id),
+            {"store_response": "Thanks for the feedback!"},
+            format="json",
+        )
+        after = timezone.now()
+
+        assert res.status_code == status.HTTP_200_OK
+        review.refresh_from_db()
+        assert review.store_response == "Thanks for the feedback!"
+        assert before <= review.store_response_at <= after
+        assert res.data["store_response"] == "Thanks for the feedback!"
+        assert res.data["store_response_at"] is not None
+
+    def test_editing_the_response_restamps_the_time(self, admin_client, make_review):
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from shop.models import Review
+
+        review = make_review(is_approved=True)
+        admin_client.patch(
+            admin_review_detail(review.id), {"store_response": "First"}, format="json"
+        )
+        # Pretend the first reply was posted a day ago so a stale timestamp
+        # is unmistakable.
+        old = timezone.now() - timedelta(days=1)
+        Review.objects.filter(pk=review.pk).update(store_response_at=old)
+
+        before = timezone.now()
+        admin_client.patch(
+            admin_review_detail(review.id), {"store_response": "Second"}, format="json"
+        )
+
+        review.refresh_from_db()
+        assert review.store_response == "Second"
+        assert review.store_response_at >= before
+        assert review.store_response_at > old
+
+    def test_resaving_identical_text_does_not_restamp(self, admin_client, make_review):
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from shop.models import Review
+
+        review = make_review(is_approved=True)
+        admin_client.patch(
+            admin_review_detail(review.id), {"store_response": "Same"}, format="json"
+        )
+        old = timezone.now() - timedelta(days=1)
+        Review.objects.filter(pk=review.pk).update(store_response_at=old)
+
+        admin_client.patch(
+            admin_review_detail(review.id), {"store_response": "Same"}, format="json"
+        )
+
+        review.refresh_from_db()
+        assert review.store_response_at == old
+
+    def test_clearing_the_response_clears_the_timestamp(
+        self, admin_client, make_review
+    ):
+        review = make_review(is_approved=True)
+        admin_client.patch(
+            admin_review_detail(review.id), {"store_response": "Oops"}, format="json"
+        )
+
+        admin_client.patch(
+            admin_review_detail(review.id), {"store_response": "   "}, format="json"
+        )
+
+        review.refresh_from_db()
+        assert review.store_response == ""
+        assert review.store_response_at is None
+
+    def test_only_store_response_applies_when_other_fields_are_sent_too(
+        self, admin_client, make_review
+    ):
+        review = make_review(
+            rating=4, comment="Original comment", headline="Headline", is_approved=False
+        )
+
+        res = admin_client.patch(
+            admin_review_detail(review.id),
+            {
+                "store_response": "We're sorry to hear that.",
+                "comment": "Rewritten by admin",
+                "rating": 1,
+                "headline": "Rewritten",
+                "name": "Someone else",
+            },
+            format="json",
+        )
+
+        assert res.status_code == status.HTTP_200_OK
+        review.refresh_from_db()
+        assert review.store_response == "We're sorry to hear that."
+        assert review.store_response_at is not None
+        assert review.comment == "Original comment"
+        assert review.rating == 4
+        assert review.headline == "Headline"
+        assert review.name == "Reviewer"
+        assert review.is_approved is False  # untouched
+
+    def test_store_response_at_cannot_be_set_by_the_client(
+        self, admin_client, make_review
+    ):
+        review = make_review(is_approved=True)
+
+        admin_client.patch(
+            admin_review_detail(review.id),
+            {"store_response_at": "2020-01-01T00:00:00Z"},
+            format="json",
+        )
+
+        review.refresh_from_db()
+        assert review.store_response_at is None
+
+    def test_moderation_patch_without_store_response_leaves_it_alone(
+        self, admin_client, make_review
+    ):
+        review = make_review(is_approved=False)
+        admin_client.patch(
+            admin_review_detail(review.id), {"store_response": "Hi"}, format="json"
+        )
+        review.refresh_from_db()
+        stamped = review.store_response_at
+
+        admin_client.patch(
+            admin_review_detail(review.id), {"is_approved": True}, format="json"
+        )
+
+        review.refresh_from_db()
+        assert review.is_approved is True
+        assert review.store_response == "Hi"
+        assert review.store_response_at == stamped
+
+    def test_non_admin_cannot_set_store_response(self, customer_client, make_review):
+        review = make_review(is_approved=True)
+
+        res = customer_client.patch(
+            admin_review_detail(review.id), {"store_response": "Hi"}, format="json"
+        )
+
+        assert res.status_code == status.HTTP_403_FORBIDDEN
+        review.refresh_from_db()
+        assert review.store_response == ""

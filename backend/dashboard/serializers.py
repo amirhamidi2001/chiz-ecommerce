@@ -594,6 +594,18 @@ class AdminOrderStatusSerializer(serializers.ModelSerializer):
 class AdminReviewSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     product_id = serializers.IntegerField(source="product.id", read_only=True)
+    user_email = serializers.CharField(
+        source="user.email", read_only=True, default=None
+    )
+    report_count = serializers.SerializerMethodField()
+
+    def get_report_count(self, obj) -> int:
+        """Unresolved reports. Uses the queryset annotation when present
+        (AdminReviewViewSet) to avoid a query per row."""
+        annotated = getattr(obj, "unresolved_report_count", None)
+        if annotated is not None:
+            return annotated
+        return obj.reports.filter(resolved=False).count()
 
     class Meta:
         model = Review
@@ -602,13 +614,37 @@ class AdminReviewSerializer(serializers.ModelSerializer):
             "product",
             "product_id",
             "product_name",
+            "user",
+            "user_email",
             "name",
             "rating",
             "headline",
             "comment",
+            "is_verified_purchase",
+            "is_approved",
+            "report_count",
+            "store_response",
+            "store_response_at",
             "created_at",
         ]
-        read_only_fields = ["id", "created_at", "product_name", "product_id"]
+        # An admin may moderate (is_approved) and post the store's own reply
+        # (store_response — their content, not the customer's), but never
+        # rewrite a customer's actual review. DRF silently ignores read-only
+        # fields on write, so a PATCH of `comment`/`rating` is a no-op.
+        # `store_response_at` is stamped by the view, never client-supplied.
+        read_only_fields = [
+            "id",
+            "product",
+            "user",
+            "name",
+            "rating",
+            "headline",
+            "comment",
+            "is_verified_purchase",
+            "report_count",
+            "store_response_at",
+            "created_at",
+        ]
 
 
 # ─── Admin: Contact Messages ─────────────────────────────────────────────────

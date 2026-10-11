@@ -8,6 +8,7 @@ from blog.models import Post as BlogPost
 from contact.models import ContactMessage
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Count, Q
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -18,7 +19,7 @@ from order.services.state_machine import is_valid_transition
 from promotions.models import Coupon
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import MethodNotAllowed, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -26,6 +27,7 @@ from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from shop.models import Brand, Category, Product, ProductVariant, Review, StockMovement
+from shop.services import refresh_product_review_stats
 
 from . import services
 from .filters import (
@@ -638,7 +640,22 @@ class AdminOrderViewSet(viewsets.ModelViewSet):
 
 
 class AdminReviewViewSet(viewsets.ModelViewSet):
-    """Admin review moderation — list and delete only."""
+    """
+    Admin review moderation queue.
+
+    GET    /admin/reviews/?status=pending|approved   — list (all when omitted)
+    GET    /admin/reviews/?has_reports=true          — only reviews with
+                                                       unresolved customer reports
+    PATCH  /admin/reviews/<id>/  {"is_approved": bool} — approve / unapprove
+    PATCH  /admin/reviews/<id>/  {"store_response": str} — post / edit / clear the
+                                 store's public reply (stamps store_response_at)
+    POST   /admin/reviews/<id>/resolve-reports/        — mark its reports resolved
+    DELETE /admin/reviews/<id>/                        — remove spam/abuse
+
+    Only `is_approved` and `store_response` are writable (see AdminReviewSerializer). Every change
+    that affects which reviews are public also refreshes the product's
+    denormalised rating/reviews_count.
+    """
 
     permission_classes = [IsAdminOrSuperuser]
     pagination_class = DashboardPagination
@@ -647,14 +664,62 @@ class AdminReviewViewSet(viewsets.ModelViewSet):
         filters.SearchFilter,
         filters.OrderingFilter,
     ]
-    search_fields = ["name", "comment", "headline", "product__name"]
+    search_fields = ["name", "comment", "headline", "product__name", "user__email"]
     ordering_fields = ["created_at", "rating"]
     ordering = ["-created_at"]
     serializer_class = AdminReviewSerializer
-    http_method_names = ["get", "delete", "head", "options"]
+    # No create/PUT via the admin API. POST is enabled only for the
+    # resolve-reports action; create() below rejects it on the collection.
+    # DELETE stays (spam removal; the admin reviews page already uses it).
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        return Review.objects.select_related("product")
+        qs = Review.objects.select_related("product", "user").annotate(
+            unresolved_report_count=Count(
+                "reports", filter=Q(reports__resolved=False), distinct=True
+            )
+        )
+        params = self.request.query_params
+        status_param = params.get("status")
+        if status_param == "pending":
+            qs = qs.filter(is_approved=False)
+        elif status_param == "approved":
+            qs = qs.filter(is_approved=True)
+        if params.get("has_reports", "").lower() == "true":
+            qs = qs.filter(unresolved_report_count__gt=0)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        raise MethodNotAllowed(request.method)
+
+    def perform_update(self, serializer):
+        extra = {}
+        if "store_response" in serializer.validated_data:
+            new_response = serializer.validated_data["store_response"]
+            # Only a real change re-stamps the response time; re-saving the
+            # same text must not make an old reply look freshly posted.
+            # Clearing the response clears its timestamp.
+            if new_response != serializer.instance.store_response:
+                extra["store_response_at"] = timezone.now() if new_response else None
+        instance = serializer.save(**extra)
+        refresh_product_review_stats(instance.product)
+
+    def perform_destroy(self, instance):
+        product = instance.product
+        instance.delete()
+        refresh_product_review_stats(product)
+
+    @action(detail=True, methods=["post"], url_path="resolve-reports")
+    def resolve_reports(self, request, pk=None):
+        """
+        Mark every unresolved report on this review as resolved, i.e. an admin
+        has looked at them. Deliberately does NOT touch `is_approved`: a review
+        can be reported and still deserve to stay hidden, and re-approving is
+        an explicit separate PATCH.
+        """
+        review = self.get_object()
+        resolved = review.reports.filter(resolved=False).update(resolved=True)
+        return Response({"resolved": resolved}, status=status.HTTP_200_OK)
 
 
 class AdminContactMessageViewSet(viewsets.ModelViewSet):

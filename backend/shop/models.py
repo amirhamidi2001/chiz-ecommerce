@@ -604,10 +604,19 @@ class Review(models.Model):
         related_name="reviews",
     )
     is_verified_purchase = models.BooleanField(default=False)
+    # Moderation gate: only approved reviews are shown publicly and counted
+    # in Product.rating / Product.reviews_count. See ProductReviewCreateView
+    # (auto-approval for verified purchases) and the admin moderation queue.
+    is_approved = models.BooleanField(default=False)
     name = models.CharField(max_length=200)
     rating = models.PositiveSmallIntegerField(choices=[(i, i) for i in range(1, 6)])
     headline = models.CharField(max_length=300, blank=True)
     comment = models.TextField()
+    # Official store reply: a single response per review (deliberately not a
+    # thread). Written by admins only via the dashboard; `store_response_at` is
+    # set server-side whenever the response text changes.
+    store_response = models.TextField(blank=True)
+    store_response_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -630,3 +639,50 @@ class Review(models.Model):
 
     def __str__(self):
         return f"{self.name} — {self.product.name} ({self.rating}★)"
+
+
+class ReviewImage(models.Model):
+    """A photo attached to a review (verified purchasers only)."""
+
+    review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name="images")
+    image = models.ImageField(upload_to="reviews/images/")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Stable order for display: the order the customer uploaded them.
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"Image for review #{self.review_id}"
+
+
+class ReviewReport(models.Model):
+    """A customer's flag on an (already published) review."""
+
+    class Reason(models.TextChoices):
+        SPAM = "spam", "Spam or fake"
+        OFFENSIVE = "offensive", "Offensive content"
+        IRRELEVANT = "irrelevant", "Not relevant to the product"
+        OTHER = "other", "Other"
+
+    review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name="reports")
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="review_reports",
+    )
+    reason = models.CharField(max_length=20, choices=Reason.choices)
+    details = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+        # One report per user per review. As with Review's (product, user)
+        # constraint, PostgreSQL treats NULLs as distinct, so reports whose
+        # reporter account was later deleted (SET_NULL) don't collide.
+        unique_together = ("review", "reported_by")
+
+    def __str__(self):
+        return f"Report on review #{self.review_id} — {self.reason}"

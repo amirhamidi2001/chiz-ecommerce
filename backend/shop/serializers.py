@@ -9,8 +9,14 @@ from .models import (
     ProductImage,
     ProductVariant,
     Review,
+    ReviewImage,
+    ReviewReport,
     StockAlertSubscription,
 )
+from .validators import validate_review_image
+
+# Max photos per review (enforced by ReviewCreateSerializer.images).
+MAX_REVIEW_IMAGES = 5
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -112,9 +118,16 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 
 
 # ─── Review — read (used inside product detail & review list responses) ───────
+class ReviewImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReviewImage
+        fields = ("id", "image")
+
+
 class ReviewSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(read_only=True)
     is_verified_purchase = serializers.BooleanField(read_only=True)
+    images = ReviewImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Review
@@ -126,8 +139,12 @@ class ReviewSerializer(serializers.ModelSerializer):
             "headline",
             "comment",
             "is_verified_purchase",
+            "images",
+            "store_response",
+            "store_response_at",
             "created_at",
         )
+        read_only_fields = ("store_response", "store_response_at")
 
 
 # ─── Review — write (validates and accepts new review submissions) ────────────
@@ -143,9 +160,24 @@ class ReviewCreateSerializer(serializers.ModelSerializer):
     reviews under an arbitrary display name.
     """
 
+    # Photos are write-only and not a Review column: the view pops them from
+    # validated_data and stores them as ReviewImage rows (verified purchasers
+    # only). `max_length` caps the count per review.
+    images = serializers.ListField(
+        child=serializers.ImageField(),
+        required=False,
+        max_length=MAX_REVIEW_IMAGES,
+        write_only=True,
+    )
+
     class Meta:
         model = Review
-        fields = ("rating", "headline", "comment")
+        fields = ("rating", "headline", "comment", "images")
+
+    def validate_images(self, value):
+        for image in value:
+            validate_review_image(image)
+        return value
 
     def validate(self, attrs):
         """
@@ -205,6 +237,12 @@ class ReviewCreateSerializer(serializers.ModelSerializer):
 
     def validate_headline(self, value: str) -> str:
         return value.strip()
+
+
+# ─── Review report — write ────────────────────────────────────────────────────
+class ReviewReportCreateSerializer(serializers.Serializer):
+    reason = serializers.ChoiceField(choices=ReviewReport.Reason.choices)
+    details = serializers.CharField(required=False, allow_blank=True, max_length=1000)
 
 
 # ─── Product list serializer — lightweight, no nested reviews ─────────────────

@@ -15,6 +15,7 @@ the entire point of having a check digit).
 """
 
 from django.core.exceptions import ValidationError
+from PIL import Image
 
 EAN13_LENGTH = 13
 
@@ -65,4 +66,44 @@ def validate_ean13(value):
         raise ValidationError(
             "Enter a valid EAN-13 barcode (13 digits with a valid check digit).",
             code="invalid_ean13",
+        )
+
+
+# ─── Review photos ────────────────────────────────────────────────────────────
+# Same policy as the avatar upload (dashboard.serializers.AvatarUploadSerializer):
+# JPEG / PNG / WebP, max 5 MB. Unlike that check, which reads `content_type`,
+# this one opens the file with Pillow and looks at the format it actually
+# contains, so neither a client-supplied Content-Type header nor a file
+# extension can get a non-image (or a disallowed image type such as SVG, which
+# can carry script) past it.
+REVIEW_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+REVIEW_IMAGE_ALLOWED_FORMATS = ("JPEG", "PNG", "WEBP")
+
+
+def validate_review_image(file) -> None:
+    """Raise ValidationError unless `file` is a real JPEG/PNG/WebP <= 5 MB."""
+    if file.size > REVIEW_IMAGE_MAX_BYTES:
+        raise ValidationError(
+            f"Image must be under {REVIEW_IMAGE_MAX_BYTES // (1024 * 1024)} MB.",
+            code="image_too_large",
+        )
+
+    try:
+        file.seek(0)
+        with Image.open(file) as img:
+            img.verify()
+            detected_format = img.format
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
+        # OSError covers PIL.UnidentifiedImageError and truncated/corrupt data.
+        raise ValidationError(
+            "Upload a valid image. The file you uploaded is not an image or is corrupted.",
+            code="invalid_image",
+        )
+    finally:
+        file.seek(0)
+
+    if detected_format not in REVIEW_IMAGE_ALLOWED_FORMATS:
+        raise ValidationError(
+            "Only JPEG, PNG and WebP images are allowed.",
+            code="unsupported_image_format",
         )

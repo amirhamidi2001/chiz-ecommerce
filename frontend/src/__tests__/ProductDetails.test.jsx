@@ -579,4 +579,47 @@ describe('ProductDetails', () => {
       expect(await screen.findByText(/back in stock/i)).toBeInTheDocument();
     });
   });
+
+  describe('store response on reviews', () => {
+    const REVIEW = {
+      id: 1,
+      user_id: 9,
+      name: 'Alice',
+      rating: 4,
+      headline: 'Nice',
+      comment: 'Lovely shade.',
+      is_verified_purchase: true,
+      created_at: '2026-09-01T10:00:00Z',
+      images: [],
+      store_response: '',
+      store_response_at: null,
+    };
+
+    const openReviews = async (reviews) => {
+      const user = userEvent.setup();
+      api.getProductDetails.mockReturnValue(resolveWith({ ...MOCK_PRODUCT, reviews }));
+      renderProductDetails();
+      await user.click(await screen.findByRole('button', { name: /reviews \(/i }));
+    };
+
+    it('renders a labelled, dated response box when the store has replied', async () => {
+      await openReviews([
+        { ...REVIEW, store_response: 'Thank you, Alice!', store_response_at: '2026-09-03T09:00:00Z' },
+      ]);
+
+      const box = await screen.findByTestId('store-response');
+      expect(within(box).getByText(/response from chiz/i)).toBeInTheDocument();
+      expect(within(box).getByText('Thank you, Alice!')).toBeInTheDocument();
+      expect(within(box).getByText('September 3, 2026')).toBeInTheDocument();
+      // The customer's own text is still shown separately.
+      expect(screen.getByText('Lovely shade.')).toBeInTheDocument();
+    });
+
+    it('renders no response box for reviews without a reply', async () => {
+      await openReviews([REVIEW]);
+
+      expect(await screen.findByText('Lovely shade.')).toBeInTheDocument();
+      expect(screen.queryByTestId('store-response')).not.toBeInTheDocument();
+    });
+  });
 });
