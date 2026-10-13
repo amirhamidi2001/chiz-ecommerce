@@ -6,13 +6,20 @@ Signal receivers for the shop app. Wired via ShopConfig.ready()
 """
 
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django_redis import get_redis_connection
 from promotions.models import FlashSale
 
-from .models import Category, Product, ProductVariant, StockMovement
-from .tasks import notify_stock_alert_subscribers
+from .models import (
+    Category,
+    Product,
+    ProductPriceSnapshot,
+    ProductVariant,
+    StockMovement,
+)
+from .tasks import notify_price_drop_subscribers, notify_stock_alert_subscribers
 from .views import CATEGORY_TREE_CACHE_KEY
 
 
@@ -86,14 +93,16 @@ def invalidate_cache_on_product_save(sender, **kwargs):
 @receiver(pre_save, sender=ProductVariant)
 def _capture_previous_variant_state(sender, instance, **kwargs):
     """
-    Capture the pre-save price so post_save can tell whether it actually
-    changed. Stock is deliberately NOT captured here — see
+    Capture the pre-save price and active flag so post_save can tell
+    whether either actually changed (is_active matters to the price-drop
+    detection below: it decides which variants count toward a product's
+    lowest price). Stock is deliberately NOT captured here — see
     invalidate_cache_on_variant_save's docstring for why stock-only
     changes don't trigger invalidation.
     """
     if instance.pk:
         try:
-            instance._previous = ProductVariant.objects.only("price").get(
+            instance._previous = ProductVariant.objects.only("price", "is_active").get(
                 pk=instance.pk
             )
         except ProductVariant.DoesNotExist:
@@ -167,3 +176,66 @@ def handle_stock_increase(sender, instance, created, **kwargs):
     # perspective and shouldn't spam anyone.
     if stock_before <= 0 and instance.stock_after > 0:
         notify_stock_alert_subscribers.delay(variant.id)
+
+
+# ─── Price-drop notifications ──────────────────────────────────────────────────
+@receiver(post_save, sender=ProductVariant)
+def handle_variant_price_change(sender, instance, created, **kwargs):
+    """
+    Keep the product's ProductPriceSnapshot baseline current and, when a
+    variant change genuinely LOWERS the product's lowest_active_price,
+    queue notify_price_drop_subscribers.
+
+    "The price" of a multi-variant product is its lowest active variant
+    price (Product.lowest_active_price, the storefront's "starting at"),
+    so what matters is whether THAT figure fell relative to the newest
+    snapshot — not whether this particular variant got cheaper. Cutting a
+    variant that is still dearer than the cheapest one is no drop at all.
+
+    Behaviours worth knowing:
+    - Saves that change neither price nor is_active (every order line's
+      stock decrement, every restock) return immediately. Besides saving
+      work on the order path, this is what keeps a restock from ever
+      looking like a price change.
+    - A newly CREATED variant never notifies ("a product having a price
+      for the first time" is not a drop), but it does record a baseline
+      if there is none / the lowest price moved, so the product's NEXT
+      real change has something to be compared against.
+    - Increases (or any other change) record the new baseline silently.
+    - Not detected: bulk .update() / bulk_create (no signals fire), and
+      flash-sale discounts (time-windowed; no variant save).
+    - The task is queued via transaction.on_commit so a rolled-back save
+      (e.g. a later admin inline error) can't announce a drop that never
+      persisted. Prices go as decimal strings: task args are JSON.
+    """
+    previous = getattr(instance, "_previous", None)
+    if (
+        not created
+        and previous is not None
+        and previous.price == instance.price
+        and previous.is_active == instance.is_active
+    ):
+        return
+
+    product = instance.product
+    current_lowest = product.lowest_active_price
+    if current_lowest is None:
+        return
+
+    last_snapshot = product.price_snapshots.first()
+    if last_snapshot is None:
+        # First time we've seen a price for this product: baseline only.
+        ProductPriceSnapshot.objects.create(product=product, price=current_lowest)
+        return
+    if current_lowest == last_snapshot.price:
+        return
+
+    ProductPriceSnapshot.objects.create(product=product, price=current_lowest)
+    if current_lowest < last_snapshot.price and not created:
+        product_id = product.id
+        old_price, new_price = str(last_snapshot.price), str(current_lowest)
+        transaction.on_commit(
+            lambda: notify_price_drop_subscribers.delay(
+                product_id, old_price, new_price
+            )
+        )

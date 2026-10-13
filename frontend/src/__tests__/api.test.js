@@ -734,6 +734,35 @@ describe('Order API', () => {
 describe('dashboardAPI', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  // ── Wishlist → cart ───────────────────────────────────────────────────────
+  it('moveWishlistItemToCart(id) — POSTs an empty body when no variant is given', async () => {
+    mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith({ detail: 'Moved to cart.' }));
+    await dashboardAPI.moveWishlistItemToCart(7);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+      '/dashboard/wishlist/7/move-to-cart/',
+      {},
+    );
+  });
+
+  it('moveWishlistItemToCart(id, variantId) — sends the chosen variant_id', async () => {
+    mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith({ detail: 'Moved to cart.' }));
+    await dashboardAPI.moveWishlistItemToCart(7, 42);
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+      '/dashboard/wishlist/7/move-to-cart/',
+      { variant_id: 42 },
+    );
+  });
+
+  it('moveAllWishlistToCart() — POSTs /dashboard/wishlist/move-all-to-cart/', async () => {
+    mockAxiosInstance.post.mockResolvedValueOnce(
+      resolvedWith({ moved: [], needs_selection: [], unavailable: [] }),
+    );
+    await dashboardAPI.moveAllWishlistToCart();
+    expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+      '/dashboard/wishlist/move-all-to-cart/',
+    );
+  });
+
   // ── Profile ───────────────────────────────────────────────────────────────
   it('getProfile() — GETs /dashboard/profile/', async () => {
     mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith({}));

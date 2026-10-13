@@ -392,6 +392,26 @@ export const dashboardAPI = {
   getWishlist: () => api.get('/dashboard/wishlist/'),
   addToWishlist: (productId) => api.post('/dashboard/wishlist/', { product_id: productId }),
   removeFromWishlist: (id) => api.delete(`/dashboard/wishlist/${id}/`),
+  /**
+   * POST /dashboard/wishlist/{id}/move-to-cart/   Body: { variant_id? }
+   *   200 → moved (the wishlist row is gone, the cart has the variant)
+   *   300 → this product has several purchasable variants and none was
+   *         chosen. axios REJECTS non-2xx, so callers see this in their
+   *         catch: err.response.status === 300 and
+   *         err.response.data = { detail, needs_selection: true, variants: [...] }.
+   *         Re-send with { variant_id } to finish.
+   *   400 → product unavailable ({ detail }) or a bad/stale variant_id ({ variant_id })
+   *   404 → not on this visitor's wishlist (e.g. already moved)
+   */
+  moveWishlistItemToCart: (id, variantId) =>
+    api.post(`/dashboard/wishlist/${id}/move-to-cart/`, variantId ? { variant_id: variantId } : {}),
+  /**
+   * POST /dashboard/wishlist/move-all-to-cart/ → always 200:
+   *   { moved: [name], needs_selection: [{ wishlist_item_id, product, variants }],
+   *     unavailable: [{ wishlist_item_id, product }] }
+   * Unambiguous items are moved; the rest are reported, not skipped silently.
+   */
+  moveAllWishlistToCart: () => api.post('/dashboard/wishlist/move-all-to-cart/'),
 
   // Addresses
   getAddresses: () => api.get('/dashboard/addresses/'),

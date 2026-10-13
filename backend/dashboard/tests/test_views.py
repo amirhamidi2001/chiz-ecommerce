@@ -262,8 +262,16 @@ class TestWishlistViewSet:
         res = customer_client.get(WISHLIST_URL)
         assert len(res.data.get("results", res.data)) == 0
 
-    def test_unauthenticated_returns_401(self, anon_client):
-        assert anon_client.get(WISHLIST_URL).status_code == status.HTTP_401_UNAUTHORIZED
+    def test_anonymous_get_returns_200_with_empty_list(self, anon_client):
+        """
+        Replaces test_unauthenticated_returns_401: the wishlist is now
+        AllowAny (guests get a session-based wishlist), so that test's
+        premise is exactly what this task removes. Full guest coverage
+        lives in test_wishlist_guest.py.
+        """
+        res = anon_client.get(WISHLIST_URL)
+        assert res.status_code == status.HTTP_200_OK
+        assert len(res.data.get("results", res.data)) == 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════

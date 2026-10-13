@@ -12,6 +12,7 @@ from rest_framework import serializers
 from shop.models import Brand, Category, Product, Review, StockMovement
 
 from .models import Address, Wishlist
+from .services import get_wishlist_owner_kwargs
 
 User = get_user_model()
 
@@ -201,8 +202,8 @@ class WishlistSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "added_at"]
 
     def validate(self, attrs):
-        user = self.context["request"].user
-        if Wishlist.objects.filter(user=user, product=attrs["product"]).exists():
+        owner = get_wishlist_owner_kwargs(self.context["request"])
+        if Wishlist.objects.filter(product=attrs["product"], **owner).exists():
             raise serializers.ValidationError(
                 {"product_id": "Product is already in your wishlist."}
             )

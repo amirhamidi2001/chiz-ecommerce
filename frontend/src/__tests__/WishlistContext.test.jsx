@@ -61,8 +61,12 @@ const WishlistConsumer = ({ onMount } = {}) => {
 // ─── beforeEach / afterEach ────────────────────────────────────────────────────
 beforeEach(() => {
   vi.clearAllMocks();
-  // Default: unauthenticated; individual tests override as needed
+  // Default: guest visitor; individual tests override as needed. The
+  // context no longer reads isAuthenticated() at all (guest wishlists are
+  // session-based), but the mock stays so tests can still model both states.
   isAuthenticated.mockReturnValue(false);
+  // Every visitor hits the API now, so give the fetch a harmless default.
+  dashboardAPI.getWishlist.mockResolvedValue({ data: [] });
   // Prevent JSDOM noise from window.location assignments
   Object.defineProperty(window, 'location', {
     writable: true,
@@ -99,7 +103,7 @@ describe('useWishlist – module contract', () => {
 // 2. Initial state (unauthenticated)
 // ═════════════════════════════════════════════════════════════════════════════
 describe('WishlistProvider – initial state', () => {
-  it('exposes empty wishlist, loading=false, error=null on first render when unauthenticated', async () => {
+  it('exposes empty wishlist, loading=false, error=null on first render for a guest with an empty wishlist', async () => {
     await renderWithProvider(<WishlistConsumer />);
 
     expect(screen.getByTestId('wishlist').textContent).toBe('[]');
@@ -113,12 +117,16 @@ describe('WishlistProvider – initial state', () => {
 // 3. fetchWishlist
 // ═════════════════════════════════════════════════════════════════════════════
 describe('fetchWishlist', () => {
-  it('clears wishlist and returns early when user is not authenticated', async () => {
+  it('calls the API for a guest visitor too (no auth gate) and shows their session wishlist', async () => {
     isAuthenticated.mockReturnValue(false);
+    dashboardAPI.getWishlist.mockResolvedValueOnce({ data: [ITEM_1] });
+
     await renderWithProvider(<WishlistConsumer />);
 
-    expect(dashboardAPI.getWishlist).not.toHaveBeenCalled();
-    expect(screen.getByTestId('wishlist').textContent).toBe('[]');
+    expect(dashboardAPI.getWishlist).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.getByTestId('count').textContent).toBe('1'),
+    );
   });
 
   it('populates wishlist from a paginated { results: [...] } response', async () => {
@@ -406,8 +414,9 @@ describe('getWishlistItemId', () => {
 // 7. addToWishlist
 // ═════════════════════════════════════════════════════════════════════════════
 describe('addToWishlist', () => {
-  it('redirects to /login and returns failure when unauthenticated', async () => {
+  it('adds for a guest via the API without redirecting to /login', async () => {
     isAuthenticated.mockReturnValue(false);
+    dashboardAPI.addToWishlist.mockResolvedValueOnce({ data: ITEM_1 });
 
     let ctx;
     const Consumer = () => { ctx = useWishlist(); return null; };
@@ -418,12 +427,10 @@ describe('addToWishlist', () => {
       result = await ctx.addToWishlist(1);
     });
 
-    expect(window.location.href).toBe('/login');
-    expect(result).toEqual({
-      success: false,
-      message: 'Please log in to save items to your wishlist.',
-    });
-    expect(dashboardAPI.addToWishlist).not.toHaveBeenCalled();
+    expect(window.location.href).toBe('/');
+    expect(result).toEqual({ success: true, message: 'Added to wishlist!' });
+    expect(dashboardAPI.addToWishlist).toHaveBeenCalledWith(1);
+    expect(ctx.isInWishlist(1)).toBe(true);
   });
 
   it('short-circuits with success if product is already in wishlist', async () => {
@@ -630,20 +637,30 @@ describe('removeFromWishlist', () => {
 // 9. toggleWishlist
 // ═════════════════════════════════════════════════════════════════════════════
 describe('toggleWishlist', () => {
-  it('redirects to /login and returns failure when unauthenticated', async () => {
+  it('toggles for a guest via the API without redirecting to /login', async () => {
     isAuthenticated.mockReturnValue(false);
+    dashboardAPI.addToWishlist.mockResolvedValueOnce({ data: ITEM_1 });
+    dashboardAPI.removeFromWishlist.mockResolvedValueOnce({});
 
     let ctx;
     const Consumer = () => { ctx = useWishlist(); return null; };
     await renderWithProvider(<Consumer />);
 
-    let result;
+    let added;
     await act(async () => {
-      result = await ctx.toggleWishlist(1);
+      added = await ctx.toggleWishlist(1);
     });
+    expect(added).toEqual({ success: true, message: 'Added to wishlist!' });
+    expect(ctx.wishlistCount).toBe(1);
 
-    expect(window.location.href).toBe('/login');
-    expect(result).toEqual({ success: false, message: 'Please log in.' });
+    let removed;
+    await act(async () => {
+      removed = await ctx.toggleWishlist(1);
+    });
+    expect(removed).toEqual({ success: true, message: 'Removed from wishlist.' });
+    expect(ctx.wishlistCount).toBe(0);
+
+    expect(window.location.href).toBe('/');
   });
 
   it('calls removeFromWishlist when product IS already in wishlist', async () => {
@@ -918,3 +935,59 @@ describe('integration: full add → remove cycle', () => {
     expect(dashboardAPI.removeFromWishlist).toHaveBeenCalledTimes(1);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// refreshWishlist — silent refetch (used after moving items to the cart)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('refreshWishlist', () => {
+  const grabContext = async () => {
+    let ctx;
+    const Consumer = () => { ctx = useWishlist(); return null; };
+    await renderWithProvider(<Consumer />);
+    return () => ctx;
+  };
+
+  it('replaces the wishlist with the server copy and reports success', async () => {
+    dashboardAPI.getWishlist.mockResolvedValueOnce({ data: [ITEM_1, ITEM_2] }); // mount
+    const ctx = await grabContext();
+    expect(ctx().wishlistCount).toBe(2);
+
+    dashboardAPI.getWishlist.mockResolvedValueOnce({ data: { results: [ITEM_2] } });
+    let ok;
+    await act(async () => { ok = await ctx().refreshWishlist(); });
+
+    expect(ok).toBe(true);
+    expect(ctx().wishlist).toEqual([ITEM_2]);
+  });
+
+  it('never flips `loading`, so the page does not flash its skeleton', async () => {
+    const ctx = await grabContext();
+    const seen = [];
+    let release;
+    dashboardAPI.getWishlist.mockReturnValueOnce(
+      new Promise((resolve) => { release = () => resolve({ data: [ITEM_1] }); }),
+    );
+
+    let pending;
+    act(() => { pending = ctx().refreshWishlist(); });
+    seen.push(ctx().loading);
+    await act(async () => { release(); await pending; });
+    seen.push(ctx().loading);
+
+    expect(seen).toEqual([false, false]);
+  });
+
+  it('returns false and leaves the wishlist and error untouched when the request fails', async () => {
+    dashboardAPI.getWishlist.mockResolvedValueOnce({ data: [ITEM_1] }); // mount
+    const ctx = await grabContext();
+
+    dashboardAPI.getWishlist.mockRejectedValueOnce(new Error('network'));
+    let ok;
+    await act(async () => { ok = await ctx().refreshWishlist(); });
+
+    expect(ok).toBe(false);
+    expect(ctx().wishlist).toEqual([ITEM_1]);
+    expect(ctx().error).toBeNull();
+  });
+});
+

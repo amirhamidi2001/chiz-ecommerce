@@ -1,4 +1,5 @@
 from cart.services import merge_session_cart_into_user_cart
+from dashboard.services import merge_session_wishlist_into_user_wishlist
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
@@ -107,6 +108,7 @@ class RegisterView(APIView):
 
         _send_welcome_email(user)
         merge_session_cart_into_user_cart(request, user)
+        merge_session_wishlist_into_user_wishlist(request, user)
 
         refresh = RefreshToken.for_user(user)
         return Response(
@@ -155,6 +157,7 @@ class LoginView(TokenObtainPairView):
             raise InvalidToken(e.args[0]) from e
 
         merge_session_cart_into_user_cart(request, serializer.user)
+        merge_session_wishlist_into_user_wishlist(request, serializer.user)
 
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
@@ -395,6 +398,7 @@ class OTPVerifyView(APIView):
             user.save(update_fields=["is_verified"])
 
         merge_session_cart_into_user_cart(request, user)
+        merge_session_wishlist_into_user_wishlist(request, user)
 
         refresh = RefreshToken.for_user(user)
         return Response(

@@ -76,3 +76,48 @@ def notify_stock_alert_subscribers(variant_id):
         sub.save(update_fields=["notified_at"])
         count += 1
     return f"Notified {count} subscriber(s) for variant {variant_id}."
+
+
+@shared_task
+def notify_price_drop_subscribers(product_id, old_price, new_price):
+    """
+    Notify users who wishlisted a product that its "starting at" price
+    (Product.lowest_active_price) has dropped. Queued by
+    shop/signals.py's handle_variant_price_change once a variant change
+    lowers that price below the product's last recorded snapshot.
+
+    `old_price` / `new_price` arrive as decimal STRINGS (e.g. "12.00") —
+    the project serializes task args as JSON, which has no Decimal type —
+    so Epic 16 should Decimal() them if it needs arithmetic.
+
+    Only AUTHENTICATED wishlist items are notification-eligible: a
+    session-only (guest) item has no email/phone to reach anyone at.
+    Same authenticated-only reasoning as coupon redemption (Epic 9).
+    """
+    from dashboard.models import Wishlist
+
+    from .models import Product
+
+    try:
+        product = Product.objects.get(pk=product_id)
+    except Product.DoesNotExist:
+        return "Product no longer exists."
+
+    subscribers = Wishlist.objects.filter(
+        product=product, user__isnull=False
+    ).select_related("user")
+
+    count = 0
+    for item in subscribers:
+        # Actual email/SMS dispatch is Epic 16's notification system —
+        # like notify_stock_alert_subscribers, this task only finds the
+        # eligible subscribers and leaves one marked place for the real
+        # send() call.
+        # TODO: Epic 16 — replace this comment with a real
+        # notify(item.user, event="price_drop", context={"product": product, "old_price": old_price, "new_price": new_price})
+        # call once the unified notification service exists.
+        count += 1
+    return (
+        f"Would notify {count} wishlist subscriber(s) for product {product_id} "
+        f"price drop {old_price} -> {new_price}."
+    )

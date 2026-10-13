@@ -1,6 +1,6 @@
 // src/context/WishlistContext.jsx
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { dashboardAPI, isAuthenticated } from '../services/api';
+import { dashboardAPI } from '../services/api';
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 const WishlistContext = createContext(null);
@@ -17,10 +17,9 @@ export const WishlistProvider = ({ children }) => {
 
     // ── Fetch full wishlist from API ───────────────────────────────────────────
     const fetchWishlist = useCallback(async () => {
-        if (!isAuthenticated()) {
-            setWishlist([]);
-            return;
-        }
+        // No auth gate: the backend returns a valid (possibly empty)
+        // wishlist for anonymous sessions too, so this runs
+        // unconditionally for every visitor — same as CartContext.
         setLoading(true);
         setError(null);
         try {
@@ -33,6 +32,21 @@ export const WishlistProvider = ({ children }) => {
             }
         } finally {
             setLoading(false);
+        }
+    }, []);
+
+    // ── Silent refetch ────────────────────────────────────────────────────────
+    // Same request as fetchWishlist but leaves `loading`/`error` alone, so the
+    // wishlist doesn't flash its skeleton after an action that merely changed
+    // its contents (e.g. moving items to the cart). Mirrors
+    // CartContext.refreshCart. Returns whether it refreshed; never throws.
+    const refreshWishlist = useCallback(async () => {
+        try {
+            const { data } = await dashboardAPI.getWishlist();
+            setWishlist(data.results ?? data);
+            return true;
+        } catch {
+            return false;
         }
     }, []);
 
@@ -67,11 +81,9 @@ export const WishlistProvider = ({ children }) => {
     );
 
     // ── Add a product to the wishlist ─────────────────────────────────────────
+    // Anonymous add works (session-based) — no auth gate, no redirect to
+    // /login. The backend resolves the owner (user or session) itself.
     const addToWishlist = async (productId) => {
-        if (!isAuthenticated()) {
-            window.location.href = '/login';
-            return { success: false, message: 'Please log in to save items to your wishlist.' };
-        }
         // Optimistic: skip if already present
         if (isInWishlist(productId)) {
             return { success: true, message: 'Already in wishlist.' };
@@ -105,10 +117,6 @@ export const WishlistProvider = ({ children }) => {
 
     // ── Toggle: add if absent, remove if present ──────────────────────────────
     const toggleWishlist = async (productId) => {
-        if (!isAuthenticated()) {
-            window.location.href = '/login';
-            return { success: false, message: 'Please log in.' };
-        }
         if (isInWishlist(productId)) {
             const itemId = getWishlistItemId(productId);
             return removeFromWishlist(itemId);
@@ -122,6 +130,7 @@ export const WishlistProvider = ({ children }) => {
         loading,
         error,
         fetchWishlist,
+        refreshWishlist,
         isInWishlist,
         getWishlistItemId,
         addToWishlist,

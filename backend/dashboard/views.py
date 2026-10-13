@@ -5,9 +5,10 @@ from accounts.models import Profile
 from blog.models import Category as BlogCategory
 from blog.models import Comment as BlogComment
 from blog.models import Post as BlogPost
+from cart.views import get_or_create_cart
 from contact.models import ContactMessage
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
@@ -22,11 +23,12 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from shop.models import Brand, Category, Product, ProductVariant, Review, StockMovement
+from shop.serializers import ProductVariantSerializer
 from shop.services import refresh_product_review_stats
 
 from . import services
@@ -68,6 +70,7 @@ from .serializers import (
     UserReviewSerializer,
     WishlistSerializer,
 )
+from .services import get_wishlist_owner_kwargs
 
 User = get_user_model()
 
@@ -197,27 +200,158 @@ class AddressViewSet(viewsets.ModelViewSet):
 
 class WishlistViewSet(viewsets.ModelViewSet):
     """
-    Wishlist management.
+    Wishlist management — open to guests (session-based) as well as
+    authenticated users; ownership is resolved by
+    get_wishlist_owner_kwargs(), so a visitor only ever sees/removes
+    their own session's items.
+
     GET    /dashboard/wishlist/
     POST   /dashboard/wishlist/         body: { product_id: <int> }
     DELETE /dashboard/wishlist/{id}/
     """
 
     serializer_class = WishlistSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_queryset(self):
-        return Wishlist.objects.filter(user=self.request.user).select_related(
-            "product", "product__category", "product__brand"
-        )
+        return Wishlist.objects.filter(
+            **get_wishlist_owner_kwargs(self.request)
+        ).select_related("product", "product__category", "product__brand")
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        # validate() already rejects duplicates; this catches the race
+        # where two identical POSTs (double-clicked heart) both pass
+        # validate() and one hits the unique constraint.
+        try:
+            with transaction.atomic():
+                serializer.save(**get_wishlist_owner_kwargs(self.request))
+        except IntegrityError:
+            raise ValidationError(
+                {"product_id": "Product is already in your wishlist."}
+            ) from None
 
     def get_object(self):
-        obj = get_object_or_404(Wishlist, pk=self.kwargs["pk"], user=self.request.user)
+        obj = get_object_or_404(
+            Wishlist,
+            pk=self.kwargs["pk"],
+            **get_wishlist_owner_kwargs(self.request),
+        )
         return obj
+
+    # ── Move to cart ─────────────────────────────────────────────────────────
+    # The cart holds a specific ProductVariant but a wishlist item is a
+    # Product, so a move has to resolve WHICH variant:
+    #   0 purchasable variants -> 400 (nothing to move)
+    #   1                      -> moved automatically
+    #   2+                     -> the client must choose; see below.
+    #
+    # Status-code decision: "needs a choice" is 300 Multiple Choices, not
+    # 200 or 400. It is a legitimate intermediate state rather than a client
+    # error, and — the practical reason — it can't be mistaken for success:
+    # axios (like most clients) rejects non-2xx, so a caller that just
+    # checks "did it resolve?" can never remove the wishlist item from its
+    # UI on the strength of a response that moved nothing. The body also
+    # carries `needs_selection: true` so clients needn't key off the status
+    # alone. Bulk "move all" is different by design: it always partly
+    # succeeds, so it returns 200 with a `needs_selection` bucket.
+
+    @action(detail=True, methods=["post"], url_path="move-to-cart")
+    def move_to_cart(self, request, pk=None):
+        """
+        POST /dashboard/wishlist/{id}/move-to-cart/   body: { variant_id? }
+
+        200 moved · 300 needs `variant_id` (body lists the choices) ·
+        400 unavailable / invalid variant_id · 404 not your item (or gone).
+        """
+        wishlist_item = self.get_object()
+        variants = services.get_purchasable_variants(wishlist_item.product)
+
+        if not variants:
+            return Response(
+                {"detail": "This product is currently unavailable."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        requested = request.data.get("variant_id")
+        if requested not in (None, ""):
+            # Validated even when only one variant is left: a client that
+            # picked shade B must not silently get shade A because B sold
+            # out while its picker was open.
+            try:
+                requested = int(requested)
+            except (TypeError, ValueError):
+                requested = None
+            variant = next((v for v in variants if v.id == requested), None)
+            if variant is None:
+                return Response(
+                    {"variant_id": "Invalid variant for this product."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        elif len(variants) == 1:
+            variant = variants[0]
+        else:
+            return Response(
+                {
+                    "detail": "This product has multiple options — please choose one.",
+                    "needs_selection": True,
+                    "variants": ProductVariantSerializer(variants, many=True).data,
+                },
+                status=status.HTTP_300_MULTIPLE_CHOICES,
+            )
+
+        cart = get_or_create_cart(request)
+        if not services.move_wishlist_item_to_cart(cart, wishlist_item, variant):
+            return Response(
+                {"detail": "This wishlist item is no longer on your wishlist."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({"detail": "Moved to cart."}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="move-all-to-cart")
+    def move_all_to_cart(self, request):
+        """
+        POST /dashboard/wishlist/move-all-to-cart/
+
+        Moves every unambiguous item in one pass and reports the rest, so
+        one multi-shade product never blocks the whole wishlist and nothing
+        is skipped silently. Always 200:
+          moved           [product name]
+          needs_selection [{wishlist_item_id, product, variants}] — finish
+                          each with move-to-cart + a variant_id
+          unavailable     [{wishlist_item_id, product}]
+        """
+        moved, needs_selection, unavailable = [], [], []
+        cart = None  # resolved lazily, once — and not at all if nothing moves
+
+        for item in list(self.get_queryset()):
+            variants = services.get_purchasable_variants(item.product)
+            if not variants:
+                unavailable.append(
+                    {"wishlist_item_id": item.id, "product": item.product.name}
+                )
+            elif len(variants) > 1:
+                needs_selection.append(
+                    {
+                        "wishlist_item_id": item.id,
+                        "product": item.product.name,
+                        "variants": ProductVariantSerializer(variants, many=True).data,
+                    }
+                )
+            else:
+                if cart is None:
+                    cart = get_or_create_cart(request)
+                if services.move_wishlist_item_to_cart(cart, item, variants[0]):
+                    moved.append(item.product.name)
+
+        return Response(
+            {
+                "moved": moved,
+                "needs_selection": needs_selection,
+                "unavailable": unavailable,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class UserOrderViewSet(viewsets.ReadOnlyModelViewSet):

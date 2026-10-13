@@ -112,12 +112,26 @@ class Address(models.Model):
 
 
 class Wishlist(models.Model):
-    """A single saved product in a user's wishlist."""
+    """
+    A single saved product — one row per ITEM (unlike Cart, which is one
+    row per owner). Each row belongs to EXACTLY ONE owner: an authenticated
+    user OR an anonymous session (never both, never neither), enforced by
+    the CheckConstraint below. Guest rows are merged into the user's real
+    wishlist on login/registration (dashboard.services).
+    """
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="wishlist_items",
+    )
+    session_key = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        db_index=True,
     )
     product = models.ForeignKey(
         "shop.Product",
@@ -127,10 +141,31 @@ class Wishlist(models.Model):
     added_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        # Still correct for authenticated rows. It does NOT cover session
+        # rows (user is NULL there and NULL != NULL in a unique index),
+        # hence the separate partial UniqueConstraint below.
         unique_together = ("user", "product")
         ordering = ["-added_at"]
         verbose_name = "Wishlist Item"
         verbose_name_plural = "Wishlist Items"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(user__isnull=False, session_key__isnull=True)
+                    | models.Q(user__isnull=True, session_key__isnull=False)
+                ),
+                name="wishlist_item_has_exactly_one_owner",
+            ),
+            models.UniqueConstraint(
+                fields=["session_key", "product"],
+                condition=models.Q(session_key__isnull=False),
+                name="wishlist_item_unique_session_product",
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.user.email} — {self.product.name}"
+        owner = self.user.email if self.user_id else f"session {self.session_key}"
+        return f"{owner} — {self.product.name}"
+
+    def get_full_name(self, obj):
+        return obj.full_name

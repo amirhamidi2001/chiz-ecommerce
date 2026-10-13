@@ -350,8 +350,9 @@ const NotifyMeButton = ({ variantId }) => {
   const [errorMessage, setErrorMessage] = useState('');
 
   const handleClick = async () => {
-    // Mirrors WishlistContext.toggleWishlist's auth-gating: redirect to
-    // login rather than letting the request 401 silently.
+    // Stock alerts are tied to an account (the endpoint requires auth), so
+    // redirect to login rather than letting the request 401 silently.
+    // (The wishlist no longer gates like this — it works for guests.)
     if (!isAuthenticated()) {
       window.location.href = '/login';
       return;

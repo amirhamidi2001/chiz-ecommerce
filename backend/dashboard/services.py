@@ -2,8 +2,10 @@ from datetime import timedelta
 from decimal import Decimal
 
 from accounts.models import UserType
+from cart.models import CartItem
 from django.contrib.auth import get_user_model
-from django.db.models import Avg, Count, DecimalField, F, Sum
+from django.db import IntegrityError, transaction
+from django.db.models import Avg, Count, DecimalField, F, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate, TruncMonth
 from django.utils import timezone
 from order.models import Order, OrderItem
@@ -252,3 +254,126 @@ def get_user_summary(user) -> dict:
         "reviews_count": reviews_count,
         "pending_orders": pending_orders,
     }
+
+
+# ─── Guest (session-based) wishlist ──────────────────────────────────────────
+
+
+def get_wishlist_owner_kwargs(request):
+    """
+    Return the filter/creation kwargs identifying the current request's
+    wishlist owner: the authenticated user, or else the anonymous session.
+
+    Unlike Cart (one row per owner, so cart.views.get_or_create_cart can
+    return "the" cart), a wishlist is many rows per owner — so this returns
+    kwargs usable with Wishlist.objects.filter(**kwargs) and
+    serializer.save(**kwargs) rather than a single object.
+
+    For anonymous callers the session is created on demand, so the
+    returned session_key is never None (important: filter(session_key=None)
+    would silently become `IS NULL` and match every user-owned row).
+    """
+    if request.user.is_authenticated:
+        return {"user": request.user}
+    if not request.session.session_key:
+        request.session.create()
+    return {"session_key": request.session.session_key}
+
+
+def merge_session_wishlist_into_user_wishlist(request, user):
+    """
+    Move the current session's guest wishlist items onto `user`, then drop
+    the session rows. A product the user already has wishlisted is NOT
+    duplicated — the session copy is simply discarded.
+
+    Called alongside merge_session_cart_into_user_cart() from all three
+    login/registration entry points (LoginView, OTPVerifyView,
+    RegisterView).
+
+    Rows are re-pointed in place (rather than cloned like the cart merge)
+    so each item keeps its original `added_at` and the wishlist ordering
+    survives the merge.
+    """
+    from dashboard.models import Wishlist
+
+    session_key = request.session.session_key
+    if not session_key:
+        return
+
+    session_items = Wishlist.objects.filter(session_key=session_key)
+    if not session_items.exists():
+        return
+
+    with transaction.atomic():
+        already_owned = set(
+            Wishlist.objects.filter(user=user).values_list("product_id", flat=True)
+        )
+        for item in session_items:
+            if item.product_id in already_owned:
+                continue  # dupe — cleaned up by the delete below
+            try:
+                # Savepoint: a concurrent add of the same product by this
+                # user (second tab) must not turn a login into a 500.
+                with transaction.atomic():
+                    Wishlist.objects.filter(pk=item.pk).update(
+                        user=user, session_key=None
+                    )
+            except IntegrityError:
+                continue
+        # Whatever is still session-owned is a skipped duplicate.
+        Wishlist.objects.filter(session_key=session_key).delete()
+
+
+# ─── Wishlist → cart ─────────────────────────────────────────────────────────
+
+
+def get_purchasable_variants(product):
+    """
+    The variants of `product` a customer could put in their cart right now,
+    cheapest first (price, then id — a stable order for a shade picker).
+
+    Must agree with what the cart itself accepts, i.e.
+    cart.serializers.CartItemSerializer.validate_variant_id: active, in
+    stock, and not past its expiration_date (a NULL date is not "expired").
+    The expiry rule matters because deactivate_expired_variants only runs
+    nightly, so an expired variant can still be is_active=True for hours —
+    offering it here would let a wishlist move sneak past the cart's own
+    expiry block. (A parity test pins this to the cart's validator.)
+    """
+    today = timezone.now().date()
+    return list(
+        product.variants.filter(is_active=True, stock__gt=0)
+        .filter(Q(expiration_date__isnull=True) | Q(expiration_date__gte=today))
+        .select_related("color")
+        .order_by("price", "id")
+    )
+
+
+def move_wishlist_item_to_cart(cart, wishlist_item, variant):
+    """
+    Add one unit of `variant` to `cart` (incrementing an existing line
+    rather than creating a duplicate) and delete `wishlist_item`, as one
+    atomic step: the item can't be lost (deleted but never added) or
+    duplicated (added but left on the wishlist).
+
+    The wishlist row is locked first, so two concurrent moves of the same
+    item (double-click, two tabs) can't both add a unit. Returns False,
+    changing nothing, if the item is already gone.
+    """
+    from dashboard.models import Wishlist
+
+    with transaction.atomic():
+        if (
+            Wishlist.objects.select_for_update().filter(pk=wishlist_item.pk).first()
+            is None
+        ):
+            return False
+        cart_item, created = CartItem.objects.get_or_create(
+            cart=cart, variant=variant, defaults={"quantity": 1}
+        )
+        if not created:
+            CartItem.objects.filter(pk=cart_item.pk).update(
+                quantity=F("quantity") + 1, updated_at=timezone.now()
+            )
+        wishlist_item.delete()
+    return True

@@ -297,6 +297,38 @@ class Product(models.Model):
             .first()
         )
 
+    def _active_variant_prices(self):
+        """
+        Regular (pre-sale) prices of this product's ACTIVE variants.
+
+        The single definition of "which variants count" for any
+        product-level price: shared by flash_sale_card_pricing() and
+        lowest_active_price so a product's "starting at" figure can't
+        drift between the storefront card and anything else built on it.
+        Uses prefetched `variants` when available (no extra query).
+        """
+        return [v.price for v in self.variants.all() if v.is_active]
+
+    @property
+    def lowest_active_price(self):
+        """
+        The product's "starting at" price: the cheapest ACTIVE variant's
+        regular price, or None if it has no active variant.
+
+        This is the same figure product cards show (see
+        flash_sale_card_pricing) and is the basis for price-drop
+        detection (ProductPriceSnapshot / handle_variant_price_change).
+
+        Deliberately NOT filtered on stock: cards show out-of-stock
+        variants' prices too, and — more importantly — a stock filter
+        would make this value move whenever the cheapest variant sells
+        out or is restocked, which would read as a price "drop" on every
+        restock. Regular price only: flash-sale discounts are
+        time-windowed and fire no variant save, so they are not part of
+        this value.
+        """
+        return min(self._active_variant_prices(), default=None)
+
     def flash_sale_card_pricing(self):
         """
         Product-card pricing for a product on sale, or None if it isn't.
@@ -310,7 +342,7 @@ class Product(models.Model):
         sale = self.active_flash_sale
         if sale is None:
             return None
-        prices = [v.price for v in self.variants.all() if v.is_active] or [self.price]
+        prices = self._active_variant_prices() or [self.price]
         lowest, highest = min(prices), max(prices)
         return FlashSaleCardPricing(
             sale=sale,
@@ -686,3 +718,29 @@ class ReviewReport(models.Model):
 
     def __str__(self):
         return f"Report on review #{self.review_id} — {self.reason}"
+
+
+class ProductPriceSnapshot(models.Model):
+    """
+    A product's lowest_active_price ("starting at") at a point in time.
+
+    The newest snapshot is the baseline the next variant change is compared
+    against to tell a genuine price DROP from an increase or an unrelated
+    change — a drop can't be detected without knowing the previous price.
+    A row is written whenever the product's lowest active price changes
+    (see shop/signals.py handle_variant_price_change), not on every save.
+    """
+
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="price_snapshots"
+    )
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # "-id" breaks ties between snapshots written within the same
+        # clock tick, so .first() is always genuinely the latest.
+        ordering = ["-recorded_at", "-id"]
+
+    def __str__(self):
+        return f"{self.product_id} @ {self.price} ({self.recorded_at:%Y-%m-%d %H:%M})"
