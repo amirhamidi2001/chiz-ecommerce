@@ -1,4 +1,5 @@
 from celery import shared_task
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .models import ProductVariant
@@ -121,3 +122,30 @@ def notify_price_drop_subscribers(product_id, old_price, new_price):
         f"Would notify {count} wishlist subscriber(s) for product {product_id} "
         f"price drop {old_price} -> {new_price}."
     )
+
+
+# ignore_result: this is fire-and-forget analytics; the result backend is the
+# same Redis as the broker, and there is no reason to store a result per search.
+@shared_task(ignore_result=True)
+def log_search_query(query, result_count, user_id):
+    """
+    Persist one SearchQueryLog row. Queued by ProductListView.list() so the
+    customer-facing search never waits on this write.
+
+    The user may be deleted between the search and this task running; rather
+    than failing on the foreign key (and losing the search), record it
+    anonymously.
+    """
+    from .models import SearchQueryLog
+
+    try:
+        with transaction.atomic():
+            SearchQueryLog.objects.create(
+                query=query, result_count=result_count, user_id=user_id
+            )
+    except IntegrityError:
+        if user_id is None:
+            raise
+        SearchQueryLog.objects.create(
+            query=query, result_count=result_count, user_id=None
+        )

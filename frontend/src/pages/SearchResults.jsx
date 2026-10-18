@@ -4,6 +4,15 @@ import { FlashSaleBadge, FlashSalePrice } from '../components/FlashSalePrice';
 import { isOnFlashSale } from '../utils/flashSale';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { getProducts, getCategories, getBrands } from '../services/api';
+import CosmeticFilters from '../components/CosmeticFilters';
+import { useFacetCounts } from '../hooks/useFacetCounts';
+import {
+  cosmeticFiltersToParams,
+  cosmeticFiltersFromSearchParams,
+  cosmeticPatchToUrlUpdates,
+  countActiveCosmeticFilters,
+  getActiveCosmeticChips,
+} from '../utils/cosmeticFilters';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 
@@ -30,8 +39,20 @@ const buildParams = (sp) => {
   if (sp.get('min_price')) p.min_price = sp.get('min_price');
   if (sp.get('max_price')) p.max_price = sp.get('max_price');
   if (sp.get('min_rating')) p.min_rating = sp.get('min_rating');
+  // skin_type, hair_type, gender, SPF range, certification flags
+  Object.assign(p, cosmeticFiltersToParams(cosmeticFiltersFromSearchParams(sp)));
   p.page = sp.get('page') || 1;
   p.page_size = PAGE_SIZE;
+  return p;
+};
+
+// Just the params that decide WHICH products match (no paging / sort): what
+// the facet counts are computed for. Changing page or sort can't change them.
+const buildFilterParams = (sp) => {
+  const p = buildParams(sp);
+  delete p.page;
+  delete p.page_size;
+  delete p.ordering;
   return p;
 };
 
@@ -194,9 +215,10 @@ const ProductCard = memo(({ product }) => {
 });
 
 // ─── Filter Sidebar ───────────────────────────────────────────────────────────
-const FilterSidebar = memo(({ categories, brands, searchParams, onFilterChange, onClearAll, activeFilterCount }) => {
+const FilterSidebar = memo(({ categories, brands, searchParams, onFilterChange, onClearAll, activeFilterCount, facetCounts }) => {
   const [priceMin, setPriceMin] = useState(searchParams.get('min_price') || '');
   const [priceMax, setPriceMax] = useState(searchParams.get('max_price') || '');
+  const cosmetic = useMemo(() => cosmeticFiltersFromSearchParams(searchParams), [searchParams]);
 
   // Sync local price inputs when URL params change externally
   useEffect(() => {
@@ -318,6 +340,15 @@ const FilterSidebar = memo(({ categories, brands, searchParams, onFilterChange, 
           </button>
         ))}
       </FilterGroup>
+
+      {/* ── Cosmetics: skin/hair type, SPF, gender, certifications ───────── */}
+      <CosmeticFilters
+        values={cosmetic}
+        counts={facetCounts}
+        onChange={(patch) => onFilterChange(cosmeticPatchToUrlUpdates(patch))}
+        Section={FilterGroup}
+        Option={CosmeticOption}
+      />
     </aside>
   );
 });
@@ -340,10 +371,12 @@ const FilterGroup = ({ title, children }) => {
 };
 
 // ─── FilterRadio ──────────────────────────────────────────────────────────────
-const FilterRadio = ({ name: _name, value, label, checked, onChange }) => (
+const FilterRadio = ({ name: _name, value, label, checked, onChange, count, disabled = false }) => (
   <button
     onClick={() => onChange(value)}
-    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition ${checked ? 'bg-emerald-50 text-teal-700 font-medium' : 'hover:bg-gray-50 text-gray-600'
+    disabled={disabled}
+    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition ${checked ? 'bg-emerald-50 text-teal-700 font-medium'
+      : disabled ? 'text-gray-300 cursor-not-allowed' : 'hover:bg-gray-50 text-gray-600'
       }`}
   >
     <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'border-teal-600 bg-teal-600' : 'border-gray-300'
@@ -351,7 +384,17 @@ const FilterRadio = ({ name: _name, value, label, checked, onChange }) => (
       {checked && <i className="bi bi-check text-white text-xs" />}
     </div>
     {label}
+    {/* the space keeps the accessible name "Oily (12)", not "Oily(12)" */}
+    {count !== undefined && <>{' '}<span className="ml-auto text-xs text-gray-400">({count})</span></>}
   </button>
+);
+
+// Adapts CosmeticFilters' option rows to this sidebar's FilterRadio look.
+const CosmeticOption = ({ name, label, checked, onToggle, count, disabled }) => (
+  <FilterRadio
+    name={name} value={name} label={label} checked={checked}
+    count={count} disabled={disabled} onChange={() => onToggle()}
+  />
 );
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
@@ -433,7 +476,7 @@ const PageBtn = ({ children, onClick, disabled, active, ...rest }) => (
 );
 
 // ─── Active Filter Chips ──────────────────────────────────────────────────────
-const ActiveChips = memo(({ searchParams, categories, brands, onRemove }) => {
+const ActiveChips = memo(({ searchParams, categories, brands, onRemove, onUpdate }) => {
   const chips = [];
 
   const catSlug = searchParams.get('category');
@@ -457,6 +500,15 @@ const ActiveChips = memo(({ searchParams, categories, brands, onRemove }) => {
   const rating = searchParams.get('min_rating');
   if (rating) chips.push({ key: 'min_rating', label: `Rating: ${rating}★ & up` });
 
+  // One chip per selected skin/hair type etc.; `update` removes just that value.
+  getActiveCosmeticChips(cosmeticFiltersFromSearchParams(searchParams)).forEach((chip) => {
+    chips.push({
+      key: chip.key,
+      label: `${chip.type}: ${chip.value}`,
+      update: cosmeticPatchToUrlUpdates(chip.patch),
+    });
+  });
+
   if (chips.length === 0) return null;
 
   return (
@@ -468,7 +520,7 @@ const ActiveChips = memo(({ searchParams, categories, brands, onRemove }) => {
         >
           {chip.label}
           <button
-            onClick={() => onRemove(chip.removes ?? [chip.key])}
+            onClick={() => (chip.update ? onUpdate(chip.update) : onRemove(chip.removes ?? [chip.key]))}
             className="ml-0.5 hover:text-red-500 transition-colors"
             aria-label={`Remove ${chip.label} filter`}
           >
@@ -532,6 +584,7 @@ const SearchResults = () => {
     if (searchParams.get('brand')) count++;
     if (searchParams.get('min_price') || searchParams.get('max_price')) count++;
     if (searchParams.get('min_rating')) count++;
+    count += countActiveCosmeticFilters(cosmeticFiltersFromSearchParams(searchParams));
     return count;
   }, [searchParams]);
 
@@ -562,6 +615,10 @@ const SearchResults = () => {
     return () => { alive = false; };
   }, []);
 
+  // ── Facet counts ("Oily (12)") for the same filters the list is showing ───
+  const filterParams = useMemo(() => buildFilterParams(searchParams), [searchParams]);
+  const facetCounts = useFacetCounts(filterParams);
+
   // ── Fetch products whenever URL params change ────────────────────────────
   useEffect(() => {
     const controller = new AbortController();
@@ -586,6 +643,10 @@ const SearchResults = () => {
   }, [searchParams]);
 
   // ── Helpers to mutate URL params ─────────────────────────────────────────
+  // History: filter / sort changes REPLACE the current entry — ticking five
+  // checkboxes must not cost five Back presses. A new search term and page
+  // changes are real navigations and PUSH an entry (Back returns to the
+  // previous search / page, filters intact).
   const setParam = useCallback(
     (key, value) => {
       setSearchParams((prev) => {
@@ -594,7 +655,7 @@ const SearchResults = () => {
         else next.set(key, value);
         next.set('page', '1'); // reset to first page on any filter change
         return next;
-      });
+      }, { replace: true });
     },
     [setSearchParams],
   );
@@ -609,7 +670,7 @@ const SearchResults = () => {
         });
         next.set('page', '1');
         return next;
-      });
+      }, { replace: true });
     },
     [setSearchParams],
   );
@@ -619,7 +680,7 @@ const SearchResults = () => {
       const next = new URLSearchParams();
       if (prev.get('q')) next.set('q', prev.get('q'));
       return next;
-    });
+    }, { replace: true });
   }, [setSearchParams]);
 
   const removeChips = useCallback(
@@ -629,7 +690,7 @@ const SearchResults = () => {
         keys.forEach((k) => next.delete(k));
         next.set('page', '1');
         return next;
-      });
+      }, { replace: true });
     },
     [setSearchParams],
   );
@@ -749,6 +810,7 @@ const SearchResults = () => {
               categories={categories}
               brands={brands}
               onRemove={removeChips}
+              onUpdate={setParams}
             />
           </div>
         )}
@@ -768,6 +830,7 @@ const SearchResults = () => {
                 onFilterChange={setParams}
                 onClearAll={clearAllFilters}
                 activeFilterCount={activeFilterCount}
+                facetCounts={facetCounts}
               />
             </div>
           </div>
@@ -779,7 +842,7 @@ const SearchResults = () => {
                 <i className="bi bi-exclamation-circle text-lg flex-shrink-0" />
                 <p className="text-sm">{error}</p>
                 <button
-                  onClick={() => setSearchParams(new URLSearchParams(searchParams))}
+                  onClick={() => setSearchParams(new URLSearchParams(searchParams), { replace: true })}
                   className="ml-auto text-sm underline hover:no-underline flex-shrink-0"
                 >
                   Retry
@@ -841,6 +904,7 @@ const SearchResults = () => {
               onFilterChange={(updates) => { setParams(updates); setSidebarOpen(false); }}
               onClearAll={() => { clearAllFilters(); setSidebarOpen(false); }}
               activeFilterCount={activeFilterCount}
+              facetCounts={facetCounts}
             />
           </div>
         </div>

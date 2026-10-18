@@ -208,6 +208,32 @@ export const getProducts = (params = {}) =>
   api.get('/products/', { params });
 
 /**
+ * GET /products/suggest/?q=<term> → [{ id, name, slug, price, thumbnail_url }]
+ * (a bare array, at most 8, relevance-ranked, public). Deliberately minimal
+ * compared with getProducts(): for a search-box dropdown, not a results page.
+ * The backend returns [] for terms under 2 characters.
+ *
+ * `config` is forwarded to axios so callers can pass `{ signal }` and abort a
+ * superseded request (getProducts() takes no such argument).
+ */
+export const getProductSuggestions = (q, config = {}) =>
+  api.get('/products/suggest/', { params: { q }, ...config });
+
+/**
+ * GET /products/facet-counts/ — how many products match each filter option,
+ * given the other active filters.
+ *
+ * Takes the same FILTER params as getProducts() (category, brand, search,
+ * skin_type, ... — paging/ordering are ignored server-side). Returns
+ *   { skin_type: {oily: 12, ...}, hair_type: {...}, gender: {...},
+ *     is_cruelty_free: 8, is_vegan: 5, is_organic: 2 }
+ * with every option present (zeros included). `config` is forwarded to axios
+ * (e.g. { signal }).
+ */
+export const getProductFacetCounts = (params = {}, config = {}) =>
+  api.get('/products/facet-counts/', { params, ...config });
+
+/**
  * GET /promotions/active-flash-sales/ → [{ id, name, discount_percent,
  * starts_at, ends_at, product_count, products: [...preview] }], soonest-ending
  * first. Public. An empty array means no sale is running.

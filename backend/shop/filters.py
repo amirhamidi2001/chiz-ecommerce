@@ -1,5 +1,6 @@
 import django_filters
 from django.utils import timezone
+from rest_framework.filters import OrderingFilter
 
 from .models import Product
 
@@ -126,3 +127,22 @@ class ProductFilter(django_filters.FilterSet):
         if not values:
             return queryset
         return queryset.filter(hair_type__in=values)
+
+
+class RelevanceOrderingFilter(OrderingFilter):
+    """
+    OrderingFilter whose DEFAULT ordering is relevance when the view is
+    running a ranked full-text search.
+
+    This has to live in the ordering backend rather than in get_queryset():
+    OrderingFilter runs AFTER get_queryset() and unconditionally re-applies
+    the view's default `ordering` (-created_at), so an order_by("-rank") set
+    in get_queryset() would be silently discarded. An explicit ?ordering=
+    from the client is still honoured first — the rank-based default only
+    applies when none (or no valid one) was requested.
+    """
+
+    def get_default_ordering(self, view):
+        if getattr(view, "is_ranked_search", False):
+            return ["-rank", "-created_at", "-pk"]
+        return super().get_default_ordering(view)

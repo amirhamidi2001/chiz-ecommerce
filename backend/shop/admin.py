@@ -13,6 +13,7 @@ from .models import (
     ProductImage,
     ProductVariant,
     Review,
+    SearchQueryLog,
     StockAlertSubscription,
     StockMovement,
 )
@@ -315,3 +316,40 @@ class ReviewAdmin(admin.ModelAdmin):
         product_ids = list(queryset.values_list("product_id", flat=True))
         super().delete_queryset(request, queryset)
         self._refresh_products(product_ids)
+
+
+class ZeroResultsFilter(admin.SimpleListFilter):
+    """
+    "Searches that found nothing" — the actionable slice of the search log: a
+    term that keeps appearing here is a catalog gap or a search-quality bug.
+    """
+
+    title = "results"
+    parameter_name = "results"
+
+    def lookups(self, request, model_admin):
+        return (("zero", "Zero results"), ("some", "Has results"))
+
+    def queryset(self, request, queryset):
+        if self.value() == "zero":
+            return queryset.filter(result_count=0)
+        if self.value() == "some":
+            return queryset.filter(result_count__gt=0)
+        return queryset
+
+
+@admin.register(SearchQueryLog)
+class SearchQueryLogAdmin(admin.ModelAdmin):
+    """Analytics data — viewable and searchable, never hand-edited."""
+
+    list_display = ("query", "result_count", "user", "created_at")
+    list_filter = (ZeroResultsFilter, "created_at")
+    search_fields = ("query",)
+    list_select_related = ("user",)
+    readonly_fields = [f.name for f in SearchQueryLog._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

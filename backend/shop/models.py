@@ -2,12 +2,16 @@ from decimal import Decimal
 from typing import NamedTuple
 
 from django.conf import settings
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
+from .search import SEARCH_VECTOR_SOURCE_FIELDS, refresh_product_search_vectors
+from .text_utils import normalize_persian_text
 from .validators import validate_ean13
 
 
@@ -44,6 +48,9 @@ class Category(models.Model):
         ordering = ["name"]
 
     def save(self, *args, **kwargs):
+        # Names feed Product.search_vector, so they are canonicalised like
+        # product text (see shop/text_utils.py).
+        self.name = normalize_persian_text(self.name)
         if not self.slug:
             self.slug = slugify(self.name)
         super().save(*args, **kwargs)
@@ -61,6 +68,9 @@ class Brand(models.Model):
         ordering = ["name"]
 
     def save(self, *args, **kwargs):
+        # Names feed Product.search_vector, so they are canonicalised like
+        # product text (see shop/text_utils.py).
+        self.name = normalize_persian_text(self.name)
         if not self.slug:
             self.slug = slugify(self.name)
         super().save(*args, **kwargs)
@@ -220,10 +230,20 @@ class Product(models.Model):
     thumbnail = models.ImageField(
         upload_to="products/thumbnails/", null=True, blank=True
     )
+    # Weighted Postgres full-text search vector (see shop/search.py for how
+    # it is built and why the "simple" config). Maintained by save() and by
+    # the Brand/Category rename signals — NOT automatically by Postgres, so
+    # queryset.update()/bulk_create() on the text fields leave it stale until
+    # `manage.py rebuild_search_vectors` is run. editable=False keeps it out
+    # of admin forms and ModelSerializer input.
+    search_vector = SearchVectorField(null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            GinIndex(fields=["search_vector"], name="product_search_vector_idx"),
+        ]
 
     def clean(self):
         super().clean()
@@ -250,6 +270,12 @@ class Product(models.Model):
             )
 
     def save(self, *args, **kwargs):
+        # Canonicalise Persian/Arabic character variants and strip zero-width
+        # characters BEFORE slug generation and the search_vector refresh, so
+        # stored text and normalised search queries always agree.
+        self.name = normalize_persian_text(self.name)
+        self.short_description = normalize_persian_text(self.short_description)
+        self.description = normalize_persian_text(self.description)
         if not self.slug:
             base_slug = slugify(self.name)
             slug = base_slug
@@ -258,7 +284,19 @@ class Product(models.Model):
                 slug = f"{base_slug}-{counter}"
                 counter += 1
             self.slug = slug
-        super().save(*args, **kwargs)
+        # One transaction for the row write AND the vector refresh: a full
+        # save() writes the instance's (stale/NULL) search_vector first, and
+        # without this a concurrent search could briefly miss the product.
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            # Skip the extra UPDATE for saves that provably can't change the
+            # vector, e.g. refresh_product_review_stats's
+            # save(update_fields=["rating", "reviews_count"]).
+            update_fields = kwargs.get("update_fields")
+            if update_fields is None or SEARCH_VECTOR_SOURCE_FIELDS.intersection(
+                update_fields
+            ):
+                refresh_product_search_vectors(type(self).objects.filter(pk=self.pk))
 
     def __str__(self):
         return self.name
@@ -744,3 +782,34 @@ class ProductPriceSnapshot(models.Model):
 
     def __str__(self):
         return f"{self.product_id} @ {self.price} ({self.recorded_at:%Y-%m-%d %H:%M})"
+
+
+class SearchQueryLog(models.Model):
+    """
+    One row per customer product search (ProductListView ?search=), for
+    merchandising analytics: popular terms, and zero-result terms that point
+    to a catalog gap or a search-quality bug.
+
+    Written asynchronously by shop.tasks.log_search_query. `query` holds the
+    NORMALISED term (Persian/Arabic variants canonicalised, whitespace
+    collapsed, lower-cased, truncated to 255) so spelling variants of the same
+    search aggregate together. `result_count` is the total number of matches
+    for that request (i.e. after any other filters the customer applied).
+    """
+
+    query = models.CharField(max_length=255)
+    result_count = models.PositiveIntegerField()
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="search_logs",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"'{self.query}' ({self.result_count} results)"

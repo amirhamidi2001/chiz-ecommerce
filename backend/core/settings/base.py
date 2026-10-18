@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sitemaps",
+    "django.contrib.postgres",  # full-text search (shop.Product.search_vector)
     # Third-party
     "corsheaders",
     "rest_framework",

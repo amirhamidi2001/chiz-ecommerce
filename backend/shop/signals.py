@@ -13,12 +13,14 @@ from django_redis import get_redis_connection
 from promotions.models import FlashSale
 
 from .models import (
+    Brand,
     Category,
     Product,
     ProductPriceSnapshot,
     ProductVariant,
     StockMovement,
 )
+from .search import refresh_product_search_vectors
 from .tasks import notify_price_drop_subscribers, notify_stock_alert_subscribers
 from .views import CATEGORY_TREE_CACHE_KEY
 
@@ -88,6 +90,26 @@ def invalidate_cache_on_product_save(sender, **kwargs):
     concern here worth a field-change check.
     """
     invalidate_product_list_cache()
+
+
+@receiver(post_save, sender=Brand)
+@receiver(post_save, sender=Category)
+def refresh_search_vectors_on_brand_or_category_save(
+    sender, instance, created, **kwargs
+):
+    """
+    Brand and category names are part of each product's search_vector, so
+    renaming one must refresh its products' vectors — Product.save() never
+    runs for them. A brand-new brand/category has no products yet.
+    """
+    if created:
+        return
+    field = "brand" if sender is Brand else "category"
+    refreshed = refresh_product_search_vectors(
+        Product.objects.filter(**{field: instance})
+    )
+    if refreshed:
+        invalidate_product_list_cache()
 
 
 @receiver(pre_save, sender=ProductVariant)

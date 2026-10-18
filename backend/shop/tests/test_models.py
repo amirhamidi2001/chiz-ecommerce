@@ -1346,3 +1346,161 @@ class TestProductFlashSaleCardPricing:
         assert (
             variant.product.flash_sale_card_pricing().price == variant.effective_price
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Product.search_vector maintenance (full-text search)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _vector(product):
+    return Product.objects.get(pk=product.pk).search_vector
+
+
+def _finds(term_vector_lexeme, product):
+    from django.contrib.postgres.search import SearchQuery
+
+    return Product.objects.filter(
+        pk=product.pk,
+        search_vector=SearchQuery(term_vector_lexeme, config="simple"),
+    ).exists()
+
+
+@pytest.mark.django_db
+class TestProductSearchVectorMaintenance:
+
+    def test_search_vector_field_is_not_editable(self):
+        assert Product._meta.get_field("search_vector").editable is False
+
+    def test_gin_index_exists_on_search_vector(self):
+        names = {i.name for i in Product._meta.indexes}
+        assert "product_search_vector_idx" in names
+
+    def test_renaming_brand_refreshes_its_products(self):
+        brand = BrandFactory(name="Oldbrand")
+        product = ProductFactory(brand=brand)
+        assert _finds("oldbrand", product)
+
+        brand.name = "Newbrand"
+        brand.save()
+
+        assert _finds("newbrand", product)
+        assert not _finds("oldbrand", product)
+
+    def test_renaming_category_refreshes_its_products(self):
+        category = CategoryFactory(name="Oldcat")
+        product = ProductFactory(category=category)
+        category.name = "Newcat"
+        category.save()
+        assert _finds("newcat", product)
+        assert not _finds("oldcat", product)
+
+    def test_changing_a_products_brand_refreshes_vector(self):
+        product = ProductFactory(brand=BrandFactory(name="First"))
+        product.brand = BrandFactory(name="Second")
+        product.save()
+        assert _finds("second", product)
+        assert not _finds("first", product)
+
+    def test_removing_brand_drops_its_contribution_without_error(self):
+        product = ProductFactory(brand=BrandFactory(name="Vanishing"))
+        product.brand = None
+        product.save()
+        assert not _finds("vanishing", product)
+        assert _vector(product)  # still has name etc.
+
+    def test_deleting_a_brand_does_not_crash(self):
+        # Brand FK is SET_NULL; the product row is updated by the DB cascade,
+        # not by Product.save() — it must simply not raise.
+        brand = BrandFactory(name="Doomed")
+        product = ProductFactory(brand=brand)
+        brand.delete()
+        product.refresh_from_db()
+        assert product.brand is None
+
+    def test_stat_only_save_skips_vector_refresh(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        product = ProductFactory()
+
+        def search_vector_updates(ctx):
+            # The refresh statement is the only one that builds a weighted
+            # vector (setweight/to_tsvector); a full save() also mentions
+            # the search_vector column, just to write back its stale value.
+            return [
+                q
+                for q in ctx.captured_queries
+                if q["sql"].lstrip().upper().startswith("UPDATE")
+                and "setweight" in q["sql"].lower()
+            ]
+
+        with CaptureQueriesContext(connection) as stats_only:
+            product.rating = 4
+            product.save(update_fields=["rating", "reviews_count"])
+        with CaptureQueriesContext(connection) as text_change:
+            product.name = "Renamed"
+            product.save(update_fields=["name"])
+        with CaptureQueriesContext(connection) as full_save:
+            product.save()
+
+        assert search_vector_updates(stats_only) == []
+        assert len(search_vector_updates(text_change)) == 1
+        assert len(search_vector_updates(full_save)) == 1
+
+    def test_rebuild_command_repairs_stale_vectors(self):
+        from django.core.management import call_command
+
+        product = ProductFactory(name="Repairable Thing")
+        # Bypass save(): simulates queryset.update() / bulk_create drift.
+        Product.objects.filter(pk=product.pk).update(search_vector=None)
+        assert _vector(product) is None
+
+        call_command(
+            "rebuild_search_vectors", batch_size=1, stdout=__import__("io").StringIO()
+        )
+
+        assert _finds("repairable", product)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Persian text normalisation at save time (Product / Brand / Category)
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.django_db
+class TestSaveNormalizesPersianText:
+
+    def test_product_text_fields_are_normalized_on_save(self):
+        product = ProductFactory(
+            name="كرم ضد\u200cآفتاب",
+            short_description="مناسب پوست خشك",
+            description="گياهي\ufeff",
+        )
+        product.refresh_from_db()
+        assert product.name == "کرم ضدآفتاب"
+        assert product.short_description == "مناسب پوست خشک"
+        assert product.description == "گیاهی"
+
+    def test_normalization_also_applies_when_editing_an_existing_product(self):
+        product = ProductFactory(name="Old")
+        product.name = "كيك"
+        product.save()
+        product.refresh_from_db()
+        assert product.name == "کیک"
+
+    def test_blank_descriptions_are_fine(self):
+        product = ProductFactory(short_description="", description="")
+        product.refresh_from_db()
+        assert product.short_description == "" and product.description == ""
+
+    def test_brand_and_category_names_are_normalized_on_save(self):
+        brand = BrandFactory(name="كيان")
+        category = CategoryFactory(name="آرايشي\u200c")
+        brand.refresh_from_db()
+        category.refresh_from_db()
+        assert brand.name == "کیان"
+        assert category.name == "آرایشی"
+
+    def test_existing_slug_is_not_rewritten_by_normalization(self):
+        product = ProductFactory(name="Some Product", slug="stable-public-url")
+        product.name = "كرم"
+        product.save()
+        product.refresh_from_db()
+        assert product.slug == "stable-public-url"

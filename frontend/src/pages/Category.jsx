@@ -1,9 +1,24 @@
 // src/pages/Category.jsx
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { FlashSaleBadge, FlashSalePrice } from '../components/FlashSalePrice';
 import { isOnFlashSale } from '../utils/flashSale';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getProducts, getCategories, getBrands, getColors } from '../services/api';
+import CosmeticFilters from '../components/CosmeticFilters';
+import { useFacetCounts } from '../hooks/useFacetCounts';
+import { useDebouncedCallback } from '../hooks/useDebouncedCallback';
+import { cosmeticPatchToUrlUpdates, getActiveCosmeticChips } from '../utils/cosmeticFilters';
+import {
+  DEFAULT_SORT,
+  DEFAULT_PAGE_SIZE,
+  FILTER_URL_KEYS,
+  PRICE_MIN,
+  PRICE_MAX,
+  parseCategoryFilters,
+  toApiFilterParams,
+  toggleListParam,
+} from '../utils/categoryFilters';
+import { applyParamUpdates } from '../utils/urlParams';
 import { useCart } from '../context/CartContext';
 
 // ─── Loading Spinner ────────────────────────────────────────────────────────
@@ -392,23 +407,51 @@ const BrandFilter = ({ brands, selectedBrands, onToggle, onClear, loading }) => 
   );
 };
 
+// ─── Sidebar section for the cosmetics filters ───────────────────────────────
+// Same markup as the other sidebar widgets (always expanded, teal-bordered h3).
+const CosmeticFilterSection = ({ title, children }) => (
+  <div className="widget-item mb-6">
+    <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">{title}</h3>
+    <div className="space-y-2">{children}</div>
+  </div>
+);
+
 // ─── Main Category Page ───────────────────────────────────────────────────────
 const Category = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  // ?flash_sale=<id> (from the homepage banner): only that running sale's products.
-  const flashSaleId = searchParams.get('flash_sale') || '';
   const { addToCart } = useCart();
 
-  // ── Filter state ────────────────────────────────────────────────────────────
-  const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || '');
-  const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 });
-  const [selectedColors, setSelectedColors] = useState([]);
-  const [selectedBrands, setSelectedBrands] = useState([]);
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
-  const [sortBy, setSortBy] = useState('-created_at');
+  // ── Filter state: the URL is the single source of truth ─────────────────────
+  // Every filter, the sort order, page and page size are READ from the query
+  // string and WRITTEN back to it, never held in a second copy of state — so a
+  // shared / bookmarked / refreshed URL restores exactly the same sidebar and
+  // results, and back/forward can't leave the UI out of step with the address
+  // bar. (See utils/categoryFilters.js for the URL format.) ?flash_sale=<id>
+  // (from the homepage banner) limits the list to that running sale.
+  const filters = useMemo(() => parseCategoryFilters(searchParams), [searchParams]);
+  const {
+    category: selectedCategory,
+    brands: selectedBrands,
+    colors: selectedColors,
+    priceRange,
+    cosmetic,
+    sortBy,
+    page: currentPage,
+    pageSize: itemsPerPage,
+    flashSaleId,
+  } = filters;
+
+  // The only local state: a layout preference, and the text being typed in the
+  // search box (committed to the URL after a pause — see handleSearchChange).
   const [viewMode, setViewMode] = useState('grid');
-  const [itemsPerPage, setItemsPerPage] = useState(12);
-  const [currentPage, setCurrentPage] = useState(1);
+  // `synced` is the URL value the draft last matched. When the URL's search term
+  // differs from it, the change came from elsewhere (back/forward, "Clear all",
+  // a chip) and the box adopts it. Our own commit updates `synced` first, so it
+  // never resets the box mid-typing.
+  const [searchDraft, setSearchDraft] = useState({ text: filters.search, synced: filters.search });
+  if (filters.search !== searchDraft.synced) {
+    setSearchDraft({ text: filters.search, synced: filters.search });
+  }
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [products, setProducts] = useState([]);
@@ -427,7 +470,6 @@ const Category = () => {
   const showToast = (message, type = 'success') => setToast({ message, type });
   const hideToast = () => setToast(null);
 
-  const searchTimer = useRef(null);
 
   // ── Fetch sidebar meta once ─────────────────────────────────────────────────
   useEffect(() => {
@@ -450,65 +492,128 @@ const Category = () => {
     fetchMeta();
   }, []);
 
-  // ── Fetch products whenever filters change ──────────────────────────────────
+  // ── Writing filters back to the URL ─────────────────────────────────────────
+  // Filter / sort changes REPLACE the current history entry: ticking five
+  // checkboxes must not cost five Back presses. Page changes PUSH one (Back
+  // returns to the previous page, filters intact). Leaving the page (a product,
+  // then Back) is an ordinary navigation, so it restores the URL as it was.
+  // `updates`: param -> string to set, null to remove. Changing anything but
+  // the page also resets to page 1.
+  const updateParams = useCallback(
+    (updates, { push = false, keepPage = false } = {}) => {
+      setSearchParams(
+        (prev) => applyParamUpdates(prev, updates, { resetPage: !keepPage }),
+        { replace: !push },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // ── Fetch products whenever the URL changes ─────────────────────────────────
+  // The params that decide WHICH products match (everything except paging and
+  // sort). Shared by the list fetch and the facet-count fetch, so the counts
+  // always describe the same filters the list is showing — and turning a page
+  // or re-sorting, which can't change the counts, doesn't refetch them.
+  const filterParams = useMemo(() => toApiFilterParams(filters), [filters]);
+
+  const facetCounts = useFacetCounts(filterParams);
+
   const fetchProducts = useCallback(async () => {
     setLoadingProducts(true);
     setError(null);
     try {
-      const params = {
+      const res = await getProducts({
         page: currentPage,
         page_size: itemsPerPage,
         ordering: sortBy,
-      };
-      if (selectedCategory) params.category = selectedCategory;
-      if (searchQuery.trim()) params.search = searchQuery.trim();
-      if (selectedBrands.length) params.brand = selectedBrands.join(',');
-      if (selectedColors.length) params.color = selectedColors.join(',');
-      if (priceRange.min > 0) params.min_price = priceRange.min;
-      if (priceRange.max < 1000) params.max_price = priceRange.max;
-      if (flashSaleId) params.flash_sale = flashSaleId;
-
-      const res = await getProducts(params);
+        ...filterParams,
+      });
       const data = res.data;
       setProducts(data.results || []);
       setPagination({ count: data.count, total_pages: data.total_pages });
     } catch (err) {
+      if (err.response?.status === 404 && currentPage > 1) {
+        // A shared / bookmarked link can point past the last page (the
+        // catalogue shrank, or fewer results fit): show page 1 instead of an error.
+        updateParams({ page: null }, { keepPage: true });
+        return;
+      }
       setError(err.message || 'Failed to load products');
     } finally {
       setLoadingProducts(false);
     }
-  }, [currentPage, itemsPerPage, sortBy, selectedCategory, searchQuery, selectedBrands, selectedColors, priceRange, flashSaleId]);
+  }, [currentPage, itemsPerPage, sortBy, filterParams, updateParams]);
 
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-  const toggleColor = (name) => {
-    setSelectedColors((prev) => prev.includes(name) ? prev.filter((c) => c !== name) : [...prev, name]);
-    setCurrentPage(1);
-  };
+  const toggleColor = (name) => updateParams({ color: toggleListParam(selectedColors, name) });
 
-  const toggleBrand = (slug) => {
-    setSelectedBrands((prev) => prev.includes(slug) ? prev.filter((b) => b !== slug) : [...prev, slug]);
-    setCurrentPage(1);
+  const toggleBrand = (slug) => updateParams({ brand: toggleListParam(selectedBrands, slug) });
+
+  // `patch` holds only the cosmetic keys that changed.
+  const handleCosmeticChange = (patch) => updateParams(cosmeticPatchToUrlUpdates(patch));
+
+  const handlePriceChange = (range) =>
+    updateParams({
+      min_price: range.min > PRICE_MIN ? String(range.min) : null,
+      max_price: range.max < PRICE_MAX ? String(range.max) : null,
+    });
+
+  const handleSortChange = (value) =>
+    updateParams({ ordering: value === DEFAULT_SORT ? null : value });
+
+  const handlePageSizeChange = (size) =>
+    updateParams({ page_size: size === DEFAULT_PAGE_SIZE ? null : String(size) });
+
+  const goToPage = (page) =>
+    updateParams({ page: page > 1 ? String(page) : null }, { push: true, keepPage: true });
+
+  // Typing updates the box immediately; the URL (and so the results) follow
+  // once the customer pauses. The hook calls the latest commitSearch (so it
+  // can't overwrite a filter ticked in the meantime) and never fires after
+  // the page is left.
+  const commitSearch = (text) => {
+    const term = text.trim();
+    // Mark this URL value as ours first, so the change below doesn't reset the box.
+    setSearchDraft((d) => ({ ...d, synced: term }));
+    updateParams({ search: term || null });
   };
+  const [scheduleSearchCommit, cancelPendingSearch] = useDebouncedCallback(commitSearch, 400);
 
   const handleSearchChange = (e) => {
-    const val = e.target.value;
-    setSearchQuery(val);
-    clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => setCurrentPage(1), 400);
+    const text = e.target.value;
+    setSearchDraft((d) => ({ ...d, text }));
+    scheduleSearchCommit(text);
   };
 
+  // Drops the pending commit AND the typed text: when the URL has no search
+  // term to clear (the text was never committed), the box wouldn't otherwise
+  // notice it should empty.
+  const resetSearchBox = () => {
+    cancelPendingSearch();
+    setSearchDraft({ text: '', synced: '' });
+  };
+
+  const clearSearch = () => {
+    resetSearchBox();
+    updateParams({ search: null });
+  };
+
+  // Resets every filter (and the sort order); keeps the flash-sale link and the
+  // page-size preference, which aren't filters.
   const clearAllFilters = () => {
-    setSelectedCategory('');
-    setPriceRange({ min: 0, max: 1000 });
-    setSelectedColors([]);
-    setSelectedBrands([]);
-    setSearchQuery('');
-    setSortBy('-created_at');
-    setCurrentPage(1);
+    resetSearchBox();
+    const updates = Object.fromEntries(FILTER_URL_KEYS.map((key) => [key, null]));
+    if (applyParamUpdates(searchParams, updates).toString() === searchParams.toString()) {
+      // Nothing to clear, so the URL won't change. The empty-state "Clear
+      // Filters" button has always doubled as a refresh; keep that.
+      fetchProducts();
+      return;
+    }
+    updateParams(updates);
   };
 
   // ── Add to cart handler ─────────────────────────────────────────────────────
@@ -523,7 +628,7 @@ const Category = () => {
     activeFilters.push({
       type: 'Category',
       value: categories.find((c) => c.slug === selectedCategory)?.name || selectedCategory,
-      clear: () => { setSelectedCategory(''); setCurrentPage(1); },
+      clear: () => updateParams({ category: null }),
     });
   }
   selectedBrands.forEach((slug) => {
@@ -544,14 +649,21 @@ const Category = () => {
     activeFilters.push({
       type: 'Price',
       value: `$${priceRange.min} – $${priceRange.max}`,
-      clear: () => { setPriceRange({ min: 0, max: 1000 }); setCurrentPage(1); },
+      clear: () => updateParams({ min_price: null, max_price: null }),
     });
   }
-  if (searchQuery.trim()) {
+  getActiveCosmeticChips(cosmetic).forEach((chip) => {
+    activeFilters.push({
+      type: chip.type,
+      value: chip.value,
+      clear: () => handleCosmeticChange(chip.patch),
+    });
+  });
+  if (filters.search.trim()) {
     activeFilters.push({
       type: 'Search',
-      value: searchQuery,
-      clear: () => { setSearchQuery(''); setCurrentPage(1); },
+      value: filters.search,
+      clear: () => clearSearch(),
     });
   }
 
@@ -602,7 +714,7 @@ const Category = () => {
                   <input
                     type="text"
                     placeholder="Search products..."
-                    value={searchQuery}
+                    value={searchDraft.text}
                     onChange={handleSearchChange}
                     className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-teal-500"
                   />
@@ -613,14 +725,14 @@ const Category = () => {
               <CategoryTree
                 categories={categories}
                 selectedCategory={selectedCategory}
-                onSelectCategory={(slug) => { setSelectedCategory(slug); setCurrentPage(1); }}
+                onSelectCategory={(slug) => updateParams({ category: slug || null })}
                 loading={loadingMeta}
               />
 
               <PriceRangeSlider
                 minPrice={priceRange.min}
                 maxPrice={priceRange.max}
-                onPriceChange={(range) => { setPriceRange(range); setCurrentPage(1); }}
+                onPriceChange={handlePriceChange}
               />
 
               <ColorFilter
@@ -634,8 +746,15 @@ const Category = () => {
                 brands={brands}
                 selectedBrands={selectedBrands}
                 onToggle={toggleBrand}
-                onClear={() => { setSelectedBrands([]); setCurrentPage(1); }}
+                onClear={() => updateParams({ brand: null })}
                 loading={loadingMeta}
+              />
+
+              <CosmeticFilters
+                values={cosmetic}
+                onChange={handleCosmeticChange}
+                counts={facetCounts}
+                Section={CosmeticFilterSection}
               />
 
               {activeFilters.length > 0 && (
@@ -661,12 +780,7 @@ const Category = () => {
                   </span>
                   <button
                     type="button"
-                    onClick={() => {
-                      const next = new URLSearchParams(searchParams);
-                      next.delete('flash_sale');
-                      setSearchParams(next);
-                      setCurrentPage(1);
-                    }}
+                    onClick={() => updateParams({ flash_sale: null })}
                     className="underline font-semibold hover:text-red-900"
                   >
                     Show all products
@@ -681,7 +795,7 @@ const Category = () => {
                     <label className="block text-sm font-medium mb-1">Sort By</label>
                     <select
                       value={sortBy}
-                      onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}
+                      onChange={(e) => handleSortChange(e.target.value)}
                       className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500"
                     >
                       <option value="-created_at">Newest First</option>
@@ -698,7 +812,7 @@ const Category = () => {
                     <label className="block text-sm font-medium mb-1">Items Per Page</label>
                     <select
                       value={itemsPerPage}
-                      onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                      onChange={(e) => handlePageSizeChange(Number(e.target.value))}
                       className="w-full border rounded-lg px-3 py-2 text-sm"
                     >
                       <option value={12}>12 per page</option>
@@ -828,7 +942,7 @@ const Category = () => {
                 <div className="flex justify-center mt-8">
                   <nav className="flex items-center gap-1">
                     <button
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      onClick={() => goToPage(Math.max(1, currentPage - 1))}
                       disabled={currentPage === 1}
                       className="px-3 py-1 border rounded-md disabled:opacity-50 hover:bg-gray-100"
                     >
@@ -837,7 +951,7 @@ const Category = () => {
 
                     {currentPage > 3 && (
                       <>
-                        <button onClick={() => setCurrentPage(1)} className="px-3 py-1 border rounded-md hover:bg-gray-100">1</button>
+                        <button onClick={() => goToPage(1)} className="px-3 py-1 border rounded-md hover:bg-gray-100">1</button>
                         {currentPage > 4 && <span className="px-2">…</span>}
                       </>
                     )}
@@ -845,7 +959,7 @@ const Category = () => {
                     {getPageNumbers().map((num) => (
                       <button
                         key={num}
-                        onClick={() => setCurrentPage(num)}
+                        onClick={() => goToPage(num)}
                         className={`px-3 py-1 border rounded-md ${currentPage === num ? 'bg-teal-600 text-white border-teal-600' : 'hover:bg-gray-100'}`}
                       >
                         {num}
@@ -855,14 +969,14 @@ const Category = () => {
                     {currentPage < totalPages - 2 && (
                       <>
                         {currentPage < totalPages - 3 && <span className="px-2">…</span>}
-                        <button onClick={() => setCurrentPage(totalPages)} className="px-3 py-1 border rounded-md hover:bg-gray-100">
+                        <button onClick={() => goToPage(totalPages)} className="px-3 py-1 border rounded-md hover:bg-gray-100">
                           {totalPages}
                         </button>
                       </>
                     )}
 
                     <button
-                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      onClick={() => goToPage(Math.min(totalPages, currentPage + 1))}
                       disabled={currentPage === totalPages}
                       className="px-3 py-1 border rounded-md disabled:opacity-50 hover:bg-gray-100"
                     >

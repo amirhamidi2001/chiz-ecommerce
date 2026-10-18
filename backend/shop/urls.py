@@ -5,8 +5,10 @@ from .views import (
     CategoryListView,
     ColorListView,
     ProductDetailView,
+    ProductFacetCountsView,
     ProductListView,
     ProductReviewCreateView,
+    ProductSuggestView,
     RelatedProductsView,
     ReviewReportCreateView,
     StockAlertSubscriptionView,
@@ -17,6 +19,14 @@ urlpatterns = [
     path("brands/", BrandListView.as_view(), name="brand-list"),
     path("colors/", ColorListView.as_view(), name="color-list"),
     path("products/", ProductListView.as_view(), name="product-list"),
+    # MUST stay above products/<slug:slug>/ — "suggest" is a valid slug, so
+    # listed after it the detail view would swallow this URL and 404.
+    path("products/suggest/", ProductSuggestView.as_view(), name="product-suggest"),
+    path(
+        "products/facet-counts/",
+        ProductFacetCountsView.as_view(),
+        name="product-facet-counts",
+    ),
     path("products/<slug:slug>/", ProductDetailView.as_view(), name="product-detail"),
     path(
         "products/<slug:slug>/related/",

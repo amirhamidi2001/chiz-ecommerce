@@ -1,11 +1,13 @@
 import hashlib
+import logging
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Count, F, Prefetch
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django_filters import utils as filter_utils
 from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order, OrderItem
 from promotions.models import FlashSale
@@ -14,31 +16,40 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .filters import ProductFilter
+from .filters import ProductFilter, RelevanceOrderingFilter
 from .models import (
     Brand,
     Category,
     Color,
+    HairType,
     Product,
+    ProductGender,
     ProductVariant,
     Review,
     ReviewImage,
     ReviewReport,
+    SkinType,
     StockAlertSubscription,
 )
 from .pagination import StandardResultsPagination
+from .search import apply_product_search, filter_products_by_search, search_log_term
 from .serializers import (
     BrandSerializer,
     CategorySerializer,
     ColorSerializer,
     ProductDetailSerializer,
     ProductListSerializer,
+    ProductSuggestSerializer,
     ReviewCreateSerializer,
     ReviewReportCreateSerializer,
     ReviewSerializer,
     StockAlertSubscriptionSerializer,
 )
 from .services import refresh_product_review_stats
+from .tasks import log_search_query
+from .text_utils import normalize_persian_text
+
+logger = logging.getLogger(__name__)
 
 # ─── Categories ────────────────────────────────────────────────────────────────
 # Cache key carries an explicit version suffix: if CategorySerializer's output
@@ -123,37 +134,70 @@ class ProductListView(generics.ListAPIView):
     permission_classes = [AllowAny]
     serializer_class = ProductListSerializer
     pagination_class = StandardResultsPagination
-    filter_backends = [
-        DjangoFilterBackend,
-        filters.SearchFilter,
-        filters.OrderingFilter,
-    ]
+    # Search is no longer a DRF SearchFilter: ?search= is handled in
+    # get_queryset() with Postgres full-text search (weighted, ranked, GIN
+    # indexed — see shop/search.py). RelevanceOrderingFilter makes relevance
+    # the default order while searching; an explicit ?ordering= still wins.
+    filter_backends = [DjangoFilterBackend, RelevanceOrderingFilter]
     filterset_class = ProductFilter
-    search_fields = [
-        "name",
-        "short_description",
-        "description",
-        "brand__name",
-        "category__name",
-    ]
     ordering_fields = ["price", "rating", "created_at", "reviews_count"]
     ordering = ["-created_at"]
+    # Set by get_queryset(); read by RelevanceOrderingFilter.
+    is_ranked_search = False
 
     def get_queryset(self):
-        return (
-            Product.objects.select_related("category", "brand")
-            .prefetch_related("colors__color", *_current_flash_sale_prefetches())
-            .all()
+        queryset = (
+            Product.objects.select_related("category", "brand").prefetch_related(
+                "colors__color", *_current_flash_sale_prefetches()
+            )
+            # The tsvector is only ever used inside SQL; don't ship it to
+            # Python for every row of every list page.
+            .defer("search_vector")
         )
+        request = getattr(self, "request", None)  # None during schema generation
+        raw_term = request.query_params.get("search", "") if request else ""
+        queryset, self.is_ranked_search = apply_product_search(queryset, raw_term)
+        return queryset
 
     def list(self, request, *args, **kwargs):
         cache_key = self._build_cache_key(request)
         cached = cache.get(cache_key)
         if cached is not None:
+            # Cache hits are real searches too: without this, a popular term
+            # would be logged once per TTL instead of once per search.
+            self._log_search(request, cached)
             return Response(cached)
         response = super().list(request, *args, **kwargs)
         cache.set(cache_key, response.data, timeout=PRODUCT_LIST_CACHE_TTL)
+        self._log_search(request, response.data)
         return response
+
+    def _log_search(self, request, data):
+        """
+        Record a customer search for analytics, without slowing it down.
+
+        Runs AFTER the response data exists (this is why it lives in list(),
+        not get_queryset(), which runs before any query) and reads the match
+        count straight out of that data: DRF's paginator has already done the
+        COUNT for the response's `count` field, so logging adds no database
+        query to the search request — only a Celery enqueue.
+
+        Not logged: normal browsing (no/blank ?search=), and pages after the
+        first (paging through one result set is not a new search).
+        """
+        term = search_log_term(request.query_params.get("search"))
+        if not term:
+            return
+        if request.query_params.get("page") not in (None, "", "1"):
+            return
+        count = data.get("count") if isinstance(data, dict) else len(data)
+        user = request.user
+        try:
+            log_search_query.delay(
+                term, count, user.id if user.is_authenticated else None
+            )
+        except Exception:  # broker down etc. — analytics must never break search
+            logger.warning("Could not enqueue search-query log", exc_info=True)
 
     def _build_cache_key(self, request):
         # Sort query params for a stable, order-independent key — ?category=1&
@@ -171,6 +215,153 @@ class ProductListView(generics.ListAPIView):
         params_str = "&".join(f"{k}={v}" for k, v in params)
         params_hash = hashlib.md5(params_str.encode()).hexdigest()
         return f"product_list_v1:{params_hash}"
+
+
+# ─── Product autocomplete ──────────────────────────────────────────────────────
+SUGGEST_MIN_LENGTH = 2
+SUGGEST_LIMIT = 8
+
+
+class ProductSuggestView(generics.ListAPIView):
+    """
+    GET /api/products/suggest/?q=<term> — a handful of top matches for a
+    search-box dropdown: id, name, slug, price, thumbnail_url only.
+
+    Uses apply_product_search() — the same normalisation, prefix tsquery
+    and weighted ranking as ProductListView's ?search= — so "lip" finds
+    "Lipstick" while typing and Arabic/Persian character variants and ZWNJ
+    behave identically in both places.
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = ProductSuggestSerializer
+    pagination_class = None  # a dropdown, not a results page
+    # No DRF default backends: OrderingFilter would try to re-order the
+    # sliced queryset on ?ordering= (AssertionError -> 500) and nothing here
+    # is user-filterable anyway.
+    filter_backends = []
+
+    def get_queryset(self):
+        # Normalise BEFORE measuring: "ك" + ZWNJ is 2 characters typed but
+        # 1 searchable character.
+        term = normalize_persian_text(self.request.query_params.get("q", "")).strip()
+        if len(term) < SUGGEST_MIN_LENGTH:
+            # Short-circuit: no database query at all for a single keystroke.
+            return Product.objects.none()
+        queryset, is_ranked = apply_product_search(
+            Product.objects.only("id", "name", "slug", "price", "thumbnail"), term
+        )
+        if not is_ranked:
+            # Long enough but nothing searchable (e.g. "!!!"): already
+            # .none(), and has no `rank` annotation to order by.
+            return queryset
+        return queryset.order_by("-rank", "-created_at", "-pk")[:SUGGEST_LIMIT]
+
+
+# ─── Facet counts ──────────────────────────────────────────────────────────────
+class ProductFacetCountsView(APIView):
+    """
+    GET /api/products/facet-counts/?<the same filter params as /products/>
+
+    For each cosmetics facet, how many products match each of its options
+    GIVEN the other active filters. Each facet is counted against every
+    active filter EXCEPT ITS OWN, so a customer who has picked "Oily" still
+    sees what "Dry" or "Normal" would yield — the standard faceted-search
+    behaviour. (Within one facet the options are OR-ed, so each count is "what
+    selecting just this option would give", not "on top of my current ones".)
+
+        {
+          "skin_type": {"oily": 12, "dry": 3, ..., "all": 0},   # every option, zeros included
+          "hair_type": {...},
+          "gender":    {"unisex": 10, "female": 4, "male": 1},
+          "is_cruelty_free": 8, "is_vegan": 5, "is_organic": 2   # products with the flag
+        }
+
+    Every filter the list endpoint understands applies — category, brand,
+    colour, price, SPF, flash sale AND ?search= (a facet count that ignored
+    the search term would be catalogue-wide, not "of these results").
+    SPF is a range, not a list of discrete options, so it has no counts.
+    paging/ordering params are accepted and ignored.
+    """
+
+    permission_classes = [AllowAny]
+
+    LIST_FACETS = {
+        "skin_type": SkinType,
+        "hair_type": HairType,
+        "gender": ProductGender,
+    }
+    BOOLEAN_FACETS = ("is_cruelty_free", "is_vegan", "is_organic")
+    # Don't affect counts, and must not fragment the cache key.
+    IGNORED_PARAMS = frozenset({"page", "page_size", "ordering"})
+
+    def get(self, request):
+        params = {
+            k: v
+            for k, v in request.query_params.items()
+            if k not in self.IGNORED_PARAMS
+        }
+
+        # Same validation (and the same 400 body) the list endpoint gives for
+        # e.g. ?min_spf=abc — rather than quietly counting an empty set.
+        filterset = ProductFilter(params, queryset=Product.objects.none())
+        if not filterset.is_valid():
+            raise filter_utils.translate_validation(filterset.errors)
+
+        cache_key = self._build_cache_key(params)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        counts = {}
+        for facet, choices in self.LIST_FACETS.items():
+            counts[facet] = self._list_facet_counts(params, facet, choices)
+        for facet in self.BOOLEAN_FACETS:
+            counts[facet] = (
+                self._filtered(params, exclude=facet)
+                .filter(**{facet: True})
+                .aggregate(n=Count("id", distinct=True))["n"]
+            )
+
+        cache.set(cache_key, counts, timeout=PRODUCT_LIST_CACHE_TTL)
+        return Response(counts)
+
+    def _filtered(self, params, exclude):
+        """
+        Products matching every active filter except `exclude` — built with
+        the SAME ProductFilter and search the list endpoint uses, so these
+        counts can't drift from what the list would actually return.
+        """
+        data = {k: v for k, v in params.items() if k != exclude}
+        queryset = ProductFilter(data, queryset=Product.objects.all()).qs
+        return filter_products_by_search(queryset, params.get("search"))
+
+    def _list_facet_counts(self, params, facet, choices):
+        values = [value for value, _label in choices.choices]
+        rows = (
+            self._filtered(params, exclude=facet)
+            .filter(**{f"{facet}__in": values})  # drops the blank "not set" value
+            .order_by()  # no default -created_at in the GROUP BY
+            .values(facet)
+            # distinct=True: filters that JOIN (colour, flash sale) can repeat
+            # a product's row, and a plain COUNT would count it twice.
+            .annotate(n=Count("id", distinct=True))
+        )
+        found = {row[facet]: row["n"] for row in rows}
+        # Every option is present, zeros included, so a client never has to
+        # guess whether a missing value means "none" or "unknown".
+        return {value: found.get(value, 0) for value in values}
+
+    def _build_cache_key(self, params):
+        # Deliberately inside the "product_list_v1:" namespace:
+        # signals.invalidate_product_list_cache() deletes "*product_list_v1:*",
+        # so product / flash-sale / stock changes clear these counts together
+        # with the cached list pages, with no separate invalidation to keep in
+        # sync. (test_facet_counts.py locks this in.)
+        # Sorted + order-independent like ProductListView._build_cache_key; see
+        # the note there about repeated query keys.
+        params_str = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        return f"product_list_v1:facets:{hashlib.md5(params_str.encode()).hexdigest()}"
 
 
 # ─── Product detail ────────────────────────────────────────────────────────────

@@ -25,10 +25,7 @@ import pytest
 from cart.models import Cart, CartItem
 from cart.serializers import CartItemSerializer
 from dashboard.models import Wishlist
-from dashboard.services import (
-    get_purchasable_variants,
-    move_wishlist_item_to_cart,
-)
+from dashboard.services import get_purchasable_variants, move_wishlist_item_to_cart
 from django.core.cache import cache
 from django.utils import timezone
 from rest_framework import status

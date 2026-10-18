@@ -215,3 +215,218 @@ class TestMigrateProductsToVariants:
 
         assert ProductVariant.objects.filter(pk=hand_made.pk).exists()
         assert ProductVariant.objects.count() == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 0032_backfill_product_search_vectors
+# ═══════════════════════════════════════════════════════════════════════════════
+import re  # noqa: E402
+
+from django.contrib.postgres.search import SearchQuery  # noqa: E402
+from django.db import connection  # noqa: E402
+from django.db.migrations.loader import MigrationLoader  # noqa: E402
+from shop.models import Product  # noqa: E402
+from shop.tests.factories import BrandFactory, CategoryFactory  # noqa: E402
+
+backfill_module = importlib.import_module(
+    "shop.migrations.0032_backfill_product_search_vectors"
+)
+
+
+def historical_apps():
+    """
+    The app registry exactly as it is at migration 0032 — real HISTORICAL
+    model classes (no custom save(), no signals), not the live ones. Running
+    the backfill against these is what proves it works inside a migration;
+    calling it with the live registry would not.
+    """
+    loader = MigrationLoader(connection)
+    return loader.project_state([("shop", "0032_backfill_product_search_vectors")]).apps
+
+
+def stored_vector(product):
+    return Product.objects.get(pk=product.pk).search_vector
+
+
+@pytest.mark.django_db
+class TestBackfillProductSearchVectors:
+
+    def _seed_pre_existing_rows(self):
+        """Rows as they exist before the migration: search_vector is NULL."""
+        full = ProductFactory(
+            name="Alpha",
+            brand=BrandFactory(name="Bravo"),
+            category=CategoryFactory(name="Charlie"),
+            short_description="Delta",
+            description="Echo",
+        )
+        no_brand_or_category = ProductFactory(
+            name="Foxtrot",
+            brand=None,
+            category=None,
+            short_description="",
+            description="",
+        )
+        persian = ProductFactory(
+            name="کرم مرطوب کننده",
+            brand=None,
+            category=None,
+            description="مناسب پوست خشک",
+        )
+        products = [full, no_brand_or_category, persian]
+        Product.objects.update(search_vector=None)
+        assert all(stored_vector(p) is None for p in products)
+        return full, no_brand_or_category, persian
+
+    def test_populates_every_preexisting_row(self):
+        products = self._seed_pre_existing_rows()
+
+        backfill_module.backfill_search_vectors(historical_apps(), None)
+
+        assert all(stored_vector(p) for p in products)
+        assert not Product.objects.filter(search_vector__isnull=True).exists()
+
+    def test_backfilled_vector_has_weighted_related_and_own_fields(self):
+        full, *_ = self._seed_pre_existing_rows()
+
+        backfill_module.backfill_search_vectors(historical_apps(), None)
+
+        stored = stored_vector(full)
+
+        def weight(lexeme):
+            return re.search(rf"'{lexeme}':\d+([A-D]?)", stored).group(1)
+
+        assert weight("alpha") == "A"
+        assert weight("bravo") == "A"
+        assert weight("charlie") == "B"
+        assert weight("delta") == "B"
+        assert weight("echo") == "C"
+
+    def test_rows_without_brand_or_category_are_backfilled_not_nulled(self):
+        _, no_brand_or_category, _ = self._seed_pre_existing_rows()
+
+        backfill_module.backfill_search_vectors(historical_apps(), None)
+
+        assert "'foxtrot'" in stored_vector(no_brand_or_category)
+
+    def test_backfilled_rows_are_findable(self):
+        full, no_brand_or_category, persian = self._seed_pre_existing_rows()
+
+        backfill_module.backfill_search_vectors(historical_apps(), None)
+
+        def finds(term, product):
+            return Product.objects.filter(
+                pk=product.pk, search_vector=SearchQuery(term, config="simple")
+            ).exists()
+
+        assert finds("bravo", full)  # via brand
+        assert finds("charlie", full)  # via category
+        assert finds("foxtrot", no_brand_or_category)
+        assert finds("مرطوب", persian)
+
+    def test_backfill_matches_what_save_produces(self):
+        """Migration and Product.save() must build the SAME vector."""
+        product = ProductFactory(
+            brand=BrandFactory(name="Same Brand"),
+            category=CategoryFactory(name="Same Cat"),
+        )
+        via_save = stored_vector(product)
+        Product.objects.filter(pk=product.pk).update(search_vector=None)
+
+        backfill_module.backfill_search_vectors(historical_apps(), None)
+
+        assert stored_vector(product) == via_save
+
+    def test_is_idempotent(self):
+        products = self._seed_pre_existing_rows()
+        backfill_module.backfill_search_vectors(historical_apps(), None)
+        first = [stored_vector(p) for p in products]
+
+        backfill_module.backfill_search_vectors(historical_apps(), None)
+
+        assert [stored_vector(p) for p in products] == first
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 0033_normalize_persian_text
+# ═══════════════════════════════════════════════════════════════════════════════
+normalize_module = importlib.import_module(
+    "shop.migrations.0033_normalize_persian_text"
+)
+
+
+def apps_at_0033():
+    loader = MigrationLoader(connection)
+    return loader.project_state([("shop", "0033_normalize_persian_text")]).apps
+
+
+@pytest.mark.django_db
+class TestNormalizeCatalogTextMigration:
+
+    def _seed_dirty_rows(self):
+        """Rows as they exist before this migration: written with variants/ZWNJ,
+        bypassing save() (which would now normalise them)."""
+        brand = BrandFactory(name="B")
+        category = CategoryFactory(name="C")
+        dirty = ProductFactory(name="x", brand=brand, category=category)
+        clean = ProductFactory(
+            name="Already Clean", short_description="", description=""
+        )
+        type(brand).objects.filter(pk=brand.pk).update(name="كيان")
+        type(category).objects.filter(pk=category.pk).update(name="آرايشي")
+        Product.objects.filter(pk=dirty.pk).update(
+            name="كرم ضد\u200cآفتاب",
+            short_description="خشك",
+            description="گياهي",
+            search_vector=None,
+        )
+        return dirty, clean
+
+    def test_existing_rows_are_normalized(self):
+        dirty, _ = self._seed_dirty_rows()
+
+        normalize_module.normalize_catalog_text(apps_at_0033(), None)
+
+        dirty.refresh_from_db()
+        assert dirty.name == "کرم ضدآفتاب"
+        assert dirty.short_description == "خشک"
+        assert dirty.description == "گیاهی"
+        assert dirty.brand.name == "کیان"
+        assert dirty.category.name == "آرایشی"
+
+    def test_search_vectors_are_rebuilt_from_normalized_text(self):
+        dirty, _ = self._seed_dirty_rows()
+
+        normalize_module.normalize_catalog_text(apps_at_0033(), None)
+
+        def finds(term):
+            return Product.objects.filter(
+                pk=dirty.pk, search_vector=SearchQuery(term, config="simple")
+            ).exists()
+
+        assert finds("ضدآفتاب")  # ZWNJ gone
+        assert finds("کیان")  # via normalised brand
+        assert finds("آرایشی")  # via normalised category
+        assert finds("گیاهی")
+
+    def test_slugs_and_already_clean_rows_are_untouched(self):
+        dirty, clean = self._seed_dirty_rows()
+        slug_before = Product.objects.get(pk=dirty.pk).slug
+
+        normalize_module.normalize_catalog_text(apps_at_0033(), None)
+
+        assert Product.objects.get(pk=dirty.pk).slug == slug_before
+        clean.refresh_from_db()
+        assert clean.name == "Already Clean"
+        assert Product.objects.filter(search_vector__isnull=True).count() == 0
+
+    def test_is_idempotent(self):
+        dirty, _ = self._seed_dirty_rows()
+        normalize_module.normalize_catalog_text(apps_at_0033(), None)
+        first = Product.objects.get(pk=dirty.pk)
+        snapshot = (first.name, first.description, first.search_vector)
+
+        normalize_module.normalize_catalog_text(apps_at_0033(), None)
+
+        again = Product.objects.get(pk=dirty.pk)
+        assert (again.name, again.description, again.search_vector) == snapshot

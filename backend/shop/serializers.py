@@ -246,6 +246,27 @@ class ReviewReportCreateSerializer(serializers.Serializer):
 
 
 # ─── Product list serializer — lightweight, no nested reviews ─────────────────
+class ProductSuggestSerializer(serializers.ModelSerializer):
+    """
+    DELIBERATELY minimal — everything an autocomplete dropdown row needs and
+    nothing more. Not a subclass of ProductListSerializer, which carries
+    category/brand/flash-sale/badge fields (and the queries behind them).
+    """
+
+    thumbnail_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = ["id", "name", "slug", "price", "thumbnail_url"]
+
+    # Identical to ProductListSerializer.get_thumbnail_url.
+    def get_thumbnail_url(self, obj):
+        request = self.context.get("request")
+        if obj.thumbnail and request:
+            return request.build_absolute_uri(obj.thumbnail.url)
+        return None
+
+
 class ProductListSerializer(serializers.ModelSerializer):
     category = CategoryMinimalSerializer(read_only=True)
     brand = BrandSerializer(read_only=True)

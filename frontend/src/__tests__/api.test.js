@@ -44,6 +44,7 @@ import {
   parseErrors,
   authAPI,
   getProducts,
+  getProductSuggestions,
   getProductDetails,
   getRelatedProducts,
   createReview,
@@ -535,6 +536,26 @@ describe('Shop API', () => {
       await getProducts({ page: 2, category: 'shoes' });
       expect(mockAxiosInstance.get).toHaveBeenCalledWith('/products/', {
         params: { page: 2, category: 'shoes' },
+      });
+    });
+  });
+
+  describe('getProductSuggestions()', () => {
+    it('GETs /products/suggest/ with the term as the q param', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith([]));
+      await getProductSuggestions('lipstick');
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/products/suggest/', {
+        params: { q: 'lipstick' },
+      });
+    });
+
+    it('forwards axios config such as an AbortSignal', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith([]));
+      const { signal } = new AbortController();
+      await getProductSuggestions('lip', { signal });
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/products/suggest/', {
+        params: { q: 'lip' },
+        signal,
       });
     });
   });
@@ -1427,7 +1448,7 @@ describe('Module exports', () => {
       'getAccessToken', 'getRefreshToken', 'setTokens', 'clearTokens', 'isAuthenticated',
       'parseErrors',
       'authAPI',
-      'getProducts', 'getProductDetails', 'getRelatedProducts', 'createReview',
+      'getProducts', 'getProductSuggestions', 'getProductDetails', 'getRelatedProducts', 'createReview',
       'getCategories', 'getBrands', 'getColors',
       'getCart', 'addToCart', 'updateCartItem', 'removeCartItem', 'clearCart', 'applyCoupon', 'removeCoupon', 'getActiveFlashSales', 'cartAPI',
       'createOrder', 'getOrders', 'getOrderDetail', 'cancelOrder',
