@@ -247,6 +247,18 @@ export const getProductDetails = (slug) =>
 export const getRelatedProducts = (slug) =>
   api.get(`/products/${slug}/related/`);
 
+/** GET /products/<slug>/frequently-bought-together/ — purchase co-occurrence ("Customers Also Bought"). */
+export const getFrequentlyBoughtTogether = (slug) =>
+  api.get(`/products/${slug}/frequently-bought-together/`);
+
+/**
+ * POST /products/home-recommendations/ — category-affinity picks for the homepage.
+ * POST (not GET) only because the viewed-ids list lives in localStorage and is
+ * sent in the body; nothing is created server-side.
+ */
+export const getHomeRecommendations = (viewedProductIds) =>
+  api.post('/products/home-recommendations/', { viewed_product_ids: viewedProductIds });
+
 /**
  * POST /products/<slug>/reviews/
  * Requires authentication — reviews are tied to the logged-in user's

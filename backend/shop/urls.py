@@ -4,6 +4,8 @@ from .views import (
     BrandListView,
     CategoryListView,
     ColorListView,
+    FrequentlyBoughtTogetherView,
+    HomeRecommendationsView,
     ProductDetailView,
     ProductFacetCountsView,
     ProductListView,
@@ -27,11 +29,23 @@ urlpatterns = [
         ProductFacetCountsView.as_view(),
         name="product-facet-counts",
     ),
+    # MUST stay above products/<slug:slug>/ — "home-recommendations" is a valid
+    # slug, so listed after it the detail view would swallow this URL (405 on POST).
+    path(
+        "products/home-recommendations/",
+        HomeRecommendationsView.as_view(),
+        name="home-recommendations",
+    ),
     path("products/<slug:slug>/", ProductDetailView.as_view(), name="product-detail"),
     path(
         "products/<slug:slug>/related/",
         RelatedProductsView.as_view(),
         name="product-related",
+    ),
+    path(
+        "products/<slug:slug>/frequently-bought-together/",
+        FrequentlyBoughtTogetherView.as_view(),
+        name="product-fbt",
     ),
     # POST a new review for a specific product
     path(

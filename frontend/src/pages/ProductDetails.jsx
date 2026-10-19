@@ -1,10 +1,11 @@
 // src/pages/ProductDetails.jsx
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { getProductDetails, getRelatedProducts, createReview, subscribeStockAlert, parseErrors, isAuthenticated } from '../services/api';
+import { getProductDetails, getRelatedProducts, getFrequentlyBoughtTogether, createReview, subscribeStockAlert, parseErrors, isAuthenticated } from '../services/api';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { STORE_NAME } from '../constants/store';
+import { addRecentlyViewed } from '../utils/recentlyViewed';
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 const Spinner = () => (
@@ -424,6 +425,7 @@ const ProductDetails = () => {
 
   const [product, setProduct] = useState(null);
   const [relatedProducts, setRelatedProducts] = useState([]);
+  const [frequentlyBoughtTogether, setFrequentlyBoughtTogether] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -464,14 +466,21 @@ const ProductDetails = () => {
       setQuantity(1);
       setActiveTab('overview');
       try {
-        const [productRes, relatedRes] = await Promise.all([
+        const [productRes, relatedRes, fbtRes] = await Promise.all([
           getProductDetails(slug),
           getRelatedProducts(slug).catch(() => ({ data: [] })),
+          getFrequentlyBoughtTogether(slug).catch(() => ({ data: [] })),
         ]);
         const data = productRes.data;
         setProduct(data);
+        // Only after the product actually loaded, so name/thumbnail/price are real.
+        // Never throws (storage errors are swallowed inside the util).
+        addRecentlyViewed(data);
         setRelatedProducts(
           Array.isArray(relatedRes.data) ? relatedRes.data : relatedRes.data.results || [],
+        );
+        setFrequentlyBoughtTogether(
+          Array.isArray(fbtRes.data) ? fbtRes.data : fbtRes.data?.results || [],
         );
 
         const firstImage =
@@ -1221,6 +1230,21 @@ const ProductDetails = () => {
               </div>
             )}
           </div>
+
+          {/* Customers Also Bought — purchase co-occurrence (not category-based).
+              No "View All" link: there is no page this could sensibly link to. */}
+          {frequentlyBoughtTogether.length > 0 && (
+            <div className="mt-16">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-800">Customers Also Bought</h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
+                {frequentlyBoughtTogether.map((p) => (
+                  <RelatedCard key={p.id} product={p} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Related Products */}
           {relatedProducts.length > 0 && (

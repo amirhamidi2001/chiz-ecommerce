@@ -47,6 +47,8 @@ import {
   getProductSuggestions,
   getProductDetails,
   getRelatedProducts,
+  getFrequentlyBoughtTogether,
+  getHomeRecommendations,
   createReview,
   getCategories,
   getBrands,
@@ -573,6 +575,26 @@ describe('Shop API', () => {
       mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith([]));
       await getRelatedProducts('cool-sneakers');
       expect(mockAxiosInstance.get).toHaveBeenCalledWith('/products/cool-sneakers/related/');
+    });
+  });
+
+  describe('getFrequentlyBoughtTogether()', () => {
+    it('GETs /products/<slug>/frequently-bought-together/', async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce(resolvedWith([]));
+      await getFrequentlyBoughtTogether('cool-sneakers');
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(
+        '/products/cool-sneakers/frequently-bought-together/',
+      );
+    });
+  });
+
+  describe('getHomeRecommendations()', () => {
+    it('POSTs viewed_product_ids to /products/home-recommendations/', async () => {
+      mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith([]));
+      await getHomeRecommendations([5, 9]);
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/products/home-recommendations/', {
+        viewed_product_ids: [5, 9],
+      });
     });
   });
 

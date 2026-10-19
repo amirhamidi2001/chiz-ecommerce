@@ -4,7 +4,7 @@ import logging
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Count, F, Prefetch
+from django.db.models import Count, F, Prefetch, prefetch_related_objects
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django_filters import utils as filter_utils
@@ -32,6 +32,10 @@ from .models import (
     StockAlertSubscription,
 )
 from .pagination import StandardResultsPagination
+from .recommendations import (
+    get_category_affinity_recommendations,
+    get_frequently_bought_together,
+)
 from .search import apply_product_search, filter_products_by_search, search_log_term
 from .serializers import (
     BrandSerializer,
@@ -414,6 +418,114 @@ class RelatedProductsView(generics.ListAPIView):
             .select_related("category", "brand")
             .prefetch_related(*_current_flash_sale_prefetches())
             .order_by("-rating")[:8]
+        )
+
+
+# ─── Frequently bought together ────────────────────────────────────────────────
+class FrequentlyBoughtTogetherView(generics.ListAPIView):
+    """
+    GET /api/products/<slug>/frequently-bought-together/
+
+    Products most often purchased in the same (completed) order as this one,
+    ranked by co-occurrence. See shop.recommendations. Unknown slug -> 404;
+    a product with no co-purchase history -> 200 with [].
+    """
+
+    permission_classes = [AllowAny]
+    serializer_class = ProductListSerializer
+    pagination_class = None
+    # get_queryset() returns a ranked list, not a QuerySet, so the project-wide
+    # default filter backends (DjangoFilter/Search/Ordering) must not run on it
+    # — and ?ordering= would silently discard the co-occurrence ranking anyway.
+    filter_backends = []
+
+    def get_queryset(self):
+        slug = self.kwargs.get("slug")
+        product = get_object_or_404(Product, slug=slug)
+        products = get_frequently_bought_together(product.id)
+        # The service returns an ordered list (not a queryset); attach the
+        # prefetches ProductListSerializer needs without disturbing the order.
+        prefetch_related_objects(products, *_current_flash_sale_prefetches())
+        return products
+
+
+# ─── Homepage recommendations (category affinity) ──────────────────────────────
+MAX_VIEWED_IDS = 20
+
+
+def _clean_id_list(raw, max_items=MAX_VIEWED_IDS):
+    """Client-supplied list -> de-duplicated positive ints, order kept, capped.
+
+    The list comes straight from the browser's localStorage, so it can be
+    anything. Junk is dropped silently rather than raising: a bad entry must
+    never turn a harmless homepage widget into a 400/500.
+    """
+    if not isinstance(raw, list):
+        return []
+    cleaned = []
+    for item in raw:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, str) and item.isdigit():
+            item = int(item)
+        if isinstance(item, int) and 0 < item < 2**31 and item not in cleaned:
+            cleaned.append(item)
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
+
+
+class HomeRecommendationsView(APIView):
+    """
+    POST /api/products/home-recommendations/   body: {"viewed_product_ids": [..]}
+
+    Lightweight category-affinity recommendations for the homepage (see
+    shop.recommendations.get_category_affinity_recommendations — a simple
+    heuristic, not ML).
+
+    Why POST for a read-only endpoint: the viewing history lives only in the
+    visitor's localStorage (Task 13.1.1.2, Option A), so the client has to send
+    it, and a list of up to 20 ids is awkward in a query string and risks URL
+    length limits. A JSON body is the practical tool, at the cost of REST
+    purity. Nothing is stored server-side.
+
+    Anonymous visitors rely entirely on the supplied ids. Authenticated users
+    additionally get the categories they have purchased from (completed
+    orders only), which works even when no ids are supplied.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        viewed_product_ids = _clean_id_list(data.get("viewed_product_ids"))
+
+        purchased_category_ids = None
+        if request.user.is_authenticated:
+            purchased_category_ids = list(
+                OrderItem.objects.filter(
+                    order__user=request.user,
+                    order__status__in=[
+                        Order.Status.PROCESSING,
+                        Order.Status.SHIPPED,
+                        Order.Status.DELIVERED,
+                    ],
+                    product__category_id__isnull=False,
+                )
+                .values_list("product__category_id", flat=True)
+                .distinct()
+            )
+
+        products = get_category_affinity_recommendations(
+            viewed_product_ids, purchased_category_ids
+        )
+        # The service returns a ranked list; attach the prefetches
+        # ProductListSerializer needs without disturbing the order.
+        prefetch_related_objects(products, *_current_flash_sale_prefetches())
+        return Response(
+            ProductListSerializer(
+                products, many=True, context={"request": request}
+            ).data
         )
 
 

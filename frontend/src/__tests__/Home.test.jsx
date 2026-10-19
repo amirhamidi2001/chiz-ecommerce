@@ -19,6 +19,10 @@ vi.mock('../components/BestSellers', () => ({
   default: () => <div data-testid="mock-bestsellers">Best Sellers Section</div>,
 }));
 
+vi.mock('../components/RecommendedForYou', () => ({
+  default: () => <div data-testid="mock-recommended">Recommended For You Section</div>,
+}));
+
 vi.mock('../components/Cards', () => ({
   default: () => <div data-testid="mock-cards">Cards Section</div>,
 }));
@@ -41,6 +45,7 @@ describe('Home Page', () => {
       expect(screen.getByTestId('mock-hero')).toBeInTheDocument();
       expect(screen.getByTestId('mock-promocards')).toBeInTheDocument();
       expect(screen.getByTestId('mock-bestsellers')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-recommended')).toBeInTheDocument();
       expect(screen.getByTestId('mock-cards')).toBeInTheDocument();
       expect(screen.getByTestId('mock-flashsalebanner')).toBeInTheDocument();
     });
@@ -60,7 +65,7 @@ describe('Home Page', () => {
 
       // Collect all mocked section nodes in DOM order
       const sections = within(container).getAllByTestId(
-        /^mock-(flashsalebanner|hero|promocards|bestsellers|cards)$/,
+        /^mock-(flashsalebanner|hero|promocards|bestsellers|recommended|cards)$/,
       );
 
       const orderedIds = sections.map((el) => el.dataset.testid);
@@ -70,6 +75,7 @@ describe('Home Page', () => {
         'mock-hero',
         'mock-promocards',
         'mock-bestsellers',
+        'mock-recommended',
         'mock-cards',
       ]);
     });

@@ -13,6 +13,7 @@ import { useWishlist } from '../context/WishlistContext';
 vi.mock('../services/api', () => ({
   getProductDetails: vi.fn(),
   getRelatedProducts: vi.fn(),
+  getFrequentlyBoughtTogether: vi.fn(),
   createReview: vi.fn(),
   subscribeStockAlert: vi.fn(),
   isAuthenticated: vi.fn(() => true),
@@ -74,6 +75,31 @@ const MOCK_RELATED = [
   },
 ];
 
+const MOCK_FBT = [
+  {
+    id: 21,
+    slug: 'bought-together-x',
+    name: 'Bought Together X',
+    price: '19.99',
+    rating: '4.2',
+    thumbnail_url: '/assets/img/product/product-4.webp',
+    category: { name: 'Accessories' },
+    is_sale: false,
+    is_new: false,
+  },
+  {
+    id: 22,
+    slug: 'bought-together-y',
+    name: 'Bought Together Y',
+    price: '59.99',
+    rating: '4.8',
+    thumbnail_url: '/assets/img/product/product-5.webp',
+    category: { name: 'Accessories' },
+    is_sale: false,
+    is_new: true,
+  },
+];
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -114,6 +140,8 @@ beforeEach(() => {
   // Happy-path defaults
   api.getProductDetails.mockReturnValue(resolveWith(MOCK_PRODUCT));
   api.getRelatedProducts.mockReturnValue(resolveWith(MOCK_RELATED));
+  // Default: no co-purchase data, so existing tests see only the original page.
+  api.getFrequentlyBoughtTogether.mockReturnValue(resolveWith([]));
 
   useCart.mockReturnValue({ addToCart: mockAddToCart });
   useWishlist.mockReturnValue({
@@ -245,6 +273,100 @@ describe('ProductDetails', () => {
       // Section heading still present, but no related product names
       await screen.findByRole('heading', { name: /test widget pro/i });
       expect(screen.queryByText('Related Widget A')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Customers Also Bought (frequently bought together) ─────────────────────
+
+  describe('customers also bought', () => {
+    it('renders the section heading and a card per product when results exist', async () => {
+      api.getFrequentlyBoughtTogether.mockReturnValue(resolveWith(MOCK_FBT));
+      renderProductDetails();
+
+      expect(
+        await screen.findByRole('heading', { name: /customers also bought/i }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Bought Together X')).toBeInTheDocument();
+      expect(screen.getByText('Bought Together Y')).toBeInTheDocument();
+      expect(screen.getByText('$19.99')).toBeInTheDocument();
+    });
+
+    it('fetches using the product slug from the route', async () => {
+      renderProductDetails('another-slug');
+      await screen.findByRole('heading', { name: /test widget pro/i });
+      expect(api.getFrequentlyBoughtTogether).toHaveBeenCalledWith('another-slug');
+    });
+
+    it('links each card to its product URL', async () => {
+      api.getFrequentlyBoughtTogether.mockReturnValue(resolveWith(MOCK_FBT));
+      renderProductDetails();
+      const link = await screen.findByRole('link', { name: 'Bought Together X' });
+      expect(link).toHaveAttribute('href', '/product/bought-together-x');
+    });
+
+    it('does not render the section when results are empty', async () => {
+      api.getFrequentlyBoughtTogether.mockReturnValue(resolveWith([]));
+      renderProductDetails();
+      await screen.findByRole('heading', { name: /test widget pro/i });
+      expect(
+        screen.queryByRole('heading', { name: /customers also bought/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('has no "View All" link inside its section', async () => {
+      api.getFrequentlyBoughtTogether.mockReturnValue(resolveWith(MOCK_FBT));
+      renderProductDetails();
+      const heading = await screen.findByRole('heading', { name: /customers also bought/i });
+      const section = heading.closest('div.mt-16');
+      expect(within(section).queryByText(/view all/i)).not.toBeInTheDocument();
+    });
+
+    it('a failed fetch hides only this section; the page and Related Products still render', async () => {
+      api.getFrequentlyBoughtTogether.mockReturnValue(rejectWith(500));
+      renderProductDetails();
+
+      expect(await screen.findByRole('heading', { name: /test widget pro/i })).toBeInTheDocument();
+      expect(
+        screen.queryByRole('heading', { name: /customers also bought/i }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/failed to load product/i)).not.toBeInTheDocument();
+      // unrelated section is unaffected
+      expect(screen.getByRole('heading', { name: /related products/i })).toBeInTheDocument();
+      expect(screen.getByText('Related Widget A')).toBeInTheDocument();
+    });
+
+    it('renders both sections independently, each with its own data', async () => {
+      api.getRelatedProducts.mockReturnValue(resolveWith(MOCK_RELATED));
+      api.getFrequentlyBoughtTogether.mockReturnValue(resolveWith(MOCK_FBT));
+      renderProductDetails();
+
+      const fbtHeading = await screen.findByRole('heading', { name: /customers also bought/i });
+      const relatedHeading = screen.getByRole('heading', { name: /related products/i });
+      const fbtSection = fbtHeading.closest('div.mt-16');
+      const relatedSection = relatedHeading.closest('div.mt-16');
+      expect(fbtSection).not.toBe(relatedSection);
+
+      // each section contains only its own source's products
+      expect(within(fbtSection).getByText('Bought Together X')).toBeInTheDocument();
+      expect(within(fbtSection).getByText('Bought Together Y')).toBeInTheDocument();
+      expect(within(fbtSection).queryByText('Related Widget A')).not.toBeInTheDocument();
+
+      expect(within(relatedSection).getByText('Related Widget A')).toBeInTheDocument();
+      expect(within(relatedSection).getByText('Related Widget B')).toBeInTheDocument();
+      expect(within(relatedSection).queryByText('Bought Together X')).not.toBeInTheDocument();
+    });
+
+    it('Related Products still renders when Customers Also Bought is empty, and vice versa', async () => {
+      api.getRelatedProducts.mockReturnValue(resolveWith([]));
+      api.getFrequentlyBoughtTogether.mockReturnValue(resolveWith(MOCK_FBT));
+      renderProductDetails();
+
+      expect(
+        await screen.findByRole('heading', { name: /customers also bought/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('heading', { name: /related products/i }),
+      ).not.toBeInTheDocument();
     });
   });
 

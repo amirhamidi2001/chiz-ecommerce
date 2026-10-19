@@ -3,6 +3,7 @@ import FlashSaleBanner from '../components/FlashSaleBanner';
 import Hero from '../components/Hero';
 import PromoCards from '../components/PromoCards';
 import BestSellers from '../components/BestSellers';
+import RecommendedForYou from '../components/RecommendedForYou';
 import Cards from '../components/Cards';
 
 // The old hardcoded <Countdown /> section (fixed end date, fixed "50% OFF")
@@ -15,6 +16,7 @@ const Home = () => {
       <Hero />
       <PromoCards />
       <BestSellers />
+      <RecommendedForYou />
       <Cards />
     </>
   );

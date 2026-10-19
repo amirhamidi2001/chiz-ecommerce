@@ -46,7 +46,7 @@ const SkeletonCard = () => (
 );
 
 // ─── Product card ────────────────────────────────────────────────────────────
-const ProductCard = ({ product }) => {
+export const ProductCard = ({ product }) => {
   const img = product.thumbnail_url || '/assets/img/product/product-2.webp';
   const colors = product.colors?.map((pc) => pc.color) || [];
 
