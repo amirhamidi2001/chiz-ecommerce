@@ -133,6 +133,7 @@ import math
 from decimal import Decimal, InvalidOperation
 
 import requests
+from core.money import RIAL_PER_TOMAN, to_whole_toman_rial
 from django.conf import settings
 
 # Safe top-level import — same reasoning as shipping/providers/snapbox.py's
@@ -415,7 +416,12 @@ class AloPeykCarrierProvider(CarrierProvider):
             return RateQuoteResult(success=False, error_message=error)
 
         try:
-            price = Decimal(str(data.get("price")))
+            # AloPeyk quotes in TOMAN (see module docstring, item c); the
+            # whole system stores Rial, so convert at this boundary only
+            # (ADR 0001 D8) and round once to a whole Toman.
+            price = to_whole_toman_rial(
+                Decimal(str(data.get("price"))) * RIAL_PER_TOMAN
+            )
         except (InvalidOperation, TypeError):
             return RateQuoteResult(
                 success=False, error_message="AloPeyk returned an unparseable price."

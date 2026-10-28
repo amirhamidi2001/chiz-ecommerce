@@ -9,6 +9,7 @@ from django.test import TestCase
 from django.utils import timezone
 from order.models import Order
 from promotions.models import Coupon, CouponRedemption, FlashSale
+from promotions.tests.factories import _coupon_fields
 from shop.models import Product
 
 User = get_user_model()
@@ -16,15 +17,11 @@ User = get_user_model()
 
 def make_coupon(**overrides):
     now = timezone.now()
-    defaults = {
-        "code": "SUMMER20",
-        "discount_type": Coupon.DiscountType.PERCENT,
-        "value": Decimal("20.00"),
-        "valid_from": now,
-        "valid_until": now + timedelta(days=30),
-    }
-    defaults.update(overrides)
-    return Coupon(**defaults)
+    return Coupon(
+        **_coupon_fields(
+            overrides, valid_from=now, valid_until=now + timedelta(days=30)
+        )
+    )
 
 
 class CouponCodeNormalizationTests(TestCase):
@@ -61,34 +58,62 @@ class CouponCleanTests(TestCase):
         self.assertIn("valid_until", ctx.exception.message_dict)
 
     def test_rejects_percent_value_outside_zero_to_hundred(self):
-        for bad in (Decimal("0"), Decimal("-5"), Decimal("100.01"), Decimal("150")):
-            with self.subTest(value=bad):
+        for bad in (0, -5, Decimal("100.01"), 150, None):
+            with self.subTest(percent_off=bad):
                 coupon = make_coupon(
-                    discount_type=Coupon.DiscountType.PERCENT, value=bad
+                    discount_type=Coupon.DiscountType.PERCENT, percent_off=bad
                 )
                 with self.assertRaises(ValidationError) as ctx:
                     coupon.clean()
-                self.assertIn("value", ctx.exception.message_dict)
+                self.assertIn("percent_off", ctx.exception.message_dict)
 
     def test_accepts_percent_value_at_upper_bound(self):
         coupon = make_coupon(
-            discount_type=Coupon.DiscountType.PERCENT, value=Decimal("100")
+            discount_type=Coupon.DiscountType.PERCENT, percent_off=Decimal("100")
         )
         coupon.clean()  # must not raise
 
     def test_rejects_fixed_value_zero_or_negative(self):
-        for bad in (Decimal("0"), Decimal("-10")):
-            with self.subTest(value=bad):
-                coupon = make_coupon(discount_type=Coupon.DiscountType.FIXED, value=bad)
+        for bad in (0, -100000, None):
+            with self.subTest(fixed_amount=bad):
+                coupon = make_coupon(
+                    discount_type=Coupon.DiscountType.FIXED, fixed_amount=bad
+                )
                 with self.assertRaises(ValidationError) as ctx:
                     coupon.clean()
-                self.assertIn("value", ctx.exception.message_dict)
+                self.assertIn("fixed_amount", ctx.exception.message_dict)
+
+    def test_percent_coupon_must_not_carry_a_fixed_amount(self):
+        coupon = make_coupon(
+            discount_type=Coupon.DiscountType.PERCENT, fixed_amount=100_000
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            coupon.clean()
+        self.assertIn("fixed_amount", ctx.exception.message_dict)
+
+    def test_fixed_coupon_must_not_carry_a_percentage(self):
+        coupon = make_coupon(
+            discount_type=Coupon.DiscountType.FIXED,
+            fixed_amount=100_000,
+            percent_off=Decimal("10"),
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            coupon.clean()
+        self.assertIn("percent_off", ctx.exception.message_dict)
+
+    def test_fixed_amount_must_be_a_whole_toman(self):
+        coupon = make_coupon(
+            discount_type=Coupon.DiscountType.FIXED, fixed_amount=100_005
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            coupon.full_clean(exclude=["valid_from", "valid_until"])
+        self.assertIn("fixed_amount", ctx.exception.message_dict)
 
     def test_full_clean_with_missing_dates_reports_field_errors_not_typeerror(self):
         coupon = Coupon(
             code="X",
             discount_type=Coupon.DiscountType.PERCENT,
-            value=Decimal("10"),
+            percent_off=Decimal("10"),
         )
         with self.assertRaises(ValidationError) as ctx:
             coupon.full_clean()
@@ -101,7 +126,7 @@ class CouponSaveTests(TestCase):
         coupon = make_coupon(
             code="PCT10",
             discount_type=Coupon.DiscountType.PERCENT,
-            value=Decimal("10"),
+            percent_off=Decimal("10"),
         )
         coupon.full_clean()
         coupon.save()
@@ -112,14 +137,14 @@ class CouponSaveTests(TestCase):
         coupon = make_coupon(
             code="FIX50",
             discount_type=Coupon.DiscountType.FIXED,
-            value=Decimal("50000.00"),
+            fixed_amount=500_000,
         )
         coupon.full_clean()
         coupon.save()
         self.assertIsNotNone(coupon.pk)
         self.assertEqual(coupon.uses_per_user, 1)
         self.assertIsNone(coupon.max_uses)
-        self.assertEqual(coupon.min_order_amount, Decimal("0"))
+        self.assertEqual(coupon.min_order_amount, 0)
 
 
 def make_order(**overrides):
@@ -133,10 +158,10 @@ def make_order(**overrides):
         shipping_state="CA",
         shipping_zip="90001",
         shipping_country="US",
-        subtotal=Decimal("100.00"),
-        shipping_cost=Decimal("0.00"),
-        tax=Decimal("0.00"),
-        total=Decimal("80.00"),
+        subtotal=1_000_000,
+        shipping_cost=0,
+        tax=0,
+        total=800_000,
     )
     data.update(overrides)
     return Order.objects.create(**data)
@@ -152,7 +177,7 @@ class CouponRedemptionTests(TestCase):
 
     def test_can_create_without_order_then_attach_order_at_checkout(self):
         redemption = CouponRedemption.objects.create(
-            coupon=self.coupon, user=self.user, discount_amount=Decimal("20.00")
+            coupon=self.coupon, user=self.user, discount_amount=200_000
         )
         redemption.refresh_from_db()
         self.assertIsNone(redemption.order)
@@ -170,20 +195,20 @@ class CouponRedemptionTests(TestCase):
 
     def test_str_for_authenticated_user(self):
         redemption = CouponRedemption.objects.create(
-            coupon=self.coupon, user=self.user, discount_amount=Decimal("20.00")
+            coupon=self.coupon, user=self.user, discount_amount=200_000
         )
         self.assertEqual(str(redemption), "SUMMER20 redeemed by buyer@example.com")
 
     def test_str_for_user_none(self):
         redemption = CouponRedemption.objects.create(
-            coupon=self.coupon, user=None, discount_amount=Decimal("20.00")
+            coupon=self.coupon, user=None, discount_amount=200_000
         )
         self.assertEqual(str(redemption), "SUMMER20 redeemed by guest")
 
     def test_many_in_progress_redemptions_can_have_null_order(self):
         for _ in range(2):
             CouponRedemption.objects.create(
-                coupon=self.coupon, user=self.user, discount_amount=Decimal("5.00")
+                coupon=self.coupon, user=self.user, discount_amount=50_000
             )
         self.assertEqual(self.coupon.redemptions.filter(order__isnull=True).count(), 2)
 
@@ -193,19 +218,19 @@ class CouponRedemptionTests(TestCase):
             coupon=self.coupon,
             user=self.user,
             order=order,
-            discount_amount=Decimal("20.00"),
+            discount_amount=200_000,
         )
         with self.assertRaises(IntegrityError), transaction.atomic():
             CouponRedemption.objects.create(
                 coupon=self.coupon,
                 user=self.user,
                 order=order,
-                discount_amount=Decimal("20.00"),
+                discount_amount=200_000,
             )
 
     def test_deleting_user_keeps_redemption_history(self):
         redemption = CouponRedemption.objects.create(
-            coupon=self.coupon, user=self.user, discount_amount=Decimal("20.00")
+            coupon=self.coupon, user=self.user, discount_amount=200_000
         )
         self.user.delete()
         redemption.refresh_from_db()
@@ -224,7 +249,7 @@ class CouponRestrictionFieldTests(TestCase):
 
         category = Category.objects.create(name="Skincare")
         product = Product.objects.create(
-            name="Serum", slug="serum", price=Decimal("20.00"), stock=5
+            name="Serum", slug="serum", price=200_000, stock=5
         )
         coupon = make_coupon(code="SCOPED")
         coupon.save()
@@ -344,7 +369,7 @@ class FlashSaleFieldTests(TestCase):
 
     def test_products_relation_and_reverse_accessor(self):
         product = Product.objects.create(
-            name="Serum", slug="flash-serum", price=Decimal("20.00"), stock=5
+            name="Serum", slug="flash-serum", price=200_000, stock=5
         )
         sale = make_flash_sale()
         sale.save()

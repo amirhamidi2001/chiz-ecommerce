@@ -1,3 +1,4 @@
+import { formatToman, parseTomanInput, toTomanNumber, tomanToRial } from './money';
 /**
  * Coupon helpers for the admin UI.
  *
@@ -6,7 +7,7 @@
  * backend remains the source of truth and re-validates everything.
  */
 
-const MONEY_RE = /^\d+(\.\d{1,2})?$/; // max_digits=10 / decimal_places=2 on the model
+const MONEY_RE = /^\d+(\.\d{1,2})?$/; // PERCENT only: Coupon.percent_off is Decimal(5,2)
 const INT_RE = /^\d+$/;
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -47,9 +48,18 @@ export const EMPTY_COUPON_FORM = {
 export const couponToForm = (coupon) => ({
   code: coupon.code ?? "",
   discount_type: coupon.discount_type ?? "percent",
-  value: coupon.value != null ? String(coupon.value) : "",
+  // One "Value" input whose unit follows discount_type: a percentage, or TOMAN
+  // (the API's fixed_amount / min_order_amount are Rial — converted here only).
+  value:
+    coupon.discount_type === "fixed"
+      ? coupon.fixed_amount != null
+        ? String(toTomanNumber(coupon.fixed_amount))
+        : ""
+      : coupon.percent_off != null
+        ? String(parseFloat(coupon.percent_off))
+        : "",
   min_order_amount:
-    coupon.min_order_amount != null ? String(coupon.min_order_amount) : "0",
+    coupon.min_order_amount != null ? String(toTomanNumber(coupon.min_order_amount)) : "0",
   max_uses: coupon.max_uses != null ? String(coupon.max_uses) : "",
   uses_per_user:
     coupon.uses_per_user != null ? String(coupon.uses_per_user) : "1",
@@ -64,8 +74,13 @@ export const couponToForm = (coupon) => ({
 export const buildCouponPayload = (form) => ({
   code: form.code.trim().toUpperCase(),
   discount_type: form.discount_type,
-  value: String(form.value).trim(),
-  min_order_amount: String(form.min_order_amount).trim() || "0",
+  // percent_off XOR fixed_amount (the API has two explicit columns; ADR 0001 §7.3).
+  percent_off: form.discount_type === "percent" ? String(form.value).trim() : null,
+  fixed_amount:
+    form.discount_type === "fixed"
+      ? tomanToRial(parseTomanInput(form.value) ?? 0)
+      : null,
+  min_order_amount: tomanToRial(parseTomanInput(form.min_order_amount) ?? 0),
   max_uses: String(form.max_uses).trim() === "" ? null : Number(form.max_uses),
   uses_per_user: Number(form.uses_per_user),
   valid_from: fromLocalInput(form.valid_from),
@@ -97,21 +112,22 @@ export const validateCouponForm = (form) => {
   const value = String(form.value ?? "").trim();
   if (!value) {
     errors.value = "Enter a discount value.";
-  } else if (!MONEY_RE.test(value)) {
-    errors.value = "Enter a positive number with at most 2 decimal places.";
   } else if (form.discount_type === "percent") {
-    const n = Number(value);
-    if (!(n > 0 && n <= 100)) {
+    if (!MONEY_RE.test(value)) {
+      errors.value = "Enter a positive number with at most 2 decimal places.";
+    } else if (!(Number(value) > 0 && Number(value) <= 100)) {
       errors.value = "Percentage must be greater than 0 and at most 100.";
     }
-  } else if (!(Number(value) > 0)) {
-    errors.value = "Fixed amount must be greater than 0.";
+  } else {
+    // Fixed amounts are typed in whole Toman.
+    const toman = parseTomanInput(value);
+    if (toman === null) errors.value = "Enter a whole number of Toman.";
+    else if (!(toman > 0)) errors.value = "Fixed amount must be greater than 0.";
   }
 
   const minOrder = String(form.min_order_amount ?? "").trim();
-  if (minOrder && !MONEY_RE.test(minOrder)) {
-    errors.min_order_amount =
-      "Enter 0 or a positive amount with at most 2 decimal places.";
+  if (minOrder && parseTomanInput(minOrder) === null) {
+    errors.min_order_amount = "Enter 0 or a whole number of Toman.";
   }
 
   const maxUses = String(form.max_uses ?? "").trim();
@@ -149,7 +165,7 @@ export const parseCouponApiErrors = (data) => {
       const msg = Array.isArray(val) ? val[0] : val;
       if (typeof msg !== "string") return;
       if (key === "detail" || key === "non_field_errors") formError = msg;
-      else fieldErrors[key] = msg;
+      else fieldErrors[key === "percent_off" || key === "fixed_amount" ? "value" : key] = msg;
     });
   }
   return { fieldErrors, formError };
@@ -163,10 +179,10 @@ export const couponStatus = (coupon, now = new Date()) => {
   return "Active";
 };
 
-const fmtMoney = (n) => `$${parseFloat(n || 0).toFixed(2)}`;
+const fmtMoney = (n) => formatToman(n);
 
-/** "20%" or "$5.00" */
+/** "20%" or "50,000 Toman" */
 export const formatCouponValue = (coupon) =>
   coupon.discount_type === "percent"
-    ? `${parseFloat(coupon.value)}%`
-    : fmtMoney(coupon.value);
+    ? `${parseFloat(coupon.percent_off)}%`
+    : fmtMoney(coupon.fixed_amount);

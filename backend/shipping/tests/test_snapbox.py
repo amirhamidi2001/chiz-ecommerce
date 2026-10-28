@@ -113,7 +113,9 @@ class SnapBoxGetRateTests(SnapBoxTestCase):
         result = self.provider.get_rate({}, COORDS_ONLY, 500)
 
         self.assertTrue(result.success)
-        self.assertEqual(result.price, Decimal("70000"))
+        # SnapBox's fare unit is unconfirmed (ADR 0001 OQ-5): taken as-is, as Rial.
+        self.assertEqual(result.price, 70_000)
+        self.assertIs(type(result.price), int)
         self.assertEqual(result.error_message, "")
 
     @responses.activate
@@ -284,7 +286,7 @@ class SnapBoxGetRateTests(SnapBoxTestCase):
 
         self.assertFalse(result.success)
         self.assertIn("Unauthorized token", result.error_message)
-        self.assertEqual(result.price, Decimal("0"))
+        self.assertEqual(result.price, 0)
 
     @responses.activate
     def test_error_without_message_falls_back_to_http_status(self):

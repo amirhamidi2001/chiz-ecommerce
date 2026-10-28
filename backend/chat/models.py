@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 
 class ChatRoom(models.Model):
@@ -11,9 +12,9 @@ class ChatRoom(models.Model):
     """
 
     class Status(models.TextChoices):
-        OPEN = "open", "Open"
-        ASSIGNED = "assigned", "Assigned"
-        CLOSED = "closed", "Closed"
+        OPEN = "open", _("Open")
+        ASSIGNED = "assigned", _("Assigned")
+        CLOSED = "closed", _("Closed")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     customer = models.ForeignKey(
@@ -52,8 +53,8 @@ class ChatMessage(models.Model):
     """
 
     class MessageType(models.TextChoices):
-        TEXT = "text", "Text"
-        SYSTEM = "system", "System"
+        TEXT = "text", _("Text")
+        SYSTEM = "system", _("System")
 
     room = models.ForeignKey(
         ChatRoom,

@@ -4,6 +4,8 @@ import { FlashSaleBadge, FlashSalePrice } from './FlashSalePrice';
 import { isOnFlashSale } from '../utils/flashSale';
 import { Link } from 'react-router-dom';
 import { getProducts } from '../services/api';
+import { formatToman } from '../utils/money';
+import { formatReviewCount } from '../utils/numerals';
 
 // ─── Shared Stars ────────────────────────────────────────────────────────────
 const Stars = ({ rating }) => {
@@ -64,7 +66,7 @@ const ProductRow = ({ product }) => {
         </Link>
         <div className="flex items-center gap-1 mt-1">
           <Stars rating={product.rating} />
-          <span className="text-gray-400 text-xs">({product.reviews_count})</span>
+          <span className="text-gray-400 text-xs">({formatReviewCount(product.reviews_count)})</span>
         </div>
         {isOnFlashSale(product) ? (
           <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -74,11 +76,11 @@ const ProductRow = ({ product }) => {
         ) : (
           <div className="flex items-center gap-2 mt-1">
             <span className="font-bold text-gray-900 text-sm">
-              ${Number(product.price).toFixed(2)}
+              {formatToman(product.price)}
             </span>
             {product.original_price && (
               <span className="text-xs text-gray-400 line-through">
-                ${Number(product.original_price).toFixed(2)}
+                {formatToman(product.original_price)}
               </span>
             )}
           </div>

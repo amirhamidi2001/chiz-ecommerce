@@ -125,7 +125,7 @@ class TestRegisterViewCartMerge:
         from cart.models import Cart
         from shop.tests.factories import ProductVariantFactory
 
-        variant = ProductVariantFactory(price=10, stock=5)
+        variant = ProductVariantFactory(price=100_000, stock=5)
 
         add_res = api_client.post(
             "/api/cart/", {"variant_id": variant.id, "quantity": 2}
@@ -226,8 +226,8 @@ class TestLoginViewCartMerge:
         from cart.models import Cart
         from shop.tests.factories import ProductVariantFactory
 
-        variant_a = ProductVariantFactory(price=10, stock=5)
-        variant_b = ProductVariantFactory(price=20, stock=5)
+        variant_a = ProductVariantFactory(price=100_000, stock=5)
+        variant_b = ProductVariantFactory(price=200_000, stock=5)
 
         assert (
             api_client.post(
@@ -260,8 +260,8 @@ class TestLoginViewCartMerge:
         from cart.models import Cart, CartItem
         from shop.tests.factories import ProductVariantFactory
 
-        shared_variant = ProductVariantFactory(price=10, stock=20)
-        session_only_variant = ProductVariantFactory(price=15, stock=20)
+        shared_variant = ProductVariantFactory(price=100_000, stock=20)
+        session_only_variant = ProductVariantFactory(price=150_000, stock=20)
 
         existing_cart = Cart.objects.create(user=user)
         CartItem.objects.create(cart=existing_cart, variant=shared_variant, quantity=2)
@@ -296,7 +296,7 @@ class TestLoginViewCartMerge:
         from cart.models import Cart
         from shop.tests.factories import ProductVariantFactory
 
-        variant = ProductVariantFactory(price=10, stock=5)
+        variant = ProductVariantFactory(price=100_000, stock=5)
         api_client.post("/api/cart/", {"variant_id": variant.id, "quantity": 1})
 
         first_login = self._login(api_client, user)

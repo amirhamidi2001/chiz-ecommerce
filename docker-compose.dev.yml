@@ -47,6 +47,7 @@ services:
     restart: unless-stopped
     command: >
       sh -c "python manage.py migrate --noinput &&
+             python manage.py compilemessages &&
              python manage.py runserver 0.0.0.0:8000"
     volumes:
       - ./backend:/app                   # mount source for hot reload

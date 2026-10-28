@@ -151,9 +151,9 @@ class TestResultCount:
     def test_reflects_other_filters_applied_to_the_search(
         self, api_client, db, run_log_tasks
     ):
-        ProductFactory(name="Rose Cheap", price=5)
-        ProductFactory(name="Rose Dear", price=500)
-        search(api_client, "rose", min_price=100)
+        ProductFactory(name="Rose Cheap", price=50_000)
+        ProductFactory(name="Rose Dear", price=5_000_000)
+        search(api_client, "rose", min_price=1_000_000)
         assert SearchQueryLog.objects.get().result_count == 1
 
 

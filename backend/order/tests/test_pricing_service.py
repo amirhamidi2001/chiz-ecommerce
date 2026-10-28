@@ -1,443 +1,269 @@
 """
-Comprehensive unit tests for order.services.pricing.calculate_order_totals().
+Tests for order/services/pricing.py (Task 1.2.1.1; money semantics rewritten in
+Task 14.1.2.2 per ADR 0001, docs/adr/0001-currency-storage.md).
 
-This is the single most financially sensitive piece of code in the
-codebase — every dollar amount charged to any customer flows through it.
-It is a pure function with no ORM/Django dependency, so these tests use
-plain `unittest.TestCase` rather than Django's `TestCase` (or even
-`SimpleTestCase`): no database is touched, no Django test-client
-machinery is spun up, and the whole file runs in milliseconds. Per
-backend/pytest.ini, `DJANGO_SETTINGS_MODULE` is still configured
-project-wide (pytest-django needs a settings module to even start), but
-that's unrelated to whether any individual test hits the database — none
-of these do.
+Money is a plain ``int`` of Rial and every amount is a whole number of Toman (a
+multiple of 10). The one fractional calculation — the tax percentage — rounds
+exactly once, to the nearest whole Toman, ties UP. Everything else is exact
+integer arithmetic, so ``total`` never needs rounding at display time.
 
-Task 7.1.1.4 breaking change: `shipping_cost` is now a required, explicit
-argument (previously an internal flat SHIPPING_COST = 9.99 constant).
-Every call in this file has been updated to pass `shipping_cost=DEFAULT_SHIPPING`
-explicitly — this is a deliberate, expected update to this test suite, not
-a regression being silently patched around. DEFAULT_SHIPPING is kept at
-the same 9.99 value the old constant used, purely so the existing
-hand-calculated expected values throughout this file didn't all need to
-change too — there is nothing special about 9.99 any more from
-calculate_order_totals()'s own point of view; it's just "whatever the
-caller passed in", as ShippingCostIsJustAnInputTests below confirms
-explicitly.
-
-Rounding note (see RoundingBehaviorTests below): `Decimal.quantize()`
-without an explicit rounding mode uses the *current decimal context's*
-rounding, and Python's default decimal context rounding mode is
-`ROUND_HALF_EVEN` ("banker's rounding") — not the "round half away from
-zero" behavior a lot of people instinctively expect from money math. The
-pricing service relies on this default implicitly (it never sets a
-rounding mode explicitly). That's a deliberate, tested-and-locked-in
-choice here, not an oversight — if the business ever wants "round half
-up" behavior instead (e.g. to match a specific payment processor's
-rounding rules), that would be a conscious, visible change to
-`pricing.py`, and RoundingBehaviorTests.test_exact_half_cent_tax_rounds_half_even
-would need to be updated alongside it.
+No database or Django state needed: plain unittest, as before.
 """
 
+import random
 import unittest
 from decimal import Decimal
 
-from order.services.pricing import PricingError, calculate_order_totals
+from order.services.pricing import PricingError, PricingService, calculate_order_totals
 
-TWO_PLACES = Decimal("0.01")
-DEFAULT_SHIPPING = Decimal("9.99")
-DEFAULT_TAX_RATE = Decimal("0.10")
+DEFAULT_SHIPPING = 99_900  # an arbitrary caller-supplied shipping cost (Rial)
 
 
-def _hand_calculate(subtotal, shipping_cost=DEFAULT_SHIPPING, discount=Decimal("0")):
+def _oracle(subtotal, shipping_cost=DEFAULT_SHIPPING, discount=0):
     """
-    Independent reimplementation of the expected formula, used as an
-    oracle in a couple of tests so the test suite isn't just restating
-    the same arithmetic the implementation performs.
+    Independent re-implementation using integer arithmetic ONLY (no Decimal, no
+    shared code): tax is 10% of subtotal = subtotal/10 Rial = subtotal/100 Toman,
+    rounded half-up with integer floor division, then back to Rial.
     """
-    tax = (subtotal * DEFAULT_TAX_RATE).quantize(TWO_PLACES)
-    total = (subtotal + shipping_cost + tax - discount).quantize(TWO_PLACES)
-    return tax, total
+    tax = ((subtotal + 50) // 100) * 10
+    return {
+        "subtotal": subtotal,
+        "shipping_cost": shipping_cost,
+        "tax": tax,
+        "discount": discount,
+        "total": subtotal + shipping_cost + tax - discount,
+    }
 
 
 class StandardCaseTests(unittest.TestCase):
-    """Case 1: known subtotal, zero discount — exact hand-calculated values."""
-
-    def test_100_dollar_subtotal_zero_discount(self):
+    def test_1m_rial_subtotal_zero_discount(self):
         result = calculate_order_totals(
-            Decimal("100.00"), shipping_cost=DEFAULT_SHIPPING
+            subtotal=1_000_000, shipping_cost=DEFAULT_SHIPPING
         )
+        self.assertEqual(result["subtotal"], 1_000_000)
+        self.assertEqual(result["shipping_cost"], 99_900)
+        self.assertEqual(result["tax"], 100_000)  # 10%
+        self.assertEqual(result["discount"], 0)
+        self.assertEqual(result["total"], 1_199_900)
 
-        self.assertEqual(result["subtotal"], Decimal("100.00"))
-        self.assertEqual(result["shipping_cost"], Decimal("9.99"))
-        self.assertEqual(result["tax"], Decimal("10.00"))  # 100.00 * 0.10
-        self.assertEqual(result["discount"], Decimal("0"))
-        self.assertEqual(result["total"], Decimal("119.99"))  # 100 + 9.99 + 10.00
-
-    def test_250_dollar_subtotal_zero_discount(self):
+    def test_2_5m_rial_subtotal_zero_discount(self):
         result = calculate_order_totals(
-            Decimal("250.00"), shipping_cost=DEFAULT_SHIPPING
+            subtotal=2_500_000, shipping_cost=DEFAULT_SHIPPING
         )
-
-        self.assertEqual(result["tax"], Decimal("25.00"))
-        self.assertEqual(result["total"], Decimal("284.99"))  # 250 + 9.99 + 25.00
+        self.assertEqual(result["tax"], 250_000)
+        self.assertEqual(result["total"], 2_849_900)
 
     def test_result_keys_are_exactly_the_five_expected_fields(self):
-        result = calculate_order_totals(
-            Decimal("10.00"), shipping_cost=DEFAULT_SHIPPING
-        )
+        result = calculate_order_totals(100_000, DEFAULT_SHIPPING)
         self.assertEqual(
-            set(result.keys()),
-            {"subtotal", "shipping_cost", "tax", "discount", "total"},
+            set(result), {"subtotal", "shipping_cost", "tax", "discount", "total"}
         )
 
-    def test_all_result_values_are_decimal_instances(self):
-        result = calculate_order_totals(
-            Decimal("10.00"), shipping_cost=DEFAULT_SHIPPING, discount=Decimal("1.00")
-        )
+    def test_all_result_values_are_plain_ints_and_whole_toman(self):
+        result = calculate_order_totals(1_234_560, DEFAULT_SHIPPING, 50_000)
         for key, value in result.items():
-            self.assertIsInstance(value, Decimal, f"{key} was {type(value)!r}")
+            with self.subTest(key=key):
+                self.assertIs(type(value), int)  # not Decimal, not float, not bool
+                self.assertEqual(value % 10, 0)
+
+    def test_module_level_wrapper_matches_the_class_method(self):
+        self.assertEqual(
+            calculate_order_totals(777_770, 55_000, 10_000),
+            PricingService.calculate_order_totals(777_770, 55_000, 10_000),
+        )
 
 
 class ShippingCostIsJustAnInputTests(unittest.TestCase):
-    """
-    Task 7.1.1.4: shipping_cost is now a plain caller-supplied argument
-    with no special meaning to calculate_order_totals() itself — it just
-    needs to be a non-negative Decimal. These tests lock in that it's
-    genuinely a free parameter (arbitrary carrier/rate prices flow through
-    unchanged), not that 9.99 is hardcoded or special-cased anywhere.
-    """
+    """shipping_cost is a plain caller-supplied argument (Task 7.1.1.4)."""
 
     def test_arbitrary_shipping_cost_flows_through_to_result(self):
-        result = calculate_order_totals(
-            Decimal("100.00"), shipping_cost=Decimal("23.50")
-        )
-        self.assertEqual(result["shipping_cost"], Decimal("23.50"))
-        # 100 + 23.50 + 10.00 tax = 133.50
-        self.assertEqual(result["total"], Decimal("133.50"))
+        result = calculate_order_totals(1_000_000, 345_000)
+        self.assertEqual(result["shipping_cost"], 345_000)
+        self.assertEqual(result["total"], 1_000_000 + 345_000 + 100_000)
 
     def test_zero_shipping_cost_is_allowed(self):
-        # e.g. a free-shipping promotional rate — zero is valid, not negative.
-        result = calculate_order_totals(
-            Decimal("100.00"), shipping_cost=Decimal("0.00")
-        )
-        self.assertEqual(result["shipping_cost"], Decimal("0.00"))
-        self.assertEqual(result["total"], Decimal("110.00"))  # 100 + 0 + 10 tax
+        result = calculate_order_totals(1_000_000, 0)
+        self.assertEqual(result["shipping_cost"], 0)
+        self.assertEqual(result["total"], 1_100_000)
 
     def test_shipping_cost_is_a_required_argument(self):
         with self.assertRaises(TypeError):
-            calculate_order_totals(Decimal("100.00"))
+            calculate_order_totals(1_000_000)  # type: ignore[call-arg]
 
 
 class DiscountAppliesCorrectlyTests(unittest.TestCase):
-    """Case 2: discount reduces total, result still rounded to 2 places."""
-
     def test_discount_subtracted_from_total(self):
-        result = calculate_order_totals(
-            Decimal("100.00"), shipping_cost=DEFAULT_SHIPPING, discount=Decimal("20.00")
-        )
-        # subtotal(100) + shipping(9.99) + tax(10.00) - discount(20.00)
-        self.assertEqual(result["total"], Decimal("99.99"))
-        self.assertEqual(result["discount"], Decimal("20.00"))
+        result = calculate_order_totals(1_000_000, DEFAULT_SHIPPING, 200_000)
+        self.assertEqual(result["discount"], 200_000)
+        self.assertEqual(result["total"], 1_199_900 - 200_000)
 
     def test_discount_does_not_affect_subtotal_tax_or_shipping(self):
-        no_discount = calculate_order_totals(
-            Decimal("100.00"), shipping_cost=DEFAULT_SHIPPING
-        )
-        with_discount = calculate_order_totals(
-            Decimal("100.00"), shipping_cost=DEFAULT_SHIPPING, discount=Decimal("15.00")
-        )
-        self.assertEqual(no_discount["subtotal"], with_discount["subtotal"])
-        self.assertEqual(no_discount["tax"], with_discount["tax"])
-        self.assertEqual(no_discount["shipping_cost"], with_discount["shipping_cost"])
+        base = calculate_order_totals(1_000_000, DEFAULT_SHIPPING)
+        discounted = calculate_order_totals(1_000_000, DEFAULT_SHIPPING, 300_000)
+        for key in ("subtotal", "shipping_cost", "tax"):
+            self.assertEqual(base[key], discounted[key], key)
 
-    def test_discounted_total_is_quantized_to_two_decimal_places(self):
-        # subtotal 100 -> tax 10.00, total before discount = 119.99;
-        # subtracting a discount with only whole cents keeps 2dp, but this
-        # asserts the *shape* (exponent) of the returned Decimal explicitly,
-        # not just its numeric value, since a stray Decimal("99.9900") would
-        # still compare equal to Decimal("99.99") with assertEqual.
-        result = calculate_order_totals(
-            Decimal("100.00"), shipping_cost=DEFAULT_SHIPPING, discount=Decimal("20.00")
-        )
-        self.assertEqual(result["total"].as_tuple().exponent, -2)
+    def test_discounted_total_is_a_whole_toman_with_nothing_left_to_round(self):
+        result = calculate_order_totals(1_234_560, DEFAULT_SHIPPING, 185_180)
+        self.assertEqual(result["total"], 1_234_560 + 99_900 + 123_460 - 185_180)
+        self.assertEqual(result["total"] % 10, 0)
 
 
 class ZeroSubtotalTests(unittest.TestCase):
-    """
-    Case 3: zero subtotal is an edge case worth deciding on explicitly.
-
-    Chosen/locked-in behavior: a $0.00 subtotal is ALLOWED (e.g. a
-    100%-off order, or a free digital item) and simply produces zero tax
-    plus the passed-in shipping cost as the total — it does not raise.
-    Only *negative* subtotal is rejected (see NegativeInputValidationTests).
-    """
+    """A zero subtotal is ALLOWED (e.g. a fully-discounted cart's own lines)."""
 
     def test_zero_subtotal_computes_cleanly_not_raises(self):
-        result = calculate_order_totals(Decimal("0.00"), shipping_cost=DEFAULT_SHIPPING)
-        self.assertEqual(result["tax"], Decimal("0.00"))
-        self.assertEqual(result["shipping_cost"], Decimal("9.99"))
-        self.assertEqual(result["total"], Decimal("9.99"))  # just shipping
+        result = calculate_order_totals(0, DEFAULT_SHIPPING)
+        self.assertEqual(result["tax"], 0)
+        self.assertEqual(result["total"], DEFAULT_SHIPPING)
 
     def test_zero_subtotal_with_zero_discount(self):
-        result = calculate_order_totals(
-            Decimal("0.00"), shipping_cost=DEFAULT_SHIPPING, discount=Decimal("0.00")
-        )
-        self.assertEqual(result["total"], Decimal("9.99"))
+        self.assertEqual(calculate_order_totals(0, 0, 0)["total"], 0)
 
     def test_zero_subtotal_with_discount_covering_shipping(self):
-        # subtotal 0 + shipping 9.99 + tax 0.00 = 9.99 max discount
-        result = calculate_order_totals(
-            Decimal("0.00"), shipping_cost=DEFAULT_SHIPPING, discount=Decimal("9.99")
-        )
-        self.assertEqual(result["total"], Decimal("0.00"))
+        self.assertEqual(calculate_order_totals(0, 100_000, 100_000)["total"], 0)
 
 
 class NegativeInputValidationTests(unittest.TestCase):
-    """Cases 4 & 5: negative subtotal / negative discount both raise."""
-
     def test_negative_subtotal_raises_pricing_error(self):
-        with self.assertRaises(PricingError):
-            calculate_order_totals(Decimal("-0.01"), shipping_cost=DEFAULT_SHIPPING)
-
-    def test_negative_subtotal_error_message_mentions_subtotal(self):
         with self.assertRaises(PricingError) as ctx:
-            calculate_order_totals(Decimal("-50.00"), shipping_cost=DEFAULT_SHIPPING)
-        self.assertIn("subtotal", str(ctx.exception).lower())
+            calculate_order_totals(-10, DEFAULT_SHIPPING)
+        self.assertIn("subtotal", str(ctx.exception))
 
     def test_negative_discount_raises_pricing_error(self):
-        with self.assertRaises(PricingError):
-            calculate_order_totals(
-                Decimal("100.00"),
-                shipping_cost=DEFAULT_SHIPPING,
-                discount=Decimal("-1.00"),
-            )
-
-    def test_negative_discount_error_message_mentions_discount(self):
         with self.assertRaises(PricingError) as ctx:
-            calculate_order_totals(
-                Decimal("100.00"),
-                shipping_cost=DEFAULT_SHIPPING,
-                discount=Decimal("-0.01"),
-            )
-        self.assertIn("discount", str(ctx.exception).lower())
+            calculate_order_totals(1_000_000, DEFAULT_SHIPPING, -10)
+        self.assertIn("discount", str(ctx.exception))
+
+    def test_negative_shipping_cost_raises_pricing_error(self):
+        with self.assertRaises(PricingError) as ctx:
+            calculate_order_totals(1_000_000, -10)
+        self.assertIn("shipping_cost", str(ctx.exception))
 
     def test_pricing_error_is_a_value_error_subclass(self):
-        # So existing/future callers doing a broad `except ValueError`
-        # continue to work without knowing about PricingError specifically.
         self.assertTrue(issubclass(PricingError, ValueError))
 
 
-class ShippingCostValidationTests(unittest.TestCase):
-    """
-    New for Task 7.1.1.4: shipping_cost gets the same negative-value
-    guard as subtotal/discount, since it's now a caller-supplied input
-    rather than a trusted internal constant.
-    """
+class MoneyTypeAndGranularityValidationTests(unittest.TestCase):
+    """ADR 0001 I-1 / I-2: ints only, and only whole Toman."""
 
-    def test_negative_shipping_cost_raises_pricing_error(self):
-        with self.assertRaises(PricingError):
-            calculate_order_totals(Decimal("100.00"), shipping_cost=Decimal("-0.01"))
+    def test_non_int_amounts_are_rejected_not_coerced(self):
+        for bad in (Decimal("1000000"), 1_000_000.0, "1000000", True, None):
+            for position in range(3):
+                args = [1_000_000, DEFAULT_SHIPPING, 0]
+                args[position] = bad
+                with self.subTest(bad=bad, position=position):
+                    with self.assertRaises(PricingError):
+                        calculate_order_totals(*args)
 
-    def test_negative_shipping_cost_error_message_mentions_shipping_cost(self):
-        with self.assertRaises(PricingError) as ctx:
-            calculate_order_totals(Decimal("100.00"), shipping_cost=Decimal("-9.99"))
-        self.assertIn("shipping_cost", str(ctx.exception).lower())
-
-    def test_negative_shipping_cost_raised_before_any_dict_constructed(self):
-        # Belt-and-suspenders, mirroring the discount-boundary test below:
-        # confirm the exception path is taken instead of ever returning a
-        # dict with a negative "shipping_cost".
-        try:
-            calculate_order_totals(Decimal("100.00"), shipping_cost=Decimal("-1.00"))
-            self.fail("Expected PricingError to be raised")
-        except PricingError:
-            pass  # expected — no dict was ever constructed/returned
+    def test_amounts_that_are_not_a_whole_toman_are_rejected(self):
+        for position, bad in ((0, 1_234_565), (1, 99_905), (2, 5)):
+            args = [1_000_000, DEFAULT_SHIPPING, 0]
+            args[position] = bad
+            with self.subTest(position=position, bad=bad):
+                with self.assertRaises(PricingError) as ctx:
+                    calculate_order_totals(*args)
+                self.assertIn("whole number of Toman", str(ctx.exception))
 
 
 class DiscountBoundaryTests(unittest.TestCase):
-    """Cases 6 & 7: discount exactly at, and just over, the allowed max."""
-
-    def _max_discount_for(self, subtotal, shipping_cost=DEFAULT_SHIPPING):
-        tax = (subtotal * DEFAULT_TAX_RATE).quantize(TWO_PLACES)
-        return subtotal + shipping_cost + tax
+    def _max_discount(self, subtotal, shipping=DEFAULT_SHIPPING):
+        return subtotal + shipping + _oracle(subtotal, shipping)["tax"]
 
     def test_discount_equal_to_subtotal_plus_shipping_plus_tax_gives_zero_total(self):
-        subtotal = Decimal("50.00")
-        max_discount = self._max_discount_for(subtotal)  # 50 + 9.99 + 5.00 = 64.99
-
+        subtotal = 500_000
         result = calculate_order_totals(
-            subtotal, shipping_cost=DEFAULT_SHIPPING, discount=max_discount
+            subtotal, DEFAULT_SHIPPING, self._max_discount(subtotal)
         )
+        self.assertEqual(result["total"], 0)
 
-        self.assertEqual(result["total"], Decimal("0.00"))
-        # Explicitly not negative, and not merely "close to zero".
-        self.assertGreaterEqual(result["total"], Decimal("0.00"))
-
-    def test_discount_one_cent_over_max_raises(self):
-        subtotal = Decimal("50.00")
-        max_discount = self._max_discount_for(subtotal)
-
+    def test_discount_one_toman_over_max_raises(self):
+        subtotal = 500_000
         with self.assertRaises(PricingError):
             calculate_order_totals(
-                subtotal,
-                shipping_cost=DEFAULT_SHIPPING,
-                discount=max_discount + Decimal("0.01"),
+                subtotal, DEFAULT_SHIPPING, self._max_discount(subtotal) + 10
             )
 
     def test_discount_far_over_max_raises(self):
-        subtotal = Decimal("50.00")
         with self.assertRaises(PricingError):
-            calculate_order_totals(
-                subtotal, shipping_cost=DEFAULT_SHIPPING, discount=Decimal("999.00")
-            )
+            calculate_order_totals(500_000, DEFAULT_SHIPPING, 500_000_000)
 
-    def test_over_max_discount_error_never_produces_a_negative_total(self):
-        # Belt-and-suspenders: confirm the exception path is taken instead
-        # of ever returning a dict with a negative "total".
-        subtotal = Decimal("50.00")
-        max_discount = self._max_discount_for(subtotal)
-        try:
-            calculate_order_totals(
-                subtotal,
-                shipping_cost=DEFAULT_SHIPPING,
-                discount=max_discount + Decimal("50.00"),
-            )
-            self.fail("Expected PricingError to be raised")
-        except PricingError:
-            pass  # expected — no dict was ever constructed/returned
+    def test_over_max_discount_never_produces_a_negative_total(self):
+        for over in (10, 100, 10_000, 1_000_000):
+            with self.subTest(over=over):
+                with self.assertRaises(PricingError):
+                    calculate_order_totals(
+                        500_000, DEFAULT_SHIPPING, self._max_discount(500_000) + over
+                    )
 
 
 class RoundingBehaviorTests(unittest.TestCase):
     """
-    Case 8: explicit verification of `.quantize(Decimal("0.01"))` rounding,
-    including a genuine half-cent tie to pin down which rounding mode is
-    in effect.
+    The tax is the ONLY fractional step. It rounds to the nearest whole Toman
+    (multiple of 10 Rial), ties UP — Decimal.quantize's old default was
+    ROUND_HALF_EVEN, which would pick 123,450 for the tie below.
     """
 
-    def test_non_round_subtotal_tax_truncates_down_correctly(self):
-        # 33.33 * 0.10 = 3.333 -> the third decimal digit (3) is below 5,
-        # so every rounding mode agrees this rounds down to 3.33. This is
-        # a sanity check before the genuine tie-breaking case below.
-        result = calculate_order_totals(
-            Decimal("33.33"), shipping_cost=DEFAULT_SHIPPING
-        )
-        self.assertEqual(result["tax"], Decimal("3.33"))
+    def test_tax_above_half_a_toman_rounds_up(self):
+        # 10% of 1,234,560 = 123,456 Rial = 12,345.6 Toman -> 12,346 Toman
+        self.assertEqual(calculate_order_totals(1_234_560, 0)["tax"], 123_460)
 
-    def test_exact_half_cent_tax_rounds_half_even(self):
-        # 12.25 * 0.10 = 1.225 exactly (no floating-point error, since
-        # Decimal arithmetic on exact decimal literals is exact). The
-        # third decimal digit is exactly 5 — a genuine rounding tie
-        # between 1.22 and 1.23.
-        #
-        # Python's Decimal.quantize(), with no rounding mode passed
-        # explicitly, uses the ambient decimal context's rounding mode,
-        # which defaults to ROUND_HALF_EVEN ("banker's rounding"): ties
-        # round to whichever neighbor has an even final digit. 1.22 ends
-        # in an even digit (2), so ROUND_HALF_EVEN produces 1.22 here —
-        # NOT 1.23, which is what "round half up" (the more commonly
-        # assumed default for money) would produce.
-        #
-        # This test locks in the service's actual, current behavior. It
-        # is not asserting this is the "correct" business behavior in
-        # some absolute sense — only that it's the behavior actually
-        # implemented, so a future change to the rounding mode is a
-        # deliberate, visible diff here rather than a silent regression.
-        subtotal = Decimal("12.25")
-        expected_tax = subtotal * DEFAULT_TAX_RATE
-        self.assertEqual(expected_tax, Decimal("1.225"))  # confirm exact tie
+    def test_tax_below_half_a_toman_rounds_down(self):
+        # 123,454 Rial = 12,345.4 Toman -> 12,345 Toman
+        self.assertEqual(calculate_order_totals(1_234_540, 0)["tax"], 123_450)
 
-        result = calculate_order_totals(subtotal, shipping_cost=DEFAULT_SHIPPING)
-        self.assertEqual(result["tax"], Decimal("1.22"))  # banker's rounding
+    def test_exact_half_toman_tie_rounds_up_not_to_even(self):
+        # 123,455 Rial = 12,345.5 Toman. HALF_UP -> 12,346; HALF_EVEN -> 12,346
+        # here (even), so also pin the case where they DISAGREE:
+        self.assertEqual(calculate_order_totals(1_234_550, 0)["tax"], 123_460)
+        # 123,445 Rial = 12,344.5 Toman: HALF_UP -> 12,345, HALF_EVEN -> 12,344.
+        self.assertEqual(calculate_order_totals(1_234_450, 0)["tax"], 123_450)
 
-    def test_another_half_cent_tie_rounds_to_even_neighbor(self):
-        # 15.25 * 0.10 = 1.525 -> ties between 1.52 (even) and 1.53 (odd).
-        # ROUND_HALF_EVEN picks 1.52.
-        subtotal = Decimal("15.25")
-        expected_tax = subtotal * DEFAULT_TAX_RATE
-        self.assertEqual(expected_tax, Decimal("1.525"))
+    def test_total_never_needs_further_rounding(self):
+        rng = random.Random(1402)
+        for _ in range(5_000):
+            subtotal = rng.randint(0, 10**9) * 10
+            result = calculate_order_totals(subtotal, DEFAULT_SHIPPING)
+            self.assertEqual(result["total"] % 10, 0)
+            self.assertEqual(
+                result["total"],
+                result["subtotal"] + result["shipping_cost"] + result["tax"],
+            )
 
-        result = calculate_order_totals(subtotal, shipping_cost=DEFAULT_SHIPPING)
-        self.assertEqual(result["tax"], Decimal("1.52"))
 
-    def test_half_cent_tie_that_rounds_up_to_even_neighbor(self):
-        # 32.75 * 0.10 = 3.275 -> ties between 3.27 (odd) and 3.28 (even).
-        # ROUND_HALF_EVEN picks 3.28 — included so the pattern isn't
-        # mistaken for "ties always round down"; it depends on which
-        # neighbor happens to be even.
-        subtotal = Decimal("32.75")
-        expected_tax = subtotal * DEFAULT_TAX_RATE
-        self.assertEqual(expected_tax, Decimal("3.275"))
+class CustomTaxPercentTests(unittest.TestCase):
+    def test_a_subclass_can_override_the_tax_percent(self):
+        class NinePercent(PricingService):
+            TAX_PERCENT = Decimal("9")
 
-        result = calculate_order_totals(subtotal, shipping_cost=DEFAULT_SHIPPING)
-        self.assertEqual(result["tax"], Decimal("3.28"))
+        # 9% of 1,234,560 = 111,110.4 Rial = 11,111.04 Toman -> 11,111 -> 111,110
+        result = NinePercent.calculate_order_totals(1_234_560, 0)
+        self.assertEqual(result["tax"], 111_110)
+        self.assertEqual(result["total"], 1_234_560 + 111_110)
 
-    def test_total_is_quantized_even_when_inputs_combine_to_extra_places(self):
-        result = calculate_order_totals(
-            Decimal("12.25"),
-            shipping_cost=DEFAULT_SHIPPING,
-            discount=Decimal("0.005").quantize(Decimal("0.01")),
-        )
-        # discount got quantized to 0.01 by the caller before being passed
-        # in (as OrderCreateSerializer's DecimalField would do); confirm
-        # the service's own output is still cleanly 2dp regardless.
-        self.assertEqual(result["total"].as_tuple().exponent, -2)
+    def test_default_tax_percent_is_ten(self):
+        self.assertEqual(PricingService.TAX_PERCENT, Decimal("10"))
 
 
 class OracleComparisonTests(unittest.TestCase):
-    """
-    Cross-check calculate_order_totals against an independently written
-    reimplementation of the formula, across a range of inputs, so the
-    test suite isn't purely restating the implementation's own math.
-    """
+    def test_matches_independent_integer_reimplementation_across_inputs(self):
+        for subtotal in (0, 10, 40, 50, 100, 990, 1_000_000, 1_234_550, 99_999_990):
+            with self.subTest(subtotal=subtotal):
+                self.assertEqual(
+                    calculate_order_totals(subtotal, DEFAULT_SHIPPING),
+                    _oracle(subtotal, DEFAULT_SHIPPING),
+                )
 
-    def test_matches_independent_reimplementation_across_several_inputs(self):
-        cases = [
-            (Decimal("19.99"), Decimal("0")),
-            (Decimal("100.00"), Decimal("10.00")),
-            (Decimal("0.01"), Decimal("0")),
-            (Decimal("9999.99"), Decimal("500.00")),
-            (Decimal("12.25"), Decimal("0")),
-        ]
-        for subtotal, discount in cases:
-            with self.subTest(subtotal=subtotal, discount=discount):
-                expected_tax, expected_total = _hand_calculate(
-                    subtotal, discount=discount
-                )
-                result = calculate_order_totals(
-                    subtotal, shipping_cost=DEFAULT_SHIPPING, discount=discount
-                )
-                self.assertEqual(result["tax"], expected_tax)
-                self.assertEqual(result["total"], expected_total)
-
-    def test_matches_independent_reimplementation_with_varied_shipping_costs(self):
-        # Task 7.1.1.4: shipping_cost itself now varies per call too, not
-        # just subtotal/discount — cross-check across a few different
-        # shipping costs to confirm it's genuinely folded into the
-        # formula correctly, not silently ignored in favor of some
-        # leftover internal default.
-        cases = [
-            (Decimal("50.00"), Decimal("0.00"), Decimal("0")),
-            (Decimal("50.00"), Decimal("15.00"), Decimal("0")),
-            (
-                Decimal("50.00"),
-                Decimal("45000.00"),
-                Decimal("0"),
-            ),  # e.g. IRR-scale rate
-            (Decimal("100.00"), Decimal("9.99"), Decimal("10.00")),
-        ]
-        for subtotal, shipping_cost, discount in cases:
-            with self.subTest(
-                subtotal=subtotal, shipping_cost=shipping_cost, discount=discount
-            ):
-                expected_tax, expected_total = _hand_calculate(
-                    subtotal, shipping_cost=shipping_cost, discount=discount
-                )
-                result = calculate_order_totals(
-                    subtotal, shipping_cost=shipping_cost, discount=discount
-                )
-                self.assertEqual(result["shipping_cost"], shipping_cost)
-                self.assertEqual(result["tax"], expected_tax)
-                self.assertEqual(result["total"], expected_total)
+    def test_matches_oracle_with_varied_shipping_and_discount(self):
+        rng = random.Random(2026)
+        for _ in range(3_000):
+            subtotal = rng.randint(0, 10**9) * 10
+            shipping = rng.randint(0, 10**7) * 10
+            discount = rng.randint(0, (subtotal + shipping) // 10) * 10
+            self.assertEqual(
+                calculate_order_totals(subtotal, shipping, discount),
+                _oracle(subtotal, shipping, discount),
+            )
 
 
 if __name__ == "__main__":

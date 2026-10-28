@@ -77,7 +77,7 @@ def catalog(db):
         organic=False,
         category=skincare,
         spf=None,
-        price=10,
+        price=100_000,
     ):
         return ProductFactory(
             name=name,
@@ -102,9 +102,9 @@ def catalog(db):
             vegan=True,
             cf=True,
             spf=30,
-            price=10,
+            price=100_000,
         ),
-        "B": mk("Plain Gel", skin_type="oily", cf=True, price=20),
+        "B": mk("Plain Gel", skin_type="oily", cf=True, price=200_000),
         "C": mk(
             "Rose Serum",
             skin_type="dry",
@@ -112,12 +112,18 @@ def catalog(db):
             vegan=True,
             organic=True,
             spf=50,
-            price=30,
+            price=300_000,
         ),
         "D": mk(
-            "Dry Balm", skin_type="dry", gender_="male", category=haircare, price=40
+            "Dry Balm",
+            skin_type="dry",
+            gender_="male",
+            category=haircare,
+            price=400_000,
         ),
-        "E": mk("Combo Lotion", skin_type="combination", vegan=True, spf=15, price=50),
+        "E": mk(
+            "Combo Lotion", skin_type="combination", vegan=True, spf=15, price=500_000
+        ),
         "F": mk(
             "Curl Cream",
             hair_type="curly",
@@ -126,10 +132,10 @@ def catalog(db):
             cf=True,
             organic=True,
             category=haircare,
-            price=60,
+            price=600_000,
         ),
-        "G": mk("Wave Spray", hair_type="wavy", category=haircare, price=70),
-        "H": mk("Plain Wash", gender_="male", category=haircare, price=80),
+        "G": mk("Wave Spray", hair_type="wavy", category=haircare, price=700_000),
+        "H": mk("Plain Wash", gender_="male", category=haircare, price=800_000),
     }
 
 
@@ -312,7 +318,7 @@ class TestOtherFiltersApply:
         assert data["is_vegan"] == 1
 
     def test_price_range(self, api_client, catalog):
-        data = facets(api_client, min_price=30, max_price=50)  # C, D, E
+        data = facets(api_client, min_price=300_000, max_price=500_000)  # C, D, E
         assert data["skin_type"] == skin(dry=2, combination=1)
 
     def test_spf_range(self, api_client, catalog):
@@ -401,7 +407,7 @@ class TestMatchesTheListEndpoint:
         {"is_vegan": "true"},
         {"skin_type": "oily", "gender": "female", "is_vegan": "true"},
         {"category": "haircare"},
-        {"min_price": 20, "max_price": 60},
+        {"min_price": 200_000, "max_price": 600_000},
         {"min_spf": 15, "is_cruelty_free": "true"},
         {"search": "rose"},
         {"search": "cream", "gender": "female"},

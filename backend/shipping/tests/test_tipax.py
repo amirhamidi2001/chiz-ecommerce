@@ -28,7 +28,7 @@ class TestTipaxCarrierProviderGetRate:
         # Confirms this never fabricates a price alongside success=False
         # — price stays at the dataclass default rather than some
         # invented number.
-        assert result.price == Decimal("0")
+        assert result.price == 0
 
     def test_get_rate_is_unsuccessful_regardless_of_inputs(self):
         # Not carrying inputs through to a (nonexistent) API call means

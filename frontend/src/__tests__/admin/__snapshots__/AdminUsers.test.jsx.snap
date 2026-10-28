@@ -149,7 +149,7 @@ exports[`AdminUsers > Snapshot > matches stable snapshot after data loads 1`] = 
           <span
             class="text-sm font-medium text-gray-800"
           >
-            $0
+            0 تومان
           </span>
         </div>
         <div
@@ -258,7 +258,7 @@ exports[`AdminUsers > Snapshot > matches stable snapshot after data loads 1`] = 
           <span
             class="text-sm font-medium text-gray-800"
           >
-            $50
+            50,000 تومان
           </span>
         </div>
         <div
@@ -367,7 +367,7 @@ exports[`AdminUsers > Snapshot > matches stable snapshot after data loads 1`] = 
           <span
             class="text-sm font-medium text-gray-800"
           >
-            $100
+            100,000 تومان
           </span>
         </div>
         <div

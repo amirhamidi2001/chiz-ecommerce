@@ -1,44 +1,62 @@
 from decimal import Decimal
 
+from core.fields import RialField, whole_toman_constraint
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 
 class Coupon(models.Model):
     class DiscountType(models.TextChoices):
-        PERCENT = "percent", "Percentage"
-        FIXED = "fixed", "Fixed Amount"
+        PERCENT = "percent", _("Percentage")
+        FIXED = "fixed", _("Fixed Amount")
 
     code = models.CharField(max_length=32, unique=True, db_index=True)
     discount_type = models.CharField(max_length=10, choices=DiscountType.choices)
-    value = models.DecimalField(
-        max_digits=10,
+    # Percentage and fixed amount live in SEPARATE columns (ADR 0001 §7.3): a
+    # single column cannot be both an integer Rial amount and a 2-decimal
+    # percentage without bringing back the unit ambiguity the ADR removes.
+    percent_off = models.DecimalField(
+        max_digits=5,
         decimal_places=2,
-        help_text=(
-            "Percentage (0-100) if discount_type=percent, or a fixed "
-            "currency amount if discount_type=fixed."
+        null=True,
+        blank=True,
+        validators=[
+            MinValueValidator(Decimal("0.01")),
+            MaxValueValidator(Decimal("100")),
+        ],
+        help_text=_("Percentage (0.01-100); used only when discount_type=percent."),
+    )
+    fixed_amount = RialField(
+        null=True,
+        blank=True,
+        help_text=_(
+            "Fixed discount in Rial (a multiple of 10); used only when "
+            "discount_type=fixed."
         ),
     )
-    min_order_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal("0"),
-        help_text="Cart subtotal must be at least this amount for the coupon to apply.",
+    min_order_amount = RialField(
+        default=0,
+        help_text=_(
+            "Cart subtotal must be at least this amount for the coupon to apply."
+        ),
     )
     max_uses = models.PositiveIntegerField(
         null=True,
         blank=True,
         help_text=(
-            "Total number of times this coupon can be redeemed across all "
-            "users. Leave blank for unlimited."
+            _(
+                "Total number of times this coupon can be redeemed across all "
+                "users. Leave blank for unlimited."
+            )
         ),
     )
     uses_per_user = models.PositiveIntegerField(
         default=1,
-        help_text="Maximum number of times a single user can redeem this coupon.",
+        help_text=_("Maximum number of times a single user can redeem this coupon."),
     )
     valid_from = models.DateTimeField()
     valid_until = models.DateTimeField()
@@ -50,25 +68,49 @@ class Coupon(models.Model):
         "shop.Category",
         blank=True,
         help_text=(
-            "If set, this coupon only applies to items in these categories. "
-            "Leave empty to apply to all categories. Matching is exact: a "
-            "product in a sub-category does NOT match its parent category, "
-            "so select the sub-categories you want as well."
+            _(
+                "If set, this coupon only applies to items in these categories. "
+                "Leave empty to apply to all categories. Matching is exact: a "
+                "product in a sub-category does NOT match its parent category, "
+                "so select the sub-categories you want as well."
+            )
         ),
     )
     products = models.ManyToManyField(
         "shop.Product",
         blank=True,
         help_text=(
-            "If set, this coupon only applies to these specific products. "
-            "Leave empty (with no category restriction either) to apply "
-            "cart-wide."
+            _(
+                "If set, this coupon only applies to these specific products. "
+                "Leave empty (with no category restriction either) to apply "
+                "cart-wide."
+            )
         ),
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            whole_toman_constraint("min_order_amount"),
+            whole_toman_constraint("fixed_amount"),
+            models.CheckConstraint(
+                name="promotions_coupon_discount_fields_match_type",
+                condition=(
+                    models.Q(
+                        discount_type="percent",
+                        percent_off__gt=0,
+                        percent_off__lte=100,
+                        fixed_amount__isnull=True,
+                    )
+                    | models.Q(
+                        discount_type="fixed",
+                        fixed_amount__gt=0,
+                        percent_off__isnull=True,
+                    )
+                ),
+            ),
+        ]
 
     def __str__(self):
         return self.code
@@ -89,17 +131,24 @@ class Coupon(models.Model):
             and self.valid_until is not None
             and self.valid_until <= self.valid_from
         ):
-            raise ValidationError({"valid_until": "Must be after valid_from."})
-        if self.value is not None:
-            if self.discount_type == self.DiscountType.PERCENT and not (
-                0 < self.value <= 100
-            ):
+            raise ValidationError({"valid_until": _("Must be after valid_from.")})
+        if self.discount_type == self.DiscountType.PERCENT:
+            if self.percent_off is None or not (0 < self.percent_off <= 100):
                 raise ValidationError(
-                    {"value": "Percentage discount must be between 0 and 100."}
+                    {"percent_off": _("Percentage discount must be between 0 and 100.")}
                 )
-            if self.discount_type == self.DiscountType.FIXED and self.value <= 0:
+            if self.fixed_amount is not None:
                 raise ValidationError(
-                    {"value": "Fixed discount amount must be greater than 0."}
+                    {"fixed_amount": _("Must be empty for percentage coupons.")}
+                )
+        elif self.discount_type == self.DiscountType.FIXED:
+            if self.fixed_amount is None or self.fixed_amount <= 0:
+                raise ValidationError(
+                    {"fixed_amount": _("Fixed discount amount must be greater than 0.")}
+                )
+            if self.percent_off is not None:
+                raise ValidationError(
+                    {"percent_off": _("Must be empty for fixed-amount coupons.")}
                 )
 
     def save(self, *args, **kwargs):
@@ -153,18 +202,19 @@ class CouponRedemption(models.Model):
         null=True,
         blank=True,
     )
-    discount_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+    discount_amount = RialField(
         help_text=(
-            "Actual currency amount discounted by this redemption "
-            "(frozen at redemption time)."
+            _(
+                "Actual currency amount discounted by this redemption "
+                "(frozen at redemption time)."
+            )
         ),
     )
     redeemed_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-redeemed_at"]
+        constraints = [whole_toman_constraint("discount_amount")]
 
     def __str__(self):
         return f"{self.coupon.code} redeemed by {self.user or 'guest'}"
@@ -214,7 +264,7 @@ class FlashSale(models.Model):
             and self.ends_at is not None
             and self.ends_at <= self.starts_at
         ):
-            raise ValidationError({"ends_at": "Must be after starts_at."})
+            raise ValidationError({"ends_at": _("Must be after starts_at.")})
 
     @property
     def is_currently_active(self):

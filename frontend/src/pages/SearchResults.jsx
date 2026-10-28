@@ -15,6 +15,14 @@ import {
 } from '../utils/cosmeticFilters';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
+import { formatToman, formatTomanLoose, parseTomanInput, toTomanLoose, tomanToRial } from '../utils/money';
+import { formatReviewCount } from '../utils/numerals';
+
+// The URL/API carry Rial; the price inputs are typed and shown in Toman.
+const rialParamToTomanText = (raw) => {
+  const t = toTomanLoose(raw);
+  return t === null ? '' : String(t);
+};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE = 12;
@@ -86,7 +94,7 @@ const StarRating = memo(({ rating, count, compact = false }) => {
           />
         ))}
       </div>
-      {!compact && <span className="text-xs text-gray-500">({count ?? 0})</span>}
+      {!compact && <span className="text-xs text-gray-500">({formatReviewCount(count ?? 0)})</span>}
     </div>
   );
 });
@@ -201,9 +209,9 @@ const ProductCard = memo(({ product }) => {
             <FlashSalePrice product={product} />
           ) : (
             <div className="flex items-baseline gap-2">
-              <span className="text-base font-bold text-teal-700">${displayPrice.toFixed(2)}</span>
+              <span className="text-base font-bold text-teal-700">{formatToman(displayPrice)}</span>
               {salePrice && (
-                <span className="text-xs text-gray-400 line-through">${price.toFixed(2)}</span>
+                <span className="text-xs text-gray-400 line-through">{formatToman(price)}</span>
               )}
             </div>
           )}
@@ -216,23 +224,23 @@ const ProductCard = memo(({ product }) => {
 
 // ─── Filter Sidebar ───────────────────────────────────────────────────────────
 const FilterSidebar = memo(({ categories, brands, searchParams, onFilterChange, onClearAll, activeFilterCount, facetCounts }) => {
-  const [priceMin, setPriceMin] = useState(searchParams.get('min_price') || '');
-  const [priceMax, setPriceMax] = useState(searchParams.get('max_price') || '');
+  const [priceMin, setPriceMin] = useState(rialParamToTomanText(searchParams.get('min_price')));
+  const [priceMax, setPriceMax] = useState(rialParamToTomanText(searchParams.get('max_price')));
   const cosmetic = useMemo(() => cosmeticFiltersFromSearchParams(searchParams), [searchParams]);
 
   // Sync local price inputs when URL params change externally
   useEffect(() => {
-    setPriceMin(searchParams.get('min_price') || '');
-    setPriceMax(searchParams.get('max_price') || '');
+    setPriceMin(rialParamToTomanText(searchParams.get('min_price')));
+    setPriceMax(rialParamToTomanText(searchParams.get('max_price')));
   }, [searchParams]);
 
   const applyPrice = useCallback(() => {
-    const updates = {};
-    if (priceMin) updates.min_price = priceMin;
-    if (priceMax) updates.max_price = priceMax;
-    if (!priceMin) updates.min_price = null;
-    if (!priceMax) updates.max_price = null;
-    onFilterChange(updates);
+    const minToman = parseTomanInput(priceMin);
+    const maxToman = parseTomanInput(priceMax);
+    onFilterChange({
+      min_price: minToman === null ? null : String(tomanToRial(minToman)),
+      max_price: maxToman === null ? null : String(tomanToRial(maxToman)),
+    });
   }, [priceMin, priceMax, onFilterChange]);
 
   return (
@@ -290,20 +298,22 @@ const FilterSidebar = memo(({ categories, brands, searchParams, onFilterChange, 
       <FilterGroup title="Price Range">
         <div className="flex items-center gap-2">
           <input
-            type="number"
-            min="0"
+            type="text"
+            inputMode="numeric"
+            aria-label="Minimum price (Toman)"
             value={priceMin}
             onChange={(e) => setPriceMin(e.target.value)}
-            placeholder="Min"
+            placeholder="Min (Toman)"
             className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-teal-500"
           />
           <span className="text-gray-400 flex-shrink-0">–</span>
           <input
-            type="number"
-            min="0"
+            type="text"
+            inputMode="numeric"
+            aria-label="Maximum price (Toman)"
             value={priceMax}
             onChange={(e) => setPriceMax(e.target.value)}
-            placeholder="Max"
+            placeholder="Max (Toman)"
             className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-teal-500"
           />
         </div>
@@ -492,9 +502,13 @@ const ActiveChips = memo(({ searchParams, categories, brands, onRemove, onUpdate
   }
 
   if (searchParams.get('min_price') || searchParams.get('max_price')) {
-    const min = searchParams.get('min_price') ?? '0';
-    const max = searchParams.get('max_price') ?? '∞';
-    chips.push({ key: 'price', label: `Price: $${min} – $${max}`, removes: ['min_price', 'max_price'] });
+    const min = searchParams.get('min_price');
+    const max = searchParams.get('max_price');
+    chips.push({
+      key: 'price',
+      label: `Price: ${min ? formatTomanLoose(min) : formatToman(0)} – ${max ? formatTomanLoose(max) : '∞'}`,
+      removes: ['min_price', 'max_price'],
+    });
   }
 
   const rating = searchParams.get('min_rating');

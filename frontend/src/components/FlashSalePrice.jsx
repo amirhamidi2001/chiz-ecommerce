@@ -8,8 +8,9 @@
 // looks and behaves the same everywhere.
 
 import { isOnFlashSale } from '../utils/flashSale';
+import { formatToman } from '../utils/money';
 
-const money = (v) => `$${Number(v).toFixed(2)}`;
+const money = (v) => formatToman(v);
 // "25.00" -> "25", "12.50" -> "12.5"
 const percent = (v) => String(parseFloat(v));
 

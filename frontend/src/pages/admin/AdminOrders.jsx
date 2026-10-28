@@ -3,9 +3,9 @@ import { adminAPI } from "../../services/api";
 import DataTable from "../../components/admin/DataTable";
 import ConfirmModal from "../../components/admin/ConfirmModal";
 import Toast, { useToast } from "../../components/admin/Toast";
+import { formatToman } from '../../utils/money';
 
-const fmt = (n) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+const fmt = (n) => formatToman(n);
 
 const STATUS_STYLES = {
   pending: "bg-gray-100 text-gray-700",

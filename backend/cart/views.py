@@ -1,3 +1,4 @@
+from django.utils.translation import gettext as _
 from promotions.services import validate_coupon
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -15,13 +16,13 @@ def get_or_create_cart(request):
     logged in, otherwise a session-based anonymous cart.
     """
     if request.user.is_authenticated:
-        cart, _ = Cart.objects.get_or_create(user=request.user)
+        cart, _created = Cart.objects.get_or_create(user=request.user)
         return cart
 
     if not request.session.session_key:
         request.session.create()
     session_key = request.session.session_key
-    cart, _ = Cart.objects.get_or_create(session_key=session_key)
+    cart, _created = Cart.objects.get_or_create(session_key=session_key)
     return cart
 
 
@@ -48,7 +49,7 @@ class CartView(APIView):
 
         if not variant_id:
             return Response(
-                {"variant_id": "This field is required."},
+                {"variant_id": _("This field is required.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -66,7 +67,7 @@ class CartView(APIView):
             variant = ProductVariant.objects.get(pk=variant_id)
         except ProductVariant.DoesNotExist:
             return Response(
-                {"variant_id": "Product variant not found."},
+                {"variant_id": _("Product variant not found.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -124,14 +125,14 @@ class CartItemView(APIView):
         item = self._get_item(request, item_id)
         if not item:
             return Response(
-                {"detail": "Cart item not found."},
+                {"detail": _("Cart item not found.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         quantity = request.data.get("quantity")
         if quantity is None:
             return Response(
-                {"quantity": "This field is required."},
+                {"quantity": _("This field is required.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -139,13 +140,13 @@ class CartItemView(APIView):
             quantity = int(quantity)
         except (TypeError, ValueError):
             return Response(
-                {"quantity": "Must be a valid integer."},
+                {"quantity": _("Must be a valid integer.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         if quantity < 1:
             return Response(
-                {"quantity": "Quantity must be at least 1."},
+                {"quantity": _("Quantity must be at least 1.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -160,7 +161,7 @@ class CartItemView(APIView):
         item = self._get_item(request, item_id)
         if not item:
             return Response(
-                {"detail": "Cart item not found."},
+                {"detail": _("Cart item not found.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -219,7 +220,7 @@ class CartApplyCouponView(APIView):
         return Response(
             {
                 "code": result.coupon.code,
-                "discount_amount": str(result.discount_amount),
+                "discount_amount": result.discount_amount,
             },
             status=status.HTTP_200_OK,
         )

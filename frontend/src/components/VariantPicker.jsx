@@ -1,3 +1,4 @@
+import { formatToman } from '../utils/money';
 // src/components/VariantPicker.jsx
 //
 // A small, controlled picker for choosing ONE of a product's variants
@@ -13,10 +14,7 @@
 //   disabled   {boolean}  optional
 //   label      {string}   accessible name for the group, optional
 
-const formatPrice = (n) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-    Number(n ?? 0),
-  );
+const formatPrice = (n) => formatToman(n);
 
 /** "Rose · 30 ml" — colour name, then size; the SKU if it has neither. */
 const variantLabel = (variant) => {

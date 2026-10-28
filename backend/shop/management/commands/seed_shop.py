@@ -1,5 +1,6 @@
 import random
 
+from core.money import to_whole_toman_rial
 from django.core.management.base import BaseCommand
 from django.utils.text import slugify
 from shop.models import (
@@ -218,10 +219,15 @@ class Command(BaseCommand):
         created_products = []
 
         for i, product_name in enumerate(PRODUCT_NAMES):
-            price = round(random.uniform(15, 400), 2)
+            # Same x10,000 re-baselining the money migrations apply to legacy
+            # dollar-shaped values (e.g. 29.99 -> 299,900 Rial), so seed data and
+            # migrated data are on one scale. Always a whole-Toman Rial int.
+            price = to_whole_toman_rial(round(random.uniform(15, 400), 2) * 10_000)
             has_discount = random.random() > 0.4
             original_price = (
-                round(price * random.uniform(1.15, 1.6), 2) if has_discount else None
+                to_whole_toman_rial(price * random.uniform(1.15, 1.6))
+                if has_discount
+                else None
             )
             rating = round(random.uniform(3.5, 5.0), 1)
             reviews_count = random.randint(5, 250)

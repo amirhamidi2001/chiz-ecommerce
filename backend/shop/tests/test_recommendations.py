@@ -33,10 +33,10 @@ def make_order(products, status=Order.Status.DELIVERED, user=None):
         shipping_state="tehran",
         shipping_zip="1234567890",
         shipping_country="IR",
-        subtotal=Decimal("10.00"),
-        shipping_cost=Decimal("0.00"),
-        tax=Decimal("0.00"),
-        total=Decimal("10.00"),
+        subtotal=100_000,
+        shipping_cost=0,
+        tax=0,
+        total=100_000,
     )
     for p in products:
         OrderItem.objects.create(
@@ -44,7 +44,7 @@ def make_order(products, status=Order.Status.DELIVERED, user=None):
             product=p,
             product_name=p.name,
             product_slug=p.slug,
-            unit_price=Decimal("10.00"),
+            unit_price=100_000,
             quantity=1,
         )
     return order

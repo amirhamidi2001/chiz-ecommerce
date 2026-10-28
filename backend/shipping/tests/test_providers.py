@@ -31,7 +31,7 @@ class TestCarrierProviderInterface:
             def get_rate(self, origin, destination, weight_g):
                 return RateQuoteResult(
                     success=True,
-                    price=Decimal("45000.00"),
+                    price=450_000_000,
                     estimated_days_min=1,
                     estimated_days_max=3,
                 )
@@ -56,7 +56,7 @@ class TestCarrierProviderInterface:
 
         rate_result = provider.get_rate({}, {}, 500)
         assert rate_result.success is True
-        assert rate_result.price == Decimal("45000.00")
+        assert rate_result.price == 450_000_000
 
         shipment_result = provider.create_shipment(order=None, destination={})
         assert shipment_result.success is True

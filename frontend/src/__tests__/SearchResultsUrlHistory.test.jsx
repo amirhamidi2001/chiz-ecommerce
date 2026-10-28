@@ -25,7 +25,7 @@ window.scrollTo = vi.fn();
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
 const ITEM = {
-  id: 1, name: 'Test Product', slug: 'test-product', price: '29.99', sale_price: null,
+  id: 1, name: 'Test Product', slug: 'test-product', price: 299_900, sale_price: null,
   rating: 4.2, reviews_count: 17, thumbnail: '/img/p.webp', in_stock: true, is_new: false,
   category: { name: 'Skincare' }, brand: { name: 'Acme' },
 };
@@ -38,7 +38,7 @@ const NavProbe = () => {
       <div data-testid="loc">{pathname + search}</div>
       <button onClick={() => navigate(-1)}>history-back</button>
       <button onClick={() => navigate(1)}>history-forward</button>
-      <button onClick={() => navigate('/search?q=lipstick&skin_type=dry&min_price=20')}>external-nav</button>
+      <button onClick={() => navigate('/search?q=lipstick&skin_type=dry&min_price=200000')}>external-nav</button>
     </div>
   );
 };
@@ -62,8 +62,8 @@ const path = () => locText().split('?')[0];
 const url = () => new URLSearchParams(locText().split('?')[1] || '');
 const lastParams = () => getProducts.mock.calls.at(-1)[0];
 const settle = async () => { await screen.findByText('Test Product'); };
-// (the SPF inputs also say "Min"; the price field comes first in the sidebar)
-const priceMin = () => screen.getAllByPlaceholderText('Min')[0];
+// (the SPF inputs are placeholdered plain "Min"; the price field says "Min (Toman)")
+const priceMin = () => screen.getByPlaceholderText('Min (Toman)');
 const row = (name) => screen.getByRole('button', { name });
 const back = (user) => user.click(screen.getByRole('button', { name: 'history-back' }));
 const forward = (user) => user.click(screen.getByRole('button', { name: 'history-forward' }));
@@ -160,23 +160,23 @@ describe('SearchResults history — filter changes replace, pages and searches p
 // ═════════════════════════════════════════════════════════════════════════════
 describe('SearchResults history — the page follows the URL', () => {
   it('Back / Forward restore the sidebar, search box and price fields', async () => {
-    const { user } = renderSearch(['/search?q=serum&skin_type=oily&min_price=5']);
+    const { user } = renderSearch(['/search?q=serum&skin_type=oily&min_price=50000']);
     await settle();
-    expect(priceMin()).toHaveValue(5);
+    expect(priceMin()).toHaveValue('5000'); // Toman text field (Persian digits allowed); Rial in the URL
     expect(hasChip('Skin Type: Oily')).toBe(true);
 
     await user.click(screen.getByRole('button', { name: 'external-nav' }));
     await waitFor(() => expect(screen.getByPlaceholderText('Refine your search…')).toHaveValue('lipstick'));
-    expect(priceMin()).toHaveValue(20);
+    expect(priceMin()).toHaveValue('20000');
     expect(hasChip('Skin Type: Dry')).toBe(true);
     expect(hasChip('Skin Type: Oily')).toBe(false);
 
     await back(user);
     await waitFor(() => expect(screen.getByPlaceholderText('Refine your search…')).toHaveValue('serum'));
-    expect(priceMin()).toHaveValue(5);
+    expect(priceMin()).toHaveValue('5000'); // Toman text field (Persian digits allowed); Rial in the URL
     expect(hasChip('Skin Type: Oily')).toBe(true);
     expect(hasChip('Skin Type: Dry')).toBe(false);
-    await waitFor(() => expect(lastParams()).toMatchObject({ search: 'serum', skin_type: 'oily', min_price: '5' }));
+    await waitFor(() => expect(lastParams()).toMatchObject({ search: 'serum', skin_type: 'oily', min_price: '50000' }));
   });
 
   it('a URL shared into a new tab restores the same filters and results', async () => {

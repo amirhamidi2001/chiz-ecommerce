@@ -92,7 +92,7 @@ class PaymentCallbackConcurrencyTests(TransactionTestCase):
         """
         user = make_user(email="racer@example.com")
         variant = make_variant(name="Race Item", slug="race-item", stock=5)
-        order = make_order(user, total=Decimal("100.00"))
+        order = make_order(user, total=1_000_000)
         make_order_item(order, variant, quantity=2)
         authority = "A00000000000000000000000000000000wOGYpd"
         PaymentTransaction.objects.create(

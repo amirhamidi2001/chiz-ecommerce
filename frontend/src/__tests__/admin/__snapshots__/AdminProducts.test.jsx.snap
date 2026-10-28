@@ -110,7 +110,7 @@ exports[`AdminProducts > Snapshot > matches stable snapshot after data loads 1`]
             <p
               class="font-semibold text-gray-800"
             >
-              $10.00
+              10,000 تومان
             </p>
           </div>
         </div>
@@ -207,7 +207,7 @@ exports[`AdminProducts > Snapshot > matches stable snapshot after data loads 1`]
             <p
               class="font-semibold text-gray-800"
             >
-              $20.00
+              20,000 تومان
             </p>
           </div>
         </div>
@@ -304,7 +304,7 @@ exports[`AdminProducts > Snapshot > matches stable snapshot after data loads 1`]
             <p
               class="font-semibold text-gray-800"
             >
-              $30.00
+              30,000 تومان
             </p>
           </div>
         </div>

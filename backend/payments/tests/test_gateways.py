@@ -48,11 +48,11 @@ class TestPaymentGatewayInterface:
 
         assert isinstance(gateway, PaymentGateway)
 
-        request_result = gateway.request_payment(Decimal("10.00"), "https://x/cb")
+        request_result = gateway.request_payment(100_000, "https://x/cb")
         assert request_result.success is True
         assert request_result.authority == "A123"
 
-        verify_result = gateway.verify_payment("A123", Decimal("10.00"))
+        verify_result = gateway.verify_payment("A123", 100_000)
         assert verify_result.success is True
         assert verify_result.ref_id == "R456"
 

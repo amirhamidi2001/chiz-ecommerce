@@ -11,17 +11,19 @@
 # to a shared lower-level location (e.g. a small core app or
 # common/choices.py) that both dashboard and shipping import from —
 # not a local import hidden inside a function body.
+from core.fields import RialField, whole_toman_constraint
 from dashboard.models import IranProvince
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 
 class ShippingCarrier(models.Model):
     class Code(models.TextChoices):
-        POST = "post", "Iran Post"
-        TIPAX = "tipax", "Tipax"
-        SNAPBOX = "snapbox", "SnapBox"
-        ALOPEYK = "alopeyk", "AloPeyk"
+        POST = "post", _("Iran Post")
+        TIPAX = "tipax", _("Tipax")
+        SNAPBOX = "snapbox", _("SnapBox")
+        ALOPEYK = "alopeyk", _("AloPeyk")
 
     code = models.CharField(max_length=20, choices=Code.choices, unique=True)
     display_name = models.CharField(max_length=100)
@@ -30,16 +32,20 @@ class ShippingCarrier(models.Model):
         default=dict,
         blank=True,
         help_text=(
-            "Carrier-specific settings (API base URL overrides, account IDs, "
-            "etc.) NOT including secret API keys — those belong in "
-            "environment variables, never in this DB-stored JSON field."
+            _(
+                "Carrier-specific settings (API base URL overrides, account IDs, "
+                "etc.) NOT including secret API keys — those belong in "
+                "environment variables, never in this DB-stored JSON field."
+            )
         ),
     )
     supports_same_day = models.BooleanField(
         default=False,
         help_text=(
-            "Whether this carrier can offer same-day/local delivery "
-            "(relevant for AloPeyk-style city-restricted couriers)."
+            _(
+                "Whether this carrier can offer same-day/local delivery "
+                "(relevant for AloPeyk-style city-restricted couriers)."
+            )
         ),
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -59,22 +65,24 @@ class ShippingRate(models.Model):
     province = models.CharField(
         max_length=30,
         choices=IranProvince.choices,
-        help_text="Destination province this rate applies to.",
+        help_text=_("Destination province this rate applies to."),
     )
     city = models.CharField(
         max_length=100,
         blank=True,
         help_text=(
-            "Optional: leave blank to apply to the whole province; set "
-            "to override for a specific city (e.g. same-city rates for "
-            "AloPeyk)."
+            _(
+                "Optional: leave blank to apply to the whole province; set "
+                "to override for a specific city (e.g. same-city rates for "
+                "AloPeyk)."
+            )
         ),
     )
     min_weight_g = models.PositiveIntegerField(default=0)
     max_weight_g = models.PositiveIntegerField(
-        help_text="Upper bound of this weight bracket, in grams."
+        help_text=_("Upper bound of this weight bracket, in grams.")
     )
-    price = models.DecimalField(max_digits=10, decimal_places=2)
+    price = RialField()
     estimated_days_min = models.PositiveSmallIntegerField(default=1)
     estimated_days_max = models.PositiveSmallIntegerField(default=3)
     is_active = models.BooleanField(default=True)
@@ -82,6 +90,7 @@ class ShippingRate(models.Model):
     class Meta:
         ordering = ["carrier", "province", "min_weight_g"]
         indexes = [models.Index(fields=["carrier", "province", "city"])]
+        constraints = [whole_toman_constraint("price")]
 
     def __str__(self):
         return (
@@ -103,7 +112,7 @@ class ShippingRate(models.Model):
             and self.max_weight_g <= self.min_weight_g
         ):
             raise ValidationError(
-                {"max_weight_g": "Max weight must be greater than min weight."}
+                {"max_weight_g": _("Max weight must be greater than min weight.")}
             )
 
     @classmethod
@@ -150,11 +159,11 @@ class Shipment(models.Model):
     """
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending Pickup"
-        IN_TRANSIT = "in_transit", "In Transit"
-        OUT_FOR_DELIVERY = "out_for_delivery", "Out for Delivery"
-        DELIVERED = "delivered", "Delivered"
-        FAILED = "failed", "Failed"
+        PENDING = "pending", _("Pending Pickup")
+        IN_TRANSIT = "in_transit", _("In Transit")
+        OUT_FOR_DELIVERY = "out_for_delivery", _("Out for Delivery")
+        DELIVERED = "delivered", _("Delivered")
+        FAILED = "failed", _("Failed")
 
     order = models.OneToOneField(
         "order.Order", on_delete=models.CASCADE, related_name="shipment"

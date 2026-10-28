@@ -28,43 +28,61 @@ def make_order(user=None, **overrides):
         shipping_state="CA",
         shipping_zip="90001",
         shipping_country="US",
-        subtotal=Decimal("100.00"),
-        shipping_cost=Decimal("0.00"),
-        tax=Decimal("0.00"),
-        total=Decimal("80.00"),
+        subtotal=1_000_000,
+        shipping_cost=0,
+        tax=0,
+        total=800_000,
     )
     data.update(overrides)
     return Order.objects.create(**data)
 
 
+def _coupon_fields(overrides, *, valid_from, valid_until):
+    """Defaults for a coupon. A PERCENT coupon carries `percent_off`, a FIXED one
+    `fixed_amount` (Rial) — never both (ADR 0001 §7.3), so switching
+    `discount_type` in an override also switches which column is filled."""
+    fields = {
+        "code": "SUMMER20",
+        "discount_type": Coupon.DiscountType.PERCENT,
+        "valid_from": valid_from,
+        "valid_until": valid_until,
+    }
+    fields.update(overrides)
+    if fields["discount_type"] == Coupon.DiscountType.FIXED:
+        if "percent_off" not in overrides:
+            fields["percent_off"] = None
+        fields.setdefault("fixed_amount", 100_000)
+    else:
+        fields.setdefault("percent_off", Decimal("20.00"))
+    return fields
+
+
 def make_saved_coupon(**overrides):
     """A saved, currently-valid 20% coupon unless overridden."""
     now = timezone.now()
-    defaults = {
-        "code": "SUMMER20",
-        "discount_type": Coupon.DiscountType.PERCENT,
-        "value": Decimal("20.00"),
-        "valid_from": now - timedelta(days=1),
-        "valid_until": now + timedelta(days=30),
-    }
-    defaults.update(overrides)
-    return Coupon.objects.create(**defaults)
+    return Coupon.objects.create(
+        **_coupon_fields(
+            overrides,
+            valid_from=now - timedelta(days=1),
+            valid_until=now + timedelta(days=30),
+        )
+    )
 
 
-def make_completed_redemption(coupon, user, discount="10.00"):
+def make_completed_redemption(coupon, user, discount=100_000):
     """A redemption tied to a real order, i.e. counted toward usage limits."""
     return CouponRedemption.objects.create(
         coupon=coupon,
         user=user,
         order=make_order(user=user),
-        discount_amount=Decimal(discount),
+        discount_amount=discount,
     )
 
 
-def make_in_progress_redemption(coupon, user, discount="10.00"):
+def make_in_progress_redemption(coupon, user, discount=100_000):
     """A redemption with order=None, i.e. applied to a cart, not checked out."""
     return CouponRedemption.objects.create(
-        coupon=coupon, user=user, order=None, discount_amount=Decimal(discount)
+        coupon=coupon, user=user, order=None, discount_amount=discount
     )
 
 
@@ -87,12 +105,12 @@ def make_variant(price, category=None, name=None):
     product = Product.objects.create(
         name=name or f"Product {n}",
         slug=f"coupon-test-product-{n}",
-        price=Decimal(price),
+        price=price,
         stock=100,
         category=category,
     )
     return ProductVariant.objects.create(
-        product=product, sku=f"COUPON-SKU-{n}", price=Decimal(price), stock=100
+        product=product, sku=f"COUPON-SKU-{n}", price=price, stock=100
     )
 
 

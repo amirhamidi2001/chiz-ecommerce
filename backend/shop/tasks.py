@@ -87,9 +87,9 @@ def notify_price_drop_subscribers(product_id, old_price, new_price):
     shop/signals.py's handle_variant_price_change once a variant change
     lowers that price below the product's last recorded snapshot.
 
-    `old_price` / `new_price` arrive as decimal STRINGS (e.g. "12.00") —
-    the project serializes task args as JSON, which has no Decimal type —
-    so Epic 16 should Decimal() them if it needs arithmetic.
+    `old_price` / `new_price` arrive as plain ints of Rial (ADR 0001) — JSON
+    carries them natively. Convert with core.money.rial_to_toman for any
+    customer-facing text.
 
     Only AUTHENTICATED wishlist items are notification-eligible: a
     session-only (guest) item has no email/phone to reach anyone at.

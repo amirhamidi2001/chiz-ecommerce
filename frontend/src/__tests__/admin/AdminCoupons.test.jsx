@@ -70,6 +70,7 @@ vi.mock("../../services/api", () => ({
   },
 }));
 import { adminAPI } from "../../services/api";
+import { formatToman } from "../../utils/money";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 const DAY = 24 * 60 * 60 * 1000;
@@ -79,8 +80,10 @@ const makeCoupon = (overrides = {}) => ({
   id: 1,
   code: "SUMMER20",
   discount_type: "percent",
-  value: "20.00",
-  min_order_amount: "0.00",
+  // API shape (ADR 0001): percent_off XOR fixed_amount; money is integer Rial.
+  percent_off: "20.00",
+  fixed_amount: null,
+  min_order_amount: 0,
   max_uses: null,
   uses_per_user: 1,
   valid_from: "2026-01-01T00:00:00Z",
@@ -142,7 +145,7 @@ describe("AdminCoupons — list", () => {
   it("renders the heading, total and existing coupons", async () => {
     await renderPage([
       makeCoupon({ id: 1, code: "SUMMER20" }),
-      makeCoupon({ id: 2, code: "FIVEOFF", discount_type: "fixed", value: "5.00" }),
+      makeCoupon({ id: 2, code: "FIVEOFF", discount_type: "fixed", percent_off: null, fixed_amount: 50_000 }),
     ]);
 
     expect(screen.getByRole("heading", { name: "Coupons" })).toBeInTheDocument();
@@ -153,7 +156,7 @@ describe("AdminCoupons — list", () => {
     expect(first.getByText("20%")).toBeInTheDocument();
     const second = within(screen.getByTestId("row-2"));
     expect(second.getByText("FIVEOFF")).toBeInTheDocument();
-    expect(second.getByText("$5.00")).toBeInTheDocument();
+    expect(second.getByText(formatToman(50_000))).toBeInTheDocument();
   });
 
   it("shows the valid-from / valid-until range", async () => {
@@ -378,7 +381,7 @@ describe("CouponModal — validation catches invalid input before submitting", (
       expect.arrayContaining([
         "Enter a whole number of 1 or more.",
         "Leave blank for unlimited, or enter a whole number of 1 or more.",
-        "Enter 0 or a positive amount with at most 2 decimal places.",
+        "Enter 0 or a whole number of Toman.",
       ]),
     );
     expect(adminAPI.createCoupon).not.toHaveBeenCalled();
@@ -417,8 +420,9 @@ describe("CouponModal — create", () => {
     expect(adminAPI.createCoupon).toHaveBeenCalledWith({
       code: "SUMMER20",
       discount_type: "percent",
-      value: "20",
-      min_order_amount: "0",
+      percent_off: "20",
+      fixed_amount: null,
+      min_order_amount: 0,
       max_uses: null,
       uses_per_user: 1,
       valid_from: new Date("2030-01-01T10:00").toISOString(),
@@ -507,7 +511,7 @@ describe("CouponModal — edit", () => {
     await user.click(submitButton("Save Changes"));
 
     await waitFor(() => expect(adminAPI.updateCoupon).toHaveBeenCalledTimes(1));
-    expect(adminAPI.updateCoupon).toHaveBeenCalledWith(3, { value: "25" });
+    expect(adminAPI.updateCoupon).toHaveBeenCalledWith(3, { percent_off: "25" });
   });
 
   it("sends no request when nothing changed", async () => {

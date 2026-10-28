@@ -143,7 +143,11 @@ class AloPeykGetRateTests(AloPeykTestCase):
         result = self.provider.get_rate({}, DESTINATION, 500)
 
         self.assertTrue(result.success)
-        self.assertEqual(result.price, Decimal("31500"))
+        # AloPeyk quotes in TOMAN (PRICE_OK: 31,500); the adapter converts to
+        # the stored unit, Rial, at the boundary (ADR 0001 D8): x10.
+        self.assertEqual(result.price, 315_000)
+        self.assertIs(type(result.price), int)
+        self.assertEqual(result.price % 10, 0)
         self.assertEqual(result.error_message, "")
 
     @responses.activate

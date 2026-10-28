@@ -69,7 +69,8 @@ class ProductFactory(DjangoModelFactory):
     slug = factory.LazyAttribute(lambda o: slugify(o.name))
     short_description = factory.Faker("sentence", nb_words=10)
     description = factory.Faker("paragraph", nb_sentences=5)
-    price = factory.Faker("pydecimal", left_digits=3, right_digits=2, positive=True)
+    # Whole-Toman Rial ints (multiples of 10), as the money invariants require.
+    price = factory.Faker("pyint", min_value=1_000, max_value=9_999_990, step=10)
     original_price = None
     stock = factory.Faker("pyint", min_value=0, max_value=200)
     rating = factory.Faker(
@@ -114,7 +115,8 @@ class ProductVariantFactory(DjangoModelFactory):
     sku = factory.Sequence(lambda n: f"SKU-{n:06d}")
     barcode = ""
     color = factory.SubFactory(ColorFactory)
-    price = factory.Faker("pydecimal", left_digits=3, right_digits=2, positive=True)
+    # Whole-Toman Rial ints (multiples of 10), as the money invariants require.
+    price = factory.Faker("pyint", min_value=1_000, max_value=9_999_990, step=10)
     original_price = None
     stock = factory.Faker("pyint", min_value=0, max_value=200)
     is_active = True

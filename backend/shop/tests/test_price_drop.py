@@ -60,12 +60,12 @@ def product(db):
 
 @pytest.fixture
 def cheap(product):
-    return ProductVariantFactory(product=product, price=D("10.00"), stock=5)
+    return ProductVariantFactory(product=product, price=100_000, stock=5)
 
 
 @pytest.fixture
 def dear(product, cheap):  # depends on `cheap` so creation order is deterministic
-    return ProductVariantFactory(product=product, price=D("15.00"), stock=5)
+    return ProductVariantFactory(product=product, price=150_000, stock=5)
 
 
 def change(variant, commit, **fields):
@@ -85,12 +85,12 @@ def change(variant, commit, **fields):
 class TestLowestActivePrice:
 
     def test_is_the_cheapest_variant_price(self, product, cheap, dear):
-        assert product.lowest_active_price == D("10.00")
+        assert product.lowest_active_price == 100_000
 
     def test_inactive_variants_are_ignored(self, product, cheap, dear):
         cheap.is_active = False
         cheap.save()
-        assert product.lowest_active_price == D("15.00")
+        assert product.lowest_active_price == 150_000
 
     def test_none_when_there_are_no_active_variants(self, product, cheap):
         cheap.is_active = False
@@ -105,7 +105,7 @@ class TestLowestActivePrice:
         part of it, so selling out / restocking never moves the price."""
         cheap.stock = 0
         cheap.save()
-        assert product.lowest_active_price == D("10.00")
+        assert product.lowest_active_price == 100_000
 
     def test_uses_prefetched_variants_without_extra_queries(
         self, product, cheap, dear, django_assert_num_queries
@@ -114,7 +114,7 @@ class TestLowestActivePrice:
 
         fetched = Product.objects.prefetch_related("variants").get(pk=product.pk)
         with django_assert_num_queries(0):
-            assert fetched.lowest_active_price == D("10.00")
+            assert fetched.lowest_active_price == 100_000
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -130,39 +130,39 @@ class TestPriceDropSignal:
     def test_decrease_of_lowest_variant_records_snapshot_and_notifies(
         self, product, cheap, dear, delay, commit
     ):
-        assert snapshot_prices(product) == [D("10.00")]  # baseline from creation
+        assert snapshot_prices(product) == [100_000]  # baseline from creation
 
-        change(cheap, commit, price=D("8.00"))
+        change(cheap, commit, price=80_000)
 
-        assert snapshot_prices(product) == [D("8.00"), D("10.00")]
-        delay.assert_called_once_with(product.id, "10.00", "8.00")
+        assert snapshot_prices(product) == [80_000, 100_000]
+        delay.assert_called_once_with(product.id, 100_000, 80_000)
 
     def test_a_dearer_variant_undercutting_the_cheapest_is_a_drop(
         self, product, cheap, dear, delay, commit
     ):
-        change(dear, commit, price=D("7.00"))  # now the cheapest of all
+        change(dear, commit, price=70_000)  # now the cheapest of all
 
-        assert snapshot_prices(product)[0] == D("7.00")
-        delay.assert_called_once_with(product.id, "10.00", "7.00")
+        assert snapshot_prices(product)[0] == 70_000
+        delay.assert_called_once_with(product.id, 100_000, 70_000)
 
     # ── 2. increase updates baseline, no notification ───────────────────────
 
     def test_increase_records_new_baseline_without_notifying(
         self, product, cheap, dear, delay, commit
     ):
-        change(cheap, commit, price=D("12.00"))
+        change(cheap, commit, price=120_000)
 
-        assert snapshot_prices(product) == [D("12.00"), D("10.00")]
+        assert snapshot_prices(product) == [120_000, 100_000]
         delay.assert_not_called()
 
     def test_drop_is_measured_from_the_raised_baseline(
         self, product, cheap, dear, delay, commit
     ):
         """After 10 -> 12 (silent), 12 -> 11 is a drop from 12."""
-        change(cheap, commit, price=D("12.00"))
-        change(cheap, commit, price=D("11.00"))
+        change(cheap, commit, price=120_000)
+        change(cheap, commit, price=110_000)
 
-        delay.assert_called_once_with(product.id, "12.00", "11.00")
+        delay.assert_called_once_with(product.id, 120_000, 110_000)
 
     # ── 3. change that doesn't affect the product's lowest price ────────────
 
@@ -171,49 +171,49 @@ class TestPriceDropSignal:
     ):
         """The trickiest case: `dear` drops 15 -> 12 but `cheap` (10) is
         unchanged and still the cheapest — "starting at" didn't move."""
-        change(dear, commit, price=D("12.00"))
+        change(dear, commit, price=120_000)
 
-        assert snapshot_prices(product) == [D("10.00")]  # nothing new recorded
+        assert snapshot_prices(product) == [100_000]  # nothing new recorded
         delay.assert_not_called()
 
     def test_non_lowest_variant_getting_dearer(
         self, product, cheap, dear, delay, commit
     ):
-        change(dear, commit, price=D("20.00"))
+        change(dear, commit, price=200_000)
 
-        assert snapshot_prices(product) == [D("10.00")]
+        assert snapshot_prices(product) == [100_000]
         delay.assert_not_called()
 
     def test_non_lowest_variant_matching_the_lowest_is_not_a_drop(
         self, product, cheap, dear, delay, commit
     ):
-        change(dear, commit, price=D("10.00"))
+        change(dear, commit, price=100_000)
 
-        assert snapshot_prices(product) == [D("10.00")]
+        assert snapshot_prices(product) == [100_000]
         delay.assert_not_called()
 
     def test_resaving_with_an_unchanged_price_does_nothing(
         self, product, cheap, dear, delay, commit
     ):
-        change(cheap, commit, price=D("10.00"))
+        change(cheap, commit, price=100_000)
 
-        assert snapshot_prices(product) == [D("10.00")]
+        assert snapshot_prices(product) == [100_000]
         delay.assert_not_called()
 
     # ── 5. newly created variants never notify ──────────────────────────────
 
     def test_creating_a_variant_never_notifies(self, product, delay, commit):
         with commit():
-            ProductVariantFactory(product=product, price=D("20.00"))
+            ProductVariantFactory(product=product, price=200_000)
         delay.assert_not_called()
 
     def test_creating_a_cheaper_variant_lowers_baseline_silently(
         self, product, cheap, delay, commit
     ):
         with commit():
-            ProductVariantFactory(product=product, price=D("6.00"))
+            ProductVariantFactory(product=product, price=60_000)
 
-        assert snapshot_prices(product) == [D("6.00"), D("10.00")]
+        assert snapshot_prices(product) == [60_000, 100_000]
         delay.assert_not_called()
 
     def test_creating_the_first_variant_records_a_baseline(
@@ -221,8 +221,8 @@ class TestPriceDropSignal:
     ):
         assert snapshot_prices(product) == []
         with commit():
-            ProductVariantFactory(product=product, price=D("10.00"))
-        assert snapshot_prices(product) == [D("10.00")]
+            ProductVariantFactory(product=product, price=100_000)
+        assert snapshot_prices(product) == [100_000]
         delay.assert_not_called()
 
     # ── The first real change after creation is a detectable drop ───────────
@@ -230,9 +230,9 @@ class TestPriceDropSignal:
     def test_first_price_cut_on_a_brand_new_product_notifies(
         self, product, delay, commit
     ):
-        variant = ProductVariantFactory(product=product, price=D("10.00"))
-        change(variant, commit, price=D("9.00"))
-        delay.assert_called_once_with(product.id, "10.00", "9.00")
+        variant = ProductVariantFactory(product=product, price=100_000)
+        change(variant, commit, price=90_000)
+        delay.assert_called_once_with(product.id, 100_000, 90_000)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -293,7 +293,7 @@ class TestPriceDropSignalEdgeCases:
     ):
         change(cheap, commit, is_active=False)  # starting-at: 10 -> 15
 
-        assert snapshot_prices(product) == [D("15.00"), D("10.00")]
+        assert snapshot_prices(product) == [150_000, 100_000]
         delay.assert_not_called()
 
     def test_inactive_variant_price_cut_does_not_notify(
@@ -301,9 +301,9 @@ class TestPriceDropSignalEdgeCases:
     ):
         dear.is_active = False
         dear.save()
-        change(dear, commit, price=D("1.00"))  # inactive: not on sale to anyone
+        change(dear, commit, price=10_000)  # inactive: not on sale to anyone
 
-        assert snapshot_prices(product) == [D("10.00")]
+        assert snapshot_prices(product) == [100_000]
         delay.assert_not_called()
 
     def test_product_with_no_prior_snapshot_only_records_a_baseline(
@@ -311,9 +311,9 @@ class TestPriceDropSignalEdgeCases:
     ):
         product.price_snapshots.all().delete()
 
-        change(cheap, commit, price=D("8.00"))
+        change(cheap, commit, price=80_000)
 
-        assert snapshot_prices(product) == [D("8.00")]
+        assert snapshot_prices(product) == [80_000]
         delay.assert_not_called()
 
     def test_rolled_back_save_notifies_nobody(
@@ -323,23 +323,25 @@ class TestPriceDropSignalEdgeCases:
 
         with commit():
             with pytest.raises(RuntimeError), transaction.atomic():
-                cheap.price = D("5.00")
+                cheap.price = 50_000
                 cheap.save()
                 raise RuntimeError("later failure, e.g. an admin inline error")
 
         delay.assert_not_called()
         assert snapshot_prices(product) == before
 
-    def test_task_args_are_json_safe_strings(self, product, cheap, dear, delay, commit):
-        change(cheap, commit, price=D("8.50"))
+    def test_task_args_are_json_safe_ints(self, product, cheap, dear, delay, commit):
+        # Money is a plain int of Rial (ADR 0001) — JSON carries it natively,
+        # so unlike the old Decimal era there is no string coercion.
+        change(cheap, commit, price=85_000)
         _, old_price, new_price = delay.call_args.args
-        assert (old_price, new_price) == ("10.00", "8.50")
-        assert isinstance(old_price, str) and isinstance(new_price, str)
+        assert (old_price, new_price) == (100_000, 85_000)
+        assert type(old_price) is int and type(new_price) is int
 
     def test_snapshots_are_ordered_newest_first(self, product, cheap, dear, commit):
-        change(cheap, commit, price=D("9.00"))
-        change(cheap, commit, price=D("8.00"))
-        assert product.price_snapshots.first().price == D("8.00")
+        change(cheap, commit, price=90_000)
+        change(cheap, commit, price=80_000)
+        assert product.price_snapshots.first().price == 80_000
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -356,16 +358,16 @@ class TestNotifyPriceDropSubscribers:
         Wishlist.objects.create(session_key="guest-1", product=product)
         Wishlist.objects.create(session_key="guest-2", product=product)
 
-        result = notify_price_drop_subscribers(product.id, "10.00", "8.00")
+        result = notify_price_drop_subscribers(product.id, 100_000, 80_000)
 
         assert result == (
             f"Would notify 2 wishlist subscriber(s) for product {product.id} "
-            "price drop 10.00 -> 8.00."
+            "price drop 100000 -> 80000."
         )
 
     def test_guest_only_wishlist_notifies_nobody(self, product):
         Wishlist.objects.create(session_key="guest-1", product=product)
-        result = notify_price_drop_subscribers(product.id, "10.00", "8.00")
+        result = notify_price_drop_subscribers(product.id, 100_000, 80_000)
         assert result.startswith("Would notify 0 wishlist subscriber(s)")
 
     def test_other_products_subscribers_are_not_counted(self, product):
@@ -374,17 +376,17 @@ class TestNotifyPriceDropSubscribers:
         Wishlist.objects.create(user=UserFactory(), product=other)
         Wishlist.objects.create(user=UserFactory(), product=other)
 
-        result = notify_price_drop_subscribers(product.id, "10.00", "8.00")
+        result = notify_price_drop_subscribers(product.id, 100_000, 80_000)
 
         assert result.startswith("Would notify 1 wishlist subscriber(s)")
 
     def test_no_subscribers_is_fine(self, product):
-        result = notify_price_drop_subscribers(product.id, "10.00", "8.00")
+        result = notify_price_drop_subscribers(product.id, 100_000, 80_000)
         assert result.startswith("Would notify 0 wishlist subscriber(s)")
 
     def test_missing_product_returns_message_instead_of_raising(self):
         assert (
-            notify_price_drop_subscribers(999999, "10.00", "8.00")
+            notify_price_drop_subscribers(999999, 100_000, 80_000)
             == "Product no longer exists."
         )
 
@@ -395,8 +397,8 @@ class TestNotifyPriceDropSubscribers:
             "shop.signals.notify_price_drop_subscribers.delay",
             side_effect=notify_price_drop_subscribers,
         ) as spy:
-            change(cheap, commit, price=D("8.00"))
-        spy.assert_called_once_with(product.id, "10.00", "8.00")
+            change(cheap, commit, price=80_000)
+        spy.assert_called_once_with(product.id, 100_000, 80_000)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -411,13 +413,13 @@ class TestBackfillPriceSnapshots:
         self, product, cheap, dear
     ):
         other = ProductFactory()
-        ProductVariantFactory(product=other, price=D("30.00"))
+        ProductVariantFactory(product=other, price=300_000)
         ProductPriceSnapshot.objects.all().delete()  # simulate pre-feature data
 
         backfill_module.backfill_price_snapshots(apps, None)
 
-        assert snapshot_prices(product) == [D("10.00")]
-        assert snapshot_prices(other) == [D("30.00")]
+        assert snapshot_prices(product) == [100_000]
+        assert snapshot_prices(other) == [300_000]
 
     def test_inactive_variants_do_not_set_the_baseline(self, product, cheap, dear):
         cheap.is_active = False
@@ -426,7 +428,7 @@ class TestBackfillPriceSnapshots:
 
         backfill_module.backfill_price_snapshots(apps, None)
 
-        assert snapshot_prices(product) == [D("15.00")]
+        assert snapshot_prices(product) == [150_000]
 
     def test_products_without_active_variants_get_no_snapshot(self, product, cheap):
         cheap.is_active = False

@@ -9,9 +9,9 @@ import ReviewsTab from "../components/ReviewsTab";
 import SettingsTab from "../components/SettingsTab";
 import PaymentMethodsTab from "../components/PaymentMethodsTab";
 import { dashboardAPI } from "../services/api";
+import { formatToman } from '../utils/money';
 
-const fmt = (n) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+const fmt = (n) => formatToman(n);
 
 // ─── Valid tab ids ─────────────────────────────────────────────────────────
 const VALID_TABS = ["overview", "orders", "wishlist", "reviews", "addresses", "settings", "payments"];

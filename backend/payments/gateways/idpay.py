@@ -70,7 +70,6 @@ written:
 """
 
 import uuid
-from decimal import Decimal
 
 import requests
 from django.conf import settings
@@ -94,7 +93,7 @@ class IDPayGateway(PaymentGateway):
         }
 
     def request_payment(
-        self, amount: Decimal, callback_url: str, description: str = ""
+        self, amount: int, callback_url: str, description: str = ""
     ) -> PaymentRequestResult:
         # IDPay requires a merchant-supplied, unique `order_id` per
         # transaction — this codebase's generic PaymentGateway interface
@@ -106,7 +105,7 @@ class IDPayGateway(PaymentGateway):
         order_id = uuid.uuid4().hex
         payload = {
             "order_id": order_id,
-            "amount": int(amount),
+            "amount": amount,  # stored int Rial, sent unchanged (ADR 0001 I-7)
             "callback": callback_url,
             "desc": description or "Order payment",
         }
@@ -152,7 +151,7 @@ class IDPayGateway(PaymentGateway):
             ),
         )
 
-    def verify_payment(self, authority: str, amount: Decimal) -> PaymentVerifyResult:
+    def verify_payment(self, authority: str, amount: int) -> PaymentVerifyResult:
         idpay_id, _, order_id = authority.partition(":")
         if not idpay_id or not order_id:
             return PaymentVerifyResult(

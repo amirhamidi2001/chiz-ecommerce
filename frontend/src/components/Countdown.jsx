@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getProducts } from '../services/api';
+import { formatToman } from '../utils/money';
+import { formatReviewCount } from '../utils/numerals';
 
 // ─── Countdown logic ─────────────────────────────────────────────────────────
 const useCountdown = (targetDate) => {
@@ -66,11 +68,11 @@ const SaleCard = ({ product }) => {
       <div className="flex justify-center items-baseline gap-2 mt-2">
         {product.original_price && (
           <span className="text-gray-400 line-through text-xs">
-            ${Number(product.original_price).toFixed(2)}
+            {formatToman(product.original_price)}
           </span>
         )}
         <span className="text-teal-700 font-bold text-base">
-          ${Number(product.price).toFixed(2)}
+          {formatToman(product.price)}
         </span>
       </div>
       <div className="flex justify-center items-center gap-0.5 text-yellow-400 text-xs mt-1">
@@ -80,7 +82,7 @@ const SaleCard = ({ product }) => {
             className={`bi ${i < full ? 'bi-star-fill' : i === full && half ? 'bi-star-half' : 'bi-star'}`}
           />
         ))}
-        <span className="text-gray-400 ml-1">({product.reviews_count})</span>
+        <span className="text-gray-400 ml-1">({formatReviewCount(product.reviews_count)})</span>
       </div>
     </Link>
   );

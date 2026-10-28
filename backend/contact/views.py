@@ -2,6 +2,7 @@ import logging
 
 from django.conf import settings
 from django.core.mail import EmailMessage
+from django.utils.translation import gettext as _
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -38,7 +39,7 @@ class ContactCreateAPIView(APIView):
         self._send_notification(contact_message)
 
         return Response(
-            {"message": "Message sent successfully"},
+            {"message": _("Message sent successfully")},
             status=status.HTTP_201_CREATED,
         )
 

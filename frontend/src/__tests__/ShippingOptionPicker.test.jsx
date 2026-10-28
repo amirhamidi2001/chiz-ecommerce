@@ -2,13 +2,14 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ShippingOptionPicker from '../components/ShippingOptionPicker';
+import { formatToman } from '../utils/money';
 
 const OPTIONS = [
   {
     carrier_id: 1,
     carrier_name: 'Iran Post',
     rate_id: 10,
-    price: '45000.00',
+    price: 450_000,
     estimated_days_min: 2,
     estimated_days_max: 4,
   },
@@ -16,7 +17,7 @@ const OPTIONS = [
     carrier_id: 2,
     carrier_name: 'Tipax',
     rate_id: 20,
-    price: '65000.00',
+    price: 650_000,
     estimated_days_min: 1,
     estimated_days_max: 2,
   },
@@ -36,11 +37,11 @@ describe('ShippingOptionPicker', () => {
       render(<ShippingOptionPicker options={OPTIONS} onSelect={vi.fn()} />);
 
       expect(screen.getByText('Iran Post')).toBeInTheDocument();
-      expect(screen.getByText('$45000.00')).toBeInTheDocument();
+      expect(screen.getByText(formatToman(450_000))).toBeInTheDocument();
       expect(screen.getByText('2–4 days')).toBeInTheDocument();
 
       expect(screen.getByText('Tipax')).toBeInTheDocument();
-      expect(screen.getByText('$65000.00')).toBeInTheDocument();
+      expect(screen.getByText(formatToman(650_000))).toBeInTheDocument();
       expect(screen.getByText('1–2 days')).toBeInTheDocument();
     });
 

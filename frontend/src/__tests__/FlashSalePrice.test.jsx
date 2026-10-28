@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { FlashSaleBadge, FlashSalePrice } from '../components/FlashSalePrice';
 import { formatRemaining, isOnFlashSale } from '../utils/flashSale';
+import { formatToman } from '../utils/money';
 
 const onSale = (overrides = {}) => ({
   is_on_flash_sale: true,
-  flash_sale_price: '60.00',
-  flash_sale_original_price: '80.00',
+  flash_sale_price: 600_000,
+  flash_sale_original_price: 800_000,
   flash_sale_price_varies: false,
   flash_sale_discount_percent: '25.00',
   ...overrides,
@@ -49,8 +50,8 @@ describe('FlashSaleBadge', () => {
 describe('FlashSalePrice', () => {
   it('shows the sale price with the original struck through', () => {
     render(<FlashSalePrice product={onSale()} />);
-    expect(screen.getByText('$60.00')).toBeInTheDocument();
-    const original = screen.getByText('$80.00');
+    expect(screen.getByText(formatToman(600_000))).toBeInTheDocument();
+    const original = screen.getByText(formatToman(800_000));
     expect(original.tagName).toBe('DEL');
     expect(screen.queryByText('From')).not.toBeInTheDocument();
   });
@@ -58,15 +59,15 @@ describe('FlashSalePrice', () => {
   it('prefixes "From" when the product’s variants differ in price', () => {
     render(<FlashSalePrice product={onSale({ flash_sale_price_varies: true })} />);
     expect(screen.getByText('From')).toBeInTheDocument();
-    expect(screen.getByText('$60.00')).toBeInTheDocument();
+    expect(screen.getByText(formatToman(600_000))).toBeInTheDocument();
   });
 
   it('formats prices to two decimals', () => {
     render(
-      <FlashSalePrice product={onSale({ flash_sale_price: '9.5', flash_sale_original_price: 12 })} />,
+      <FlashSalePrice product={onSale({ flash_sale_price: 95_000, flash_sale_original_price: 120_000 })} />,
     );
-    expect(screen.getByText('$9.50')).toBeInTheDocument();
-    expect(screen.getByText('$12.00')).toBeInTheDocument();
+    expect(screen.getByText(formatToman(95_000))).toBeInTheDocument();
+    expect(screen.getByText(formatToman(120_000))).toBeInTheDocument();
   });
 
   it('renders nothing for a product that is not on sale', () => {

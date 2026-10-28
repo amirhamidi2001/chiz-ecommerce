@@ -6,7 +6,7 @@ from accounts.models import UserType
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _make_delivered_order(make_order, user=None, total=Decimal("100.00")):
+def _make_delivered_order(make_order, user=None, total=1_000_000):
     o = make_order(user=user, status="delivered", total=total)
     return o
 
@@ -29,17 +29,17 @@ class TestGetAdminOverview:
     def test_revenue_reflects_delivered_orders(self, make_order, customer):
         from dashboard.services import get_admin_overview
 
-        _make_delivered_order(make_order, user=customer, total=Decimal("250.00"))
+        _make_delivered_order(make_order, user=customer, total=2_500_000)
         data = get_admin_overview("30d")
-        assert data["revenue"]["current"] >= 250.0
+        assert data["revenue"]["current"] >= 2_500_000
 
     def test_cancelled_orders_excluded_from_revenue(self, make_order, customer):
         from dashboard.services import get_admin_overview
 
-        make_order(user=customer, status="cancelled", total=Decimal("999.00"))
+        make_order(user=customer, status="cancelled", total=9_990_000)
         data = get_admin_overview("30d")
         # Cancelled should not contribute to revenue
-        assert data["revenue"]["current"] == 0.0
+        assert data["revenue"]["current"] == 0
 
     def test_revenue_chart_list_of_dicts(self, make_order, customer):
         from dashboard.services import get_admin_overview
@@ -127,13 +127,13 @@ class TestGetMonthlyRevenue:
             assert "revenue" in item
             assert "orders" in item
 
-    def test_revenue_values_are_floats(self, make_order, customer):
+    def test_revenue_values_are_whole_rial_ints(self, make_order, customer):
         from dashboard.services import get_monthly_revenue
 
         _make_delivered_order(make_order)
         result = get_monthly_revenue(12)
         for item in result:
-            assert isinstance(item["revenue"], float)
+            assert type(item["revenue"]) is int  # never a float (ADR 0001 I-1)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -205,10 +205,11 @@ class TestGetUserSummary:
     def test_total_spent_sums_active_orders(self, customer, make_order):
         from dashboard.services import get_user_summary
 
-        make_order(user=customer, status="delivered", total=Decimal("100.00"))
-        make_order(user=customer, status="cancelled", total=Decimal("50.00"))
+        make_order(user=customer, status="delivered", total=1_000_000)
+        make_order(user=customer, status="cancelled", total=500_000)
         summary = get_user_summary(customer)
-        assert summary["total_spent"] == 100.0
+        assert summary["total_spent"] == 1_000_000
+        assert type(summary["total_spent"]) is int
 
     def test_wishlist_count(self, customer, make_product):
         from dashboard.models import Wishlist

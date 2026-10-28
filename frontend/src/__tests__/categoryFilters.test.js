@@ -3,6 +3,7 @@ import {
   DEFAULT_SORT,
   DEFAULT_PAGE_SIZE,
   FILTER_URL_KEYS,
+  PRICE_MAX,
   parseCategoryFilters,
   toApiFilterParams,
   toggleListParam,
@@ -20,7 +21,7 @@ describe('parseCategoryFilters — reading the URL', () => {
       search: '',
       brands: [],
       colors: [],
-      priceRange: { min: 0, max: 1000 },
+      priceRange: { min: 0, max: PRICE_MAX },
       cosmetic: EMPTY_COSMETIC_FILTERS,
       sortBy: DEFAULT_SORT,
       page: 1,
@@ -32,7 +33,7 @@ describe('parseCategoryFilters — reading the URL', () => {
   it('reads every filter', () => {
     const f = parse(
       'category=skincare&search=rose&brand=acme,zen&color=Red,Deep%20Blue' +
-        '&min_price=100&max_price=500&skin_type=oily,dry&hair_type=curly&gender=female' +
+        '&min_price=1000000&max_price=5000000&skin_type=oily,dry&hair_type=curly&gender=female' +
         '&min_spf=30&max_spf=50&is_cruelty_free=true&is_vegan=true' +
         '&ordering=price&page=3&page_size=24&flash_sale=7',
     );
@@ -41,7 +42,7 @@ describe('parseCategoryFilters — reading the URL', () => {
       search: 'rose',
       brands: ['acme', 'zen'],
       colors: ['Red', 'Deep Blue'],
-      priceRange: { min: 100, max: 500 },
+      priceRange: { min: 1_000_000, max: 5_000_000 },
       sortBy: 'price',
       page: 3,
       pageSize: 24,
@@ -87,12 +88,12 @@ describe('parseCategoryFilters — reading the URL', () => {
     });
 
     it('prices are clamped to the slider range and ignore non-numbers', () => {
-      expect(parse('min_price=-50&max_price=5000').priceRange).toEqual({ min: 0, max: 1000 });
-      expect(parse('min_price=zzz&max_price=yyy').priceRange).toEqual({ min: 0, max: 1000 });
+      expect(parse(`min_price=-50&max_price=${PRICE_MAX * 10}`).priceRange).toEqual({ min: 0, max: PRICE_MAX });
+      expect(parse('min_price=zzz&max_price=yyy').priceRange).toEqual({ min: 0, max: PRICE_MAX });
     });
 
     it('a reversed price range is put the right way round', () => {
-      expect(parse('min_price=500&max_price=100').priceRange).toEqual({ min: 100, max: 500 });
+      expect(parse('min_price=5000000&max_price=1000000').priceRange).toEqual({ min: 1_000_000, max: 5_000_000 });
     });
 
     it('unknown skin / gender values are ignored', () => {
@@ -116,7 +117,7 @@ describe('toApiFilterParams — what the list/facet requests are built from', ()
   it('maps every filter to its API param, comma-joining lists', () => {
     const params = toApiFilterParams(
       parse(
-        'category=skincare&search=%20rose%20&brand=acme,zen&color=Red,Blue&min_price=100&max_price=500' +
+        'category=skincare&search=%20rose%20&brand=acme,zen&color=Red,Blue&min_price=1000000&max_price=5000000' +
           '&skin_type=dry,oily&gender=female&min_spf=30&is_vegan=true&flash_sale=7',
       ),
     );
@@ -125,8 +126,8 @@ describe('toApiFilterParams — what the list/facet requests are built from', ()
       search: 'rose', // trimmed
       brand: 'acme,zen',
       color: 'Red,Blue',
-      min_price: 100,
-      max_price: 500,
+      min_price: 1_000_000,
+      max_price: 5_000_000,
       flash_sale: '7',
       skin_type: 'oily,dry', // canonical order
       gender: 'female',
@@ -141,9 +142,9 @@ describe('toApiFilterParams — what the list/facet requests are built from', ()
   });
 
   it('omits the price bounds when they are at the slider extremes', () => {
-    expect(toApiFilterParams(parse('min_price=0&max_price=1000'))).toEqual({});
-    expect(toApiFilterParams(parse('min_price=10'))).toEqual({ min_price: 10 });
-    expect(toApiFilterParams(parse('max_price=990'))).toEqual({ max_price: 990 });
+    expect(toApiFilterParams(parse(`min_price=0&max_price=${PRICE_MAX}`))).toEqual({});
+    expect(toApiFilterParams(parse('min_price=100000'))).toEqual({ min_price: 100_000 });
+    expect(toApiFilterParams(parse('max_price=9900000'))).toEqual({ max_price: 9_900_000 });
   });
 });
 
@@ -192,7 +193,7 @@ describe('applyParamUpdates — writing the URL', () => {
   });
 
   it('coerces numbers to strings', () => {
-    expect(applyParamUpdates(sp(''), { min_price: 100 }).get('min_price')).toBe('100');
+    expect(applyParamUpdates(sp(''), { min_price: 1_000_000 }).get('min_price')).toBe('1000000');
   });
 
   it('a multi-value list is stored as a single param, never repeated keys', () => {
@@ -212,7 +213,7 @@ describe('write -> read round trip', () => {
     write({ brand: toggleListParam([], 'acme') });
     write({ brand: toggleListParam(['acme'], 'zen') });
     write({ color: toggleListParam([], 'Deep Blue') });
-    write({ min_price: '100', max_price: '500' });
+    write({ min_price: '1000000', max_price: '5000000' });
     write(cosmeticPatchToUrlUpdates({ skin_type: ['dry', 'oily'] }));
     write(cosmeticPatchToUrlUpdates({ hair_type: ['curly'], gender: 'female' }));
     write(cosmeticPatchToUrlUpdates({ min_spf: '30', max_spf: '50' }));
@@ -227,7 +228,7 @@ describe('write -> read round trip', () => {
       category: 'skincare',
       brands: ['acme', 'zen'],
       colors: ['Deep Blue'],
-      priceRange: { min: 100, max: 500 },
+      priceRange: { min: 1_000_000, max: 5_000_000 },
       search: 'rose',
       sortBy: 'price',
       pageSize: 24,
@@ -252,7 +253,7 @@ describe('write -> read round trip', () => {
     const write = (u) => { url = applyParamUpdates(url, u); };
     write({ brand: 'a' });
     write(cosmeticPatchToUrlUpdates({ skin_type: ['oily'], is_vegan: true }));
-    write({ min_price: '100' });
+    write({ min_price: '1000000' });
     write({ brand: null });
     write(cosmeticPatchToUrlUpdates({ skin_type: [], is_vegan: false }));
     write({ min_price: null });

@@ -163,6 +163,7 @@ vi.mock('../../services/api', () => ({
   },
 }));
 import { adminAPI } from '../../services/api';
+import { formatToman } from '../../utils/money';
 
 // ─── Fixture factories ────────────────────────────────────────────────────────
 const makeOrder = (overrides = {}) => ({
@@ -173,7 +174,7 @@ const makeOrder = (overrides = {}) => ({
   status: 'pending',
   payment_method: 'credit_card',
   items_count: 2,
-  total: 150.5,
+  total: 1_505_000,
   created_at: '2024-06-01T10:00:00Z',
   ...overrides,
 });
@@ -187,7 +188,7 @@ const makeOrders = (n = 3) =>
     status: 'pending',
     payment_method: 'credit_card',
     items_count: i + 1,
-    total: (i + 1) * 50,
+    total: (i + 1) * 500_000, // Rial: 50,000 / 100,000 / 150,000 Toman
     created_at: '2024-06-01T10:00:00Z',
   }));
 
@@ -207,14 +208,14 @@ const makeOrderDetail = (overrides = {}) => ({
   items: [
     {
       id: 1, product_name: 'Widget A', product_image: null,
-      quantity: 2, unit_price: 25, subtotal: 50,
+      quantity: 2, unit_price: 250_000, subtotal: 500_000,
     },
   ],
-  subtotal: 50,
-  shipping_cost: 5,
-  tax: 4.5,
+  subtotal: 500_000,
+  shipping_cost: 50_000,
+  tax: 45_000,
   discount: 0,
-  total: 59.5,
+  total: 595_000,
   ...overrides,
 });
 
@@ -428,12 +429,12 @@ describe('AdminOrders', () => {
 
     it('formats total as currency', async () => {
       adminAPI.getOrders.mockResolvedValue(
-        paged([makeOrder({ total: 1234.5 })], 1)
+        paged([makeOrder({ total: 12_345_000 })], 1)
       );
       render(<AdminOrders />);
       await waitFor(() => {
         const cell = screen.getByTestId('cell-total');
-        expect(within(cell).getByText('$1,234.50')).toBeInTheDocument();
+        expect(within(cell).getByText(formatToman(12_345_000))).toBeInTheDocument();
       });
     });
 
@@ -756,8 +757,8 @@ describe('AdminOrders', () => {
         user,
         makeOrderDetail({
           items: [
-            { id: 1, product_name: 'A', product_image: null, quantity: 1, unit_price: 10, subtotal: 10 },
-            { id: 2, product_name: 'B', product_image: null, quantity: 2, unit_price: 5, subtotal: 10 },
+            { id: 1, product_name: 'A', product_image: null, quantity: 1, unit_price: 100_000, subtotal: 100_000 },
+            { id: 2, product_name: 'B', product_image: null, quantity: 2, unit_price: 50_000, subtotal: 100_000 },
           ],
         })
       );
@@ -778,7 +779,7 @@ describe('AdminOrders', () => {
         user,
         makeOrderDetail({
           items: [
-            { id: 1, product_name: 'Widget', product_image: 'https://cdn.test/w.png', quantity: 1, unit_price: 10, subtotal: 10 },
+            { id: 1, product_name: 'Widget', product_image: 'https://cdn.test/w.png', quantity: 1, unit_price: 100_000, subtotal: 100_000 },
           ],
         })
       );
@@ -792,7 +793,7 @@ describe('AdminOrders', () => {
       adminAPI.getOrder.mockResolvedValue({
         data: makeOrderDetail({
           items: [
-            { id: 1, product_name: 'Widget', product_image: null, quantity: 1, unit_price: 10, subtotal: 10 },
+            { id: 1, product_name: 'Widget', product_image: null, quantity: 1, unit_price: 100_000, subtotal: 100_000 },
           ],
         }),
       });
@@ -808,7 +809,7 @@ describe('AdminOrders', () => {
         user,
         makeOrderDetail({
           items: [
-            { id: 1, product_name: 'Gadget', product_image: null, quantity: 3, unit_price: 9.99, subtotal: 29.97 },
+            { id: 1, product_name: 'Gadget', product_image: null, quantity: 3, unit_price: 99_900, subtotal: 299_700 },
           ],
         })
       );
@@ -821,16 +822,16 @@ describe('AdminOrders', () => {
         user,
         makeOrderDetail({
           items: [
-            { id: 1, product_name: 'Gadget', product_image: null, quantity: 1, unit_price: 19.99, subtotal: 19.99 },
+            { id: 1, product_name: 'Gadget', product_image: null, quantity: 1, unit_price: 199_900, subtotal: 199_900 },
           ],
         })
       );
-      expect(screen.getByText('$19.99')).toBeInTheDocument();
+      expect(screen.getByText(formatToman(199_900))).toBeInTheDocument();
     });
 
     it('renders Subtotal, Shipping, and Tax rows', async () => {
       const user = setup();
-      await openDetail(user, makeOrderDetail({ subtotal: 100, shipping_cost: 10, tax: 8 }));
+      await openDetail(user, makeOrderDetail({ subtotal: 1_000_000, shipping_cost: 100_000, tax: 80_000 }));
 
       const modal = getModalCard();
 
@@ -838,16 +839,16 @@ describe('AdminOrders', () => {
       expect(within(modal).getByText('Subtotal')).toBeInTheDocument();
       expect(within(modal).getByText('Shipping')).toBeInTheDocument();
       expect(within(modal).getByText('Tax')).toBeInTheDocument();
-      expect(within(modal).getByText('$100.00')).toBeInTheDocument();
-      expect(within(modal).getByText('$10.00')).toBeInTheDocument();
-      expect(within(modal).getByText('$8.00')).toBeInTheDocument();
+      expect(within(modal).getByText(formatToman(1_000_000))).toBeInTheDocument();
+      expect(within(modal).getByText(formatToman(100_000))).toBeInTheDocument();
+      expect(within(modal).getByText(formatToman(80_000))).toBeInTheDocument();
     });
 
     it('renders Discount row when discount > 0', async () => {
       const user = setup();
-      await openDetail(user, makeOrderDetail({ discount: 15 }));
+      await openDetail(user, makeOrderDetail({ discount: 150_000 }));
       expect(screen.getByText('Discount')).toBeInTheDocument();
-      expect(screen.getByText('-$15.00')).toBeInTheDocument();
+      expect(screen.getByText('-' + formatToman(150_000))).toBeInTheDocument();
     });
 
     it('does NOT render Discount row when discount is 0', async () => {
@@ -858,10 +859,10 @@ describe('AdminOrders', () => {
 
     it('renders the Total row in bold', async () => {
       const user = setup();
-      await openDetail(user, makeOrderDetail({ total: 250.75 }));
+      await openDetail(user, makeOrderDetail({ total: 2_507_500 }));
       const totalLabel = screen.getByText('Total');
       expect(totalLabel.closest('div').className).toMatch(/font-bold/);
-      expect(screen.getByText('$250.75')).toBeInTheDocument();
+      expect(screen.getByText(formatToman(2_507_500))).toBeInTheDocument();
     });
 
     it('closes the modal when the × button is clicked', async () => {

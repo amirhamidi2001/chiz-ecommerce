@@ -39,7 +39,15 @@ INSTALLED_APPS = [
     "django_filters",
     "channels",
     "django_celery_beat",
+    # Jalali (Solar Hijri) calendar support — DISPLAY/admin UX only. Storage stays
+    # Gregorian/UTC (same storage-vs-display split as currency, ADR 0001); no model
+    # uses a jDateField. The package's docs require it to be listed BEFORE the local
+    # apps. It ships no models or migrations; installing it only enables the
+    # `jformat` template tags and its admin widget assets. Wiring to specific
+    # admin screens is Task 14.2.1.2.
+    "django_jalali",
     # Local
+    "core",  # shared money primitives + template filters (core/money.py)
     "accounts.apps.AccountsConfig",
     "contact.apps.ContactConfig",
     "shop.apps.ShopConfig",
@@ -57,6 +65,10 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # Picks the per-request language from the Accept-Language header (limited
+    # to LANGUAGES, falling back to LANGUAGE_CODE = "fa"). Must sit after
+    # SessionMiddleware and before CommonMiddleware.
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -110,8 +122,16 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 # ─── Internationalisation ─────────────────────────────────────────────────────
-LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+LANGUAGE_CODE = "fa"
+LANGUAGES = [
+    ("fa", "Persian"),
+    (
+        "en",
+        "English",
+    ),  # kept available for admin/staff convenience and any future i18n expansion
+]
+LOCALE_PATHS = [BASE_DIR / "locale"]
+TIME_ZONE = "Asia/Tehran"
 USE_I18N = True
 USE_TZ = True
 
@@ -303,11 +323,11 @@ CELERY_RESULT_BACKEND = CELERY_BROKER_URL  # same Redis instance/DB serves as bo
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
-# Reuses whatever TIME_ZONE is actually configured above (currently "UTC" —
-# NOTE: no "Asia/Tehran" setting exists anywhere in this project despite the
-# Iran-market regulatory-compliance settings further below; if that ever
-# changes, CELERY_TIMEZONE tracks it automatically since it references the
-# variable rather than a hardcoded string).
+# Reuses whatever TIME_ZONE is actually configured above (currently
+# "Asia/Tehran"); CELERY_TIMEZONE tracks it automatically since it
+# references the variable rather than a hardcoded string. Note: this only
+# affects NEWLY created django_celery_beat schedules — existing
+# CrontabSchedule rows keep the timezone they were saved with.
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers.DatabaseScheduler"
 
@@ -385,6 +405,14 @@ IDPAY_SANDBOX = config("IDPAY_SANDBOX", default=True, cast=bool)
 # customer-abandoned-the-gateway-page case that PaymentCallbackView alone
 # can never catch (nothing ever calls that view if the gateway never
 # redirects back).
+# Task 14.1.2.2 safety interlock. The money migrations re-baseline legacy
+# dollar-shaped test/seed values to Rial (x10,000). That is meaningless — and
+# dangerous — for real customer financial history, so any migration that finds
+# rows in a money table REFUSES to run unless this is explicitly set to true.
+MONEY_REBASELINE_CONFIRMED = config(
+    "MONEY_REBASELINE_CONFIRMED", default=False, cast=bool
+)
+
 PAYMENT_RECONCILIATION_THRESHOLD_MINUTES = config(
     "PAYMENT_RECONCILIATION_THRESHOLD_MINUTES", default=30, cast=int
 )

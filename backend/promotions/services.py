@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from decimal import Decimal
 
+from core.money import percent_of, rial_to_toman
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from .models import Coupon, CouponRedemption
 
@@ -10,7 +11,7 @@ from .models import Coupon, CouponRedemption
 class CouponValidationResult:
     valid: bool
     coupon: Coupon | None = None
-    discount_amount: Decimal = Decimal("0")
+    discount_amount: int = 0  # Rial
     error: str = ""
 
 
@@ -24,7 +25,7 @@ class CouponLine:
 
     product_id: int | None
     category_id: int | None
-    amount: Decimal
+    amount: int  # Rial
 
 
 def cart_lines(cart) -> list[CouponLine]:
@@ -82,20 +83,20 @@ def validate_coupon(
     try:
         coupon = Coupon.objects.get(code=code.upper().strip())
     except Coupon.DoesNotExist:
-        return CouponValidationResult(valid=False, error="Invalid coupon code.")
+        return CouponValidationResult(valid=False, error=_("Invalid coupon code."))
 
     if not coupon.is_active:
         return CouponValidationResult(
-            valid=False, error="This coupon is no longer active."
+            valid=False, error=_("This coupon is no longer active.")
         )
 
     now = timezone.now()
     if now < coupon.valid_from:
         return CouponValidationResult(
-            valid=False, error="This coupon is not yet valid."
+            valid=False, error=_("This coupon is not yet valid.")
         )
     if now > coupon.valid_until:
-        return CouponValidationResult(valid=False, error="This coupon has expired.")
+        return CouponValidationResult(valid=False, error=_("This coupon has expired."))
 
     if coupon.max_uses is not None:
         total_redemptions = CouponRedemption.objects.filter(
@@ -103,12 +104,12 @@ def validate_coupon(
         ).count()
         if total_redemptions >= coupon.max_uses:
             return CouponValidationResult(
-                valid=False, error="This coupon has reached its usage limit."
+                valid=False, error=_("This coupon has reached its usage limit.")
             )
 
     if user is None or not user.is_authenticated:
         return CouponValidationResult(
-            valid=False, error="Please log in to use a coupon code."
+            valid=False, error=_("Please log in to use a coupon code.")
         )
 
     user_redemptions = CouponRedemption.objects.filter(
@@ -116,7 +117,7 @@ def validate_coupon(
     ).count()
     if user_redemptions >= coupon.uses_per_user:
         return CouponValidationResult(
-            valid=False, error="You have already used this coupon."
+            valid=False, error=_("You have already used this coupon.")
         )
 
     # ── Eligible portion of the cart ─────────────────────────────────────
@@ -137,30 +138,40 @@ def validate_coupon(
             or line.product_id in product_ids
             or line.category_id in category_ids
         ),
-        Decimal("0"),
+        0,
     )
 
     if eligible_subtotal == 0:
         return CouponValidationResult(
-            valid=False, error="This coupon does not apply to any items in your cart."
+            valid=False,
+            error=_("This coupon does not apply to any items in your cart."),
         )
 
     if eligible_subtotal < coupon.min_order_amount:
         # "eligible" only means something to the customer when the coupon
         # is actually restricted.
-        kind = "minimum eligible order" if restricted else "minimum order"
+        # Two complete messages rather than one sentence assembled from
+        # translated fragments — word order differs between languages.
+        if restricted:
+            message = _(
+                "This coupon requires a minimum eligible order of %(amount)s Toman."
+            )
+        else:
+            message = _("This coupon requires a minimum order of %(amount)s Toman.")
         return CouponValidationResult(
             valid=False,
-            error=f"This coupon requires a {kind} of {coupon.min_order_amount}.",
+            # Customers read Toman (ADR 0001 §6); the stored unit is Rial.
+            error=message % {"amount": f"{rial_to_toman(coupon.min_order_amount):,}"},
         )
 
     if coupon.discount_type == Coupon.DiscountType.PERCENT:
-        discount_amount = (eligible_subtotal * coupon.value / Decimal("100")).quantize(
-            Decimal("0.01")
-        )
+        # Rounded ONCE to a whole Toman (ADR 0001 I-3); a percentage of an
+        # eligible subtotal can never exceed that subtotal, which is itself a
+        # whole-Toman amount, so no clamp is needed here.
+        discount_amount = percent_of(eligible_subtotal, coupon.percent_off)
     else:
         # Never discount more than the eligible items themselves.
-        discount_amount = min(coupon.value, eligible_subtotal)
+        discount_amount = min(coupon.fixed_amount, eligible_subtotal)
 
     return CouponValidationResult(
         valid=True, coupon=coupon, discount_amount=discount_amount

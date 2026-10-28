@@ -1,5 +1,6 @@
 // src/components/CouponInput.jsx
 import { useState } from 'react';
+import { formatToman } from '../utils/money';
 
 /**
  * Coupon entry / status box for the cart page.
@@ -96,7 +97,7 @@ const CouponInput = ({ couponCode, couponDiscount, couponError, onApply, onRemov
             <i className="bi bi-check-circle-fill"></i>
             <span>
               <strong>{couponCode}</strong> applied
-              {saving > 0 && <> — you save ${saving.toFixed(2)}</>}
+              {saving > 0 && <> — you save {formatToman(saving)}</>}
             </span>
           </p>
           <button

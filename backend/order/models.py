@@ -1,8 +1,10 @@
 import uuid
 
+from core.fields import RialField, whole_toman_constraint
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 
 class Order(models.Model):
@@ -15,16 +17,16 @@ class Order(models.Model):
     """
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        PROCESSING = "processing", "Processing"
-        SHIPPED = "shipped", "Shipped"
-        DELIVERED = "delivered", "Delivered"
-        CANCELLED = "cancelled", "Cancelled"
+        PENDING = "pending", _("Pending")
+        PROCESSING = "processing", _("Processing")
+        SHIPPED = "shipped", _("Shipped")
+        DELIVERED = "delivered", _("Delivered")
+        CANCELLED = "cancelled", _("Cancelled")
 
     class PaymentMethod(models.TextChoices):
-        CREDIT_CARD = "credit_card", "Credit / Debit Card"
-        PAYPAL = "paypal", "PayPal"
-        APPLE_PAY = "apple_pay", "Apple Pay"
+        CREDIT_CARD = "credit_card", _("Credit / Debit Card")
+        PAYPAL = "paypal", _("PayPal")
+        APPLE_PAY = "apple_pay", _("Apple Pay")
 
     # ── Identity ───────────────────────────────────────────────────────────
     order_number = models.CharField(
@@ -90,16 +92,16 @@ class Order(models.Model):
     )
 
     # ── Financials (snapshot at checkout time) ─────────────────────────────
-    subtotal = models.DecimalField(max_digits=12, decimal_places=2)
+    subtotal = RialField()
     # No default any more (Task 7.1.1.4): shipping_cost is now always
     # explicitly set from the resolved ShippingRate's price at checkout —
     # a hardcoded fallback default here is no longer appropriate and could
     # mask a bug (an order silently getting the old flat $9.99 instead of
     # its actual resolved rate) if ever accidentally relied upon.
-    shipping_cost = models.DecimalField(max_digits=8, decimal_places=2)
-    tax = models.DecimalField(max_digits=10, decimal_places=2)
-    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    total = models.DecimalField(max_digits=12, decimal_places=2)
+    shipping_cost = RialField()
+    tax = RialField()
+    discount = RialField(default=0)
+    total = RialField()
 
     # ── Notes ──────────────────────────────────────────────────────────────
     notes = models.TextField(blank=True)
@@ -110,8 +112,15 @@ class Order(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "Order"
-        verbose_name_plural = "Orders"
+        verbose_name = _("Order")
+        verbose_name_plural = _("Orders")
+        constraints = [
+            whole_toman_constraint("subtotal"),
+            whole_toman_constraint("shipping_cost"),
+            whole_toman_constraint("tax"),
+            whole_toman_constraint("discount"),
+            whole_toman_constraint("total"),
+        ]
 
     def __str__(self):
         return f"Order {self.order_number} — {self.user}"
@@ -171,15 +180,14 @@ class OrderItem(models.Model):
     # fulfillment record even if the variant is later deleted or its
     # color is renamed.
     variant_attributes_json = models.JSONField(default=dict, blank=True)
-    unit_price = models.DecimalField(
-        max_digits=10, decimal_places=2, validators=[MinValueValidator(0)]
-    )
+    unit_price = RialField()
     quantity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
 
     class Meta:
         ordering = ["id"]
-        verbose_name = "Order Item"
-        verbose_name_plural = "Order Items"
+        verbose_name = _("Order Item")
+        verbose_name_plural = _("Order Items")
+        constraints = [whole_toman_constraint("unit_price")]
 
     def __str__(self):
         return f"{self.quantity}× {self.product_name} in {self.order.order_number}"

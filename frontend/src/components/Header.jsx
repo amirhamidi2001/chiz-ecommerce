@@ -5,6 +5,8 @@ import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { useAuth } from '../context/AuthContext';
 import SearchBox from './SearchBox';
+import { FREE_SHIPPING_THRESHOLD_RIAL } from '../constants/pricing';
+import { formatToman } from '../utils/money';
 
 // ─── Header ───────────────────────────────────────────────────────────────────
 const Header = () => {
@@ -56,7 +58,7 @@ const Header = () => {
           <div className="flex gap-6">
             <div className="overflow-hidden h-6">
               <div className="animate-marquee whitespace-nowrap text-teal-700 font-medium">
-                🚚 Free shipping on orders over $50 &nbsp;&nbsp;|&nbsp;&nbsp;
+                🚚 Free shipping on orders over {formatToman(FREE_SHIPPING_THRESHOLD_RIAL)} &nbsp;&nbsp;|&nbsp;&nbsp;
                 💰 30 days money back guarantee &nbsp;&nbsp;|&nbsp;&nbsp;
                 🎁 20% off on your first order
               </div>
@@ -72,15 +74,10 @@ const Header = () => {
                   <a href="#" className="block px-4 py-2 text-sm hover:bg-emerald-100">Español</a>
                 </div>
               </div>
-              <div className="dropdown relative group">
-                <button className="flex items-center gap-1 text-emerald-700 hover:text-teal-700">
-                  <i className="bi bi-currency-dollar" /> USD <i className="bi bi-chevron-down text-xs" />
-                </button>
-                <div className="absolute right-0 mt-2 w-32 bg-white shadow-lg rounded-md hidden group-hover:block z-10">
-                  <a href="#" className="block px-4 py-2 text-sm hover:bg-emerald-100">USD</a>
-                  <a href="#" className="block px-4 py-2 text-sm hover:bg-emerald-100">EUR</a>
-                </div>
-              </div>
+              {/* Single currency: every price is shown in Toman (ADR 0001). */}
+              <span className="flex items-center gap-1 text-emerald-700">
+                <i className="bi bi-cash-stack" /> Toman
+              </span>
             </div>
           </div>
         </div>

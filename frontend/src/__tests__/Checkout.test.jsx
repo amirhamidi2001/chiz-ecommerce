@@ -35,6 +35,7 @@ vi.mock('../services/api', () => ({
 
 import { useCart } from '../context/CartContext';
 import { createOrder, initiatePayment, isAuthenticated, dashboardAPI, getShippingQuote } from '../services/api';
+import { formatToman } from '../utils/money';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -42,21 +43,21 @@ const MOCK_ITEMS = [
   {
     id: 1,
     quantity: 2,
-    unit_price: '19.99',
-    subtotal: '39.98',
+    unit_price: 199_900,
+    subtotal: 399_800,
     product: { id: 10, name: 'Test Widget', image: null },
   },
   {
     id: 2,
     quantity: 1,
-    unit_price: '49.99',
-    subtotal: '49.99',
+    unit_price: 499_900,
+    subtotal: 499_900,
     product: { id: 11, name: 'Premium Gadget', image: 'https://example.com/img.jpg' },
   },
 ];
 
 const MOCK_CART = {
-  subtotal: '89.97',
+  subtotal: 899_700,
   total_items: 3,
   items: MOCK_ITEMS,
 };
@@ -82,7 +83,7 @@ const CART_READY_STATE = {
 };
 
 const CART_EMPTY_STATE = {
-  cart: { subtotal: '0.00', total_items: 0, items: [] },
+  cart: { subtotal: 0, total_items: 0, items: [] },
   loading: false,
   error: null,
   fetchCart: vi.fn(),
@@ -100,7 +101,7 @@ const MOCK_SHIPPING_OPTIONS = [
     carrier_id: 1,
     carrier_name: 'Iran Post',
     rate_id: 10,
-    price: '9.99',
+    price: 99_900,
     estimated_days_min: 2,
     estimated_days_max: 4,
   },
@@ -306,7 +307,7 @@ describe('Checkout', () => {
     it('displays subtotal and tax rows, prompting for a shipping selection before one is made', () => {
       renderCheckout();
 
-      expect(screen.getByText('$89.97')).toBeInTheDocument();
+      expect(screen.getByText(formatToman(899_700))).toBeInTheDocument();
       expect(screen.getByText(/tax \(10%\)/i)).toBeInTheDocument();
       // Shipping cost isn't known until a carrier+rate is actually
       // selected (Task 7.2.1.6) — no more hardcoded flat $9.99.
@@ -323,7 +324,7 @@ describe('Checkout', () => {
 
       // Appears twice by design: once on the option row itself, once in
       // the Order Summary total.
-      expect(screen.getAllByText('$9.99').length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText(formatToman(99_900)).length).toBeGreaterThanOrEqual(2);
     });
 
     it('renders the Place Order submit button', () => {
@@ -613,7 +614,7 @@ describe('Checkout', () => {
 
       // Appears twice by design: once on the option row, once in the
       // Order Summary total.
-      expect(screen.getAllByText('$9.99').length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText(formatToman(99_900)).length).toBeGreaterThanOrEqual(2);
     });
 
     it('shows the empty-options fallback when no rate is configured for the destination', async () => {
@@ -865,7 +866,7 @@ describe('Checkout', () => {
   // discount, so the client never sends one.
 
   describe('coupon', () => {
-    // 89.97 subtotal, no shipping chosen yet, 10% tax (8.997).
+    // 899,700 Rial subtotal, no shipping chosen yet, 10% tax = 89,970 Rial.
     const cartWith = (couponFields) => ({
       ...CART_READY_STATE,
       cart: { ...MOCK_CART, ...couponFields },
@@ -873,7 +874,7 @@ describe('Checkout', () => {
 
     const APPLIED = {
       coupon_code: 'SUMMER20',
-      coupon_discount: '10.00',
+      coupon_discount: 100_000,
       coupon_error: null,
     };
     const INVALID = {
@@ -889,8 +890,8 @@ describe('Checkout', () => {
       renderCheckout();
 
       expect(screen.queryByText(/^Coupon \(/)).not.toBeInTheDocument();
-      // 89.97 + 8.997 tax = 98.967
-      expect(screen.getAllByText('$98.97').length).toBeGreaterThan(0);
+      // 899,700 + 89,970 tax = 989,670 Rial (98,967 Toman) — exact, no cents rounding
+      expect(screen.getAllByText(formatToman(989_670)).length).toBeGreaterThan(0);
     });
 
     it('shows the applied coupon as a read-only line item and reduces the total', () => {
@@ -898,10 +899,10 @@ describe('Checkout', () => {
       renderCheckout();
 
       expect(screen.getByText('Coupon (SUMMER20)')).toBeInTheDocument();
-      expect(screen.getByText('-$10.00')).toBeInTheDocument();
-      // 89.97 + 8.997 - 10 = 88.967; the undiscounted total is gone.
-      expect(screen.getAllByText('$88.97').length).toBeGreaterThan(0);
-      expect(screen.queryByText('$98.97')).not.toBeInTheDocument();
+      expect(screen.getByText('-' + formatToman(100_000))).toBeInTheDocument();
+      // 899,700 + 89,970 - 100,000 = 889,670 Rial; the undiscounted total is gone.
+      expect(screen.getAllByText(formatToman(889_670)).length).toBeGreaterThan(0);
+      expect(screen.queryByText(formatToman(989_670))).not.toBeInTheDocument();
     });
 
     it('has no coupon input — application happens on the cart page', () => {
@@ -914,7 +915,7 @@ describe('Checkout', () => {
 
     it('never sends a coupon or discount in the createOrder payload', async () => {
       useCart.mockReturnValue(cartWith(APPLIED));
-      createOrder.mockResolvedValueOnce({ data: { id: 42, discount: '10.00' } });
+      createOrder.mockResolvedValueOnce({ data: { id: 42, discount: 100_000 } });
       initiatePayment.mockResolvedValueOnce({ data: { redirect_url: 'https://gw.example/pay' } });
       delete window.location;
       window.location = { href: '' };
@@ -940,7 +941,7 @@ describe('Checkout', () => {
         expect(alert).toHaveTextContent(/SUMMER20 can.t be applied/);
         expect(alert).toHaveTextContent('This coupon has expired.');
         expect(screen.queryByText(/^Coupon \(/)).not.toBeInTheDocument();
-        expect(screen.getAllByText('$98.97').length).toBeGreaterThan(0);
+        expect(screen.getAllByText(formatToman(989_670)).length).toBeGreaterThan(0);
       });
 
       it('lets the shopper remove it right here', async () => {
@@ -1014,7 +1015,7 @@ describe('Checkout', () => {
             coupon_discount: '0',
             coupon_error: 'You have already used this coupon.',
           });
-          return { data: { id: 42, discount: '10.00' } };
+          return { data: { id: 42, discount: 100_000 } };
         });
         initiatePayment.mockRejectedValueOnce({
           response: { data: { detail: 'Gateway is down.' } },
@@ -1028,7 +1029,7 @@ describe('Checkout', () => {
         expect(await screen.findByText('Gateway is down.')).toBeInTheDocument();
         // Discount still in the summary and total; no misleading warning.
         expect(screen.getByText('Coupon (SUMMER20)')).toBeInTheDocument();
-        expect(screen.getByText('-$10.00')).toBeInTheDocument();
+        expect(screen.getByText('-' + formatToman(100_000))).toBeInTheDocument();
         expect(screen.queryByText(/can.t be applied/i)).not.toBeInTheDocument();
         expect(screen.queryByText(/already used/i)).not.toBeInTheDocument();
       });

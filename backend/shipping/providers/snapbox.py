@@ -101,6 +101,7 @@ import math
 from decimal import Decimal, InvalidOperation
 
 import requests
+from core.money import to_whole_toman_rial
 from django.conf import settings
 
 # Shipment lives in shipping/models.py, which imports nothing from
@@ -349,7 +350,7 @@ class SnapBoxCarrierProvider(CarrierProvider):
     # ── Pricing (shared by get_rate and create_shipment) ─────────────────
 
     def _quote(self, origin, destination, city, category):
-        """Returns ({"price": Decimal, "pricing_id": str}, error)."""
+        """Returns ({"price": int Rial, "pricing_id": str}, error)."""
         payload = {
             "city": city,
             "deliveryCategory": category,
@@ -381,7 +382,11 @@ class SnapBoxCarrierProvider(CarrierProvider):
                 status, data, "SnapBox pricing request failed."
             )
         try:
-            price = Decimal(str(data["totalFare"]))
+            # UNIT UNCONFIRMED (module docstring, item c / ADR 0001 OQ-5): the
+            # fare is taken as-is, i.e. treated as Rial, and only rounded to a
+            # whole Toman so it satisfies the stored-amount invariant. Confirm
+            # SnapBox's unit before using a live quote for real charging.
+            price = to_whole_toman_rial(Decimal(str(data["totalFare"])))
         except InvalidOperation:
             return None, "SnapBox returned an unparseable totalFare."
         if price < 0:

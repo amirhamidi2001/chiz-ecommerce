@@ -10,7 +10,7 @@ from payments.gateways.idpay import IDPayGateway
 class IDPayRequestPaymentTests(SimpleTestCase):
     def setUp(self):
         self.gateway = IDPayGateway()
-        self.amount = Decimal("150000")
+        self.amount = 1_500_000_000
         self.callback_url = "https://example.test/payments/callback/"
 
     @responses.activate
@@ -129,7 +129,7 @@ class IDPayRequestPaymentTests(SimpleTestCase):
 class IDPayVerifyPaymentTests(SimpleTestCase):
     def setUp(self):
         self.gateway = IDPayGateway()
-        self.amount = Decimal("150000")
+        self.amount = 1_500_000_000
         self.idpay_id = "d2e353189823079e1e4181772cff5292"
         self.order_id = "b7f1c1a2e3d4f5a6b7c8d9e0f1a2b3c4"
         self.authority = f"{self.idpay_id}:{self.order_id}"

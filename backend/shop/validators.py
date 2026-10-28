@@ -15,6 +15,7 @@ the entire point of having a check digit).
 """
 
 from django.core.exceptions import ValidationError
+from django.utils.translation import gettext as _
 from PIL import Image
 
 EAN13_LENGTH = 13
@@ -56,7 +57,7 @@ def validate_ean13(value):
     value = str(value)
     if len(value) != EAN13_LENGTH or not value.isdigit():
         raise ValidationError(
-            "Enter a valid EAN-13 barcode (13 digits with a valid check digit).",
+            _("Enter a valid EAN-13 barcode (13 digits with a valid check digit)."),
             code="invalid_ean13",
         )
 
@@ -64,7 +65,7 @@ def validate_ean13(value):
     actual_check_digit = int(value[12])
     if actual_check_digit != expected_check_digit:
         raise ValidationError(
-            "Enter a valid EAN-13 barcode (13 digits with a valid check digit).",
+            _("Enter a valid EAN-13 barcode (13 digits with a valid check digit)."),
             code="invalid_ean13",
         )
 
@@ -84,7 +85,8 @@ def validate_review_image(file) -> None:
     """Raise ValidationError unless `file` is a real JPEG/PNG/WebP <= 5 MB."""
     if file.size > REVIEW_IMAGE_MAX_BYTES:
         raise ValidationError(
-            f"Image must be under {REVIEW_IMAGE_MAX_BYTES // (1024 * 1024)} MB.",
+            _("Image must be under %(max_mb)s MB.")
+            % {"max_mb": REVIEW_IMAGE_MAX_BYTES // (1024 * 1024)},
             code="image_too_large",
         )
 
@@ -96,7 +98,9 @@ def validate_review_image(file) -> None:
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
         # OSError covers PIL.UnidentifiedImageError and truncated/corrupt data.
         raise ValidationError(
-            "Upload a valid image. The file you uploaded is not an image or is corrupted.",
+            _(
+                "Upload a valid image. The file you uploaded is not an image or is corrupted."
+            ),
             code="invalid_image",
         )
     finally:
@@ -104,6 +108,6 @@ def validate_review_image(file) -> None:
 
     if detected_format not in REVIEW_IMAGE_ALLOWED_FORMATS:
         raise ValidationError(
-            "Only JPEG, PNG and WebP images are allowed.",
+            _("Only JPEG, PNG and WebP images are allowed."),
             code="unsupported_image_format",
         )

@@ -13,6 +13,7 @@ from django.db.models import Count, Q
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order
 from order.services.cancellation import cancel_order
@@ -140,7 +141,7 @@ class ChangePasswordView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({"detail": "Password changed successfully."})
+        return Response({"detail": _("Password changed successfully.")})
 
 
 class NotificationSettingsView(APIView):
@@ -228,7 +229,7 @@ class WishlistViewSet(viewsets.ModelViewSet):
                 serializer.save(**get_wishlist_owner_kwargs(self.request))
         except IntegrityError:
             raise ValidationError(
-                {"product_id": "Product is already in your wishlist."}
+                {"product_id": _("Product is already in your wishlist.")}
             ) from None
 
     def get_object(self):
@@ -269,7 +270,7 @@ class WishlistViewSet(viewsets.ModelViewSet):
 
         if not variants:
             return Response(
-                {"detail": "This product is currently unavailable."},
+                {"detail": _("This product is currently unavailable.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -285,7 +286,7 @@ class WishlistViewSet(viewsets.ModelViewSet):
             variant = next((v for v in variants if v.id == requested), None)
             if variant is None:
                 return Response(
-                    {"variant_id": "Invalid variant for this product."},
+                    {"variant_id": _("Invalid variant for this product.")},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         elif len(variants) == 1:
@@ -293,7 +294,9 @@ class WishlistViewSet(viewsets.ModelViewSet):
         else:
             return Response(
                 {
-                    "detail": "This product has multiple options — please choose one.",
+                    "detail": _(
+                        "This product has multiple options — please choose one."
+                    ),
                     "needs_selection": True,
                     "variants": ProductVariantSerializer(variants, many=True).data,
                 },
@@ -303,10 +306,10 @@ class WishlistViewSet(viewsets.ModelViewSet):
         cart = get_or_create_cart(request)
         if not services.move_wishlist_item_to_cart(cart, wishlist_item, variant):
             return Response(
-                {"detail": "This wishlist item is no longer on your wishlist."},
+                {"detail": _("This wishlist item is no longer on your wishlist.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response({"detail": "Moved to cart."}, status=status.HTTP_200_OK)
+        return Response({"detail": _("Moved to cart.")}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="move-all-to-cart")
     def move_all_to_cart(self, request):
@@ -713,6 +716,10 @@ class AdminOrderViewSet(viewsets.ModelViewSet):
                 )
             serializer.save()
 
+    CSV_MONEY_FIELDS = frozenset(
+        {"subtotal", "shipping_cost", "tax", "discount", "total"}
+    )
+
     CSV_EXPORT_FIELDS = [
         "order_number",
         "created_at",
@@ -751,11 +758,17 @@ class AdminOrderViewSet(viewsets.ModelViewSet):
             .prefetch_related(None)
         )
         fields = self.CSV_EXPORT_FIELDS
+        # Money columns carry their unit in the header (ADR 0001, I-8): a
+        # spreadsheet user must never have to guess whether 3141660 is Rial,
+        # Toman or dollars. Values are the stored integers, untouched.
+        header = [
+            f"{name}_rial" if name in self.CSV_MONEY_FIELDS else name for name in fields
+        ]
 
         def row_generator():
             writer = csv.writer(Echo())
             # BOM so Excel reads the UTF-8 file correctly (Persian names).
-            yield "\ufeff" + writer.writerow(fields)
+            yield "\ufeff" + writer.writerow(header)
             for order in queryset.only(*fields).iterator(chunk_size=500):
                 row = []
                 for name in fields:

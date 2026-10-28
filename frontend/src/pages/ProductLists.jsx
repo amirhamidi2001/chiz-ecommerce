@@ -1,6 +1,7 @@
 // src/pages/ProductLists.jsx
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { formatToman } from '../utils/money';
 
 const ProductLists = () => {
   const [searchQuery, setSearchQuery] = useState('Lorem ipsum');
@@ -12,7 +13,7 @@ const ProductLists = () => {
       id: 1,
       name: 'Tempor Incididunt',
       category: "Women's Fashion",
-      price: 129.0,
+      price: 1_290_000,
       rating: 4.8,
       reviews: 42,
       imageMain: '/assets/img/product/product-1.webp',
@@ -24,7 +25,7 @@ const ProductLists = () => {
       id: 2,
       name: 'Elit Consectetur',
       category: "Men's Collection",
-      price: 95.0,
+      price: 950_000,
       rating: 4.6,
       reviews: 28,
       imageMain: '/assets/img/product/product-1.webp',
@@ -36,8 +37,8 @@ const ProductLists = () => {
       id: 3,
       name: 'Adipiscing Magna',
       category: 'Accessories',
-      price: 75.0,
-      originalPrice: 99.0,
+      price: 750_000,
+      originalPrice: 990_000,
       rating: 4.9,
       reviews: 56,
       imageMain: '/assets/img/product/product-3.webp',
@@ -48,7 +49,7 @@ const ProductLists = () => {
       id: 4,
       name: 'Labore Dolore',
       category: 'Footwear',
-      price: 145.0,
+      price: 1_450_000,
       rating: 4.7,
       reviews: 35,
       imageMain: '/assets/img/product/product-3.webp',
@@ -60,7 +61,7 @@ const ProductLists = () => {
       id: 5,
       name: 'Magna Aliqua',
       category: "Men's Fashion",
-      price: 89.0,
+      price: 890_000,
       rating: 4.5,
       reviews: 23,
       imageMain: '/assets/img/product/product-5.webp',
@@ -72,8 +73,8 @@ const ProductLists = () => {
       id: 6,
       name: 'Eiusmod Tempor',
       category: "Women's Fashion",
-      price: 110.0,
-      originalPrice: 129.0,
+      price: 1_100_000,
+      originalPrice: 1_290_000,
       rating: 4.8,
       reviews: 47,
       imageMain: '/assets/img/product/product-5.webp',
@@ -84,7 +85,7 @@ const ProductLists = () => {
       id: 7,
       name: 'Incididunt Labore',
       category: 'Accessories',
-      price: 55.0,
+      price: 550_000,
       rating: 4.6,
       reviews: 31,
       imageMain: '/assets/img/product/product-1.webp',
@@ -96,7 +97,7 @@ const ProductLists = () => {
       id: 8,
       name: 'Aliqua Magna',
       category: "Men's Fashion",
-      price: 79.0,
+      price: 790_000,
       rating: 4.7,
       reviews: 39,
       imageMain: '/assets/img/product/product-1.webp',
@@ -270,11 +271,11 @@ const ProductLists = () => {
                     <div>
                       {product.originalPrice ? (
                         <>
-                          <span className="text-lg font-bold text-teal-700">${product.price}</span>
-                          <span className="text-sm text-gray-400 line-through ml-2">${product.originalPrice}</span>
+                          <span className="text-lg font-bold text-teal-700">{formatToman(product.price)}</span>
+                          <span className="text-sm text-gray-400 line-through ml-2">{formatToman(product.originalPrice)}</span>
                         </>
                       ) : (
-                        <span className="text-lg font-bold text-gray-800">${product.price}</span>
+                        <span className="text-lg font-bold text-gray-800">{formatToman(product.price)}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-1">

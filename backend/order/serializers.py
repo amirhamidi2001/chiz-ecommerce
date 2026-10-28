@@ -1,8 +1,8 @@
-from decimal import Decimal
-
+from core.serializers import RialSerializerField
 from dashboard.models import Address, IranProvince, iran_postal_code_validator
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from promotions.models import Coupon, CouponRedemption
 from promotions.services import CouponLine, validate_coupon
 from rest_framework import serializers
@@ -24,7 +24,7 @@ from .services.pricing import PricingError, calculate_order_totals
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    subtotal = RialSerializerField(read_only=True)
 
     class Meta:
         model = OrderItem
@@ -182,7 +182,7 @@ class OrderCreateSerializer(serializers.Serializer):
 
     def validate_card_last_four(self, value):
         if value and not value.isdigit():
-            raise serializers.ValidationError("Must be 4 numeric digits.")
+            raise serializers.ValidationError(_("Must be 4 numeric digits."))
         return value
 
     def validate(self, attrs):
@@ -198,7 +198,9 @@ class OrderCreateSerializer(serializers.Serializer):
             try:
                 address = Address.objects.get(pk=address_id, user=user)
             except Address.DoesNotExist:
-                raise serializers.ValidationError({"address_id": "Address not found."})
+                raise serializers.ValidationError(
+                    {"address_id": _("Address not found.")}
+                )
 
             # A saved address_id takes precedence over any manually-typed
             # fields also present in the same payload — the saved address
@@ -230,7 +232,7 @@ class OrderCreateSerializer(serializers.Serializer):
                 "country",
             )
             missing = {
-                field: "This field is required when no address_id is provided."
+                field: _("This field is required when no address_id is provided.")
                 for field in required_manual_fields
                 if not attrs.get(field)
             }
@@ -240,9 +242,11 @@ class OrderCreateSerializer(serializers.Serializer):
         try:
             cart = user.cart
         except Exception:
-            raise serializers.ValidationError({"cart": "No cart found for this user."})
+            raise serializers.ValidationError(
+                {"cart": _("No cart found for this user.")}
+            )
         if not cart.items.exists():
-            raise serializers.ValidationError({"cart": "Your cart is empty."})
+            raise serializers.ValidationError({"cart": _("Your cart is empty.")})
 
         # Non-locking, best-effort availability pre-check. This is a UX
         # improvement layered on top of create()'s existing atomic,
@@ -269,11 +273,19 @@ class OrderCreateSerializer(serializers.Serializer):
                     "cart": [
                         (
                             (
-                                f"{item.variant.product.name} ({item.variant.sku}) is no "
-                                "longer available in the requested quantity."
+                                _(
+                                    "%(product)s (%(sku)s) is no longer available "
+                                    "in the requested quantity."
+                                )
+                                % {
+                                    "product": item.variant.product.name,
+                                    "sku": item.variant.sku,
+                                }
                             )
                             if item.variant is not None
-                            else "One of the items in your cart is no longer available."
+                            else _(
+                                "One of the items in your cart is no longer available."
+                            )
                         )
                         for item in problems
                     ]
@@ -320,18 +332,18 @@ class OrderCreateSerializer(serializers.Serializer):
             )
         except ShippingRate.DoesNotExist:
             raise serializers.ValidationError(
-                {"shipping_rate_id": "Shipping rate not found."}
+                {"shipping_rate_id": _("Shipping rate not found.")}
             )
 
         if not shipping_rate.is_active:
             raise serializers.ValidationError(
-                {"shipping_rate_id": "This shipping rate is no longer available."}
+                {"shipping_rate_id": _("This shipping rate is no longer available.")}
             )
 
         if shipping_rate.province != attrs["state"]:
             raise serializers.ValidationError(
                 {
-                    "shipping_rate_id": (
+                    "shipping_rate_id": _(
                         "This shipping rate does not apply to the selected "
                         "destination."
                     )
@@ -340,7 +352,7 @@ class OrderCreateSerializer(serializers.Serializer):
 
         if shipping_rate.carrier_id != attrs["shipping_carrier_id"]:
             raise serializers.ValidationError(
-                {"shipping_carrier_id": "Carrier does not match the selected rate."}
+                {"shipping_carrier_id": _("Carrier does not match the selected rate.")}
             )
 
         attrs["shipping_rate"] = shipping_rate
@@ -391,7 +403,7 @@ class OrderCreateSerializer(serializers.Serializer):
             # captured list, closes it: every price used anywhere in this
             # order is the same value, read after the lock was acquired.
             priced_items = []
-            subtotal = Decimal("0")
+            subtotal = 0  # int Rial (ADR 0001)
             for cart_item in cart_items:
                 locked_variant = locked_variants[cart_item.variant_id]
 
@@ -427,11 +439,14 @@ class OrderCreateSerializer(serializers.Serializer):
                     )
                     raise serializers.ValidationError(
                         {
-                            "expired_item": (
-                                f"'{locked_variant.product.name} — {variant_detail}' "
-                                "has expired and can no longer be purchased. Please "
-                                "remove it from your cart."
+                            "expired_item": _(
+                                "'%(product)s — %(variant)s' has expired and can no "
+                                "longer be purchased. Please remove it from your cart."
                             )
+                            % {
+                                "product": locked_variant.product.name,
+                                "variant": variant_detail,
+                            }
                         }
                     )
 
@@ -446,11 +461,15 @@ class OrderCreateSerializer(serializers.Serializer):
                     )
                     raise serializers.ValidationError(
                         {
-                            "stock": (
-                                f"Only {locked_variant.stock} of "
-                                f"'{locked_variant.product.name} — {variant_detail}' "
+                            "stock": _(
+                                "Only %(stock)s of '%(product)s — %(variant)s' "
                                 "left in stock."
                             )
+                            % {
+                                "stock": locked_variant.stock,
+                                "product": locked_variant.product.name,
+                                "variant": variant_detail,
+                            }
                         }
                     )
 
@@ -476,7 +495,7 @@ class OrderCreateSerializer(serializers.Serializer):
             # max_uses / uses_per_user check before either has recorded
             # its redemption (a bare pre-check can't guarantee that).
             # Lock order is always variants first, then coupon.
-            discount = Decimal("0")
+            discount = 0  # int Rial (ADR 0001)
             coupon_result = None
             if cart.coupon_id:
                 try:
@@ -485,7 +504,7 @@ class OrderCreateSerializer(serializers.Serializer):
                     )
                 except Coupon.DoesNotExist:
                     raise serializers.ValidationError(
-                        {"coupon": ["Invalid coupon code."]}
+                        {"coupon": [_("Invalid coupon code.")]}
                     )
                 coupon_result = validate_coupon(
                     locked_coupon.code,

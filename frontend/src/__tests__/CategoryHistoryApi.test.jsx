@@ -25,7 +25,7 @@ import {
 } from '../services/api';
 
 const PRODUCT = {
-  id: 1, slug: 'test-product', name: 'Test Product', price: '49.99', original_price: null,
+  id: 1, slug: 'test-product', name: 'Test Product', price: 499_900, original_price: null,
   rating: 4.5, reviews_count: 10, stock: 5, is_new: false, is_sale: false,
   discount_percent: 0, thumbnail_url: '/img/t.webp', images: [], category: { name: 'Skincare' },
 };

@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils.translation import gettext as _
 from order.models import Order
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -34,12 +35,16 @@ class PaymentInitiateView(APIView):
             order = Order.objects.get(pk=order_id, user=request.user)
         except Order.DoesNotExist:
             return Response(
-                {"order_id": "Order not found."}, status=status.HTTP_404_NOT_FOUND
+                {"order_id": _("Order not found.")}, status=status.HTTP_404_NOT_FOUND
             )
 
         if order.status != Order.Status.PENDING:
             return Response(
-                {"detail": "This order has already been paid or is no longer payable."},
+                {
+                    "detail": _(
+                        "This order has already been paid or is no longer payable."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -120,10 +125,10 @@ class PaymentInitiateView(APIView):
             # dependency (the gateway), not a client input error or a
             # bug on our side.
             error_message = (
-                result.error_message if result else "Payment initiation failed."
+                result.error_message if result else _("Payment initiation failed.")
             )
             return Response(
-                {"detail": error_message or "Payment initiation failed."},
+                {"detail": error_message or _("Payment initiation failed.")},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 

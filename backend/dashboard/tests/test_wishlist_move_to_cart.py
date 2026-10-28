@@ -64,7 +64,7 @@ def cart_lines(customer):
 @pytest.fixture
 def single_variant_product(make_product, make_variant):
     product = make_product()
-    variant = make_variant(product=product, price="20.00")
+    variant = make_variant(product=product, price=200_000)
     return product, variant
 
 
@@ -73,10 +73,10 @@ def multi_variant_product(make_product, make_variant):
     """Two purchasable variants (+ an inactive and a sold-out one that must
     never be offered)."""
     product = make_product()
-    dear = make_variant(product=product, price="30.00")
-    cheap = make_variant(product=product, price="10.00")
-    make_variant(product=product, price="5.00", is_active=False)
-    make_variant(product=product, price="6.00", stock=0)
+    dear = make_variant(product=product, price=300_000)
+    cheap = make_variant(product=product, price=100_000)
+    make_variant(product=product, price=50_000, is_active=False)
+    make_variant(product=product, price=60_000, stock=0)
     return product, cheap, dear
 
 
@@ -391,8 +391,8 @@ class TestMoveAllToCart:
         single_d_variant = make_variant(product=single_d)
 
         multi = make_product(name="Multi B")
-        multi_cheap = make_variant(product=multi, price="10.00")
-        multi_dear = make_variant(product=multi, price="20.00")
+        multi_cheap = make_variant(product=multi, price=100_000)
+        multi_dear = make_variant(product=multi, price=200_000)
 
         gone = make_product(name="Gone C")
         make_variant(product=gone, stock=0)
@@ -562,8 +562,8 @@ class TestEligibilityMatchesTheCart:
         self._check(product, variant, True)
 
     def test_results_are_ordered_cheapest_first(self, product, make_variant):
-        dear = make_variant(product=product, price="9.00")
-        cheap = make_variant(product=product, price="3.00")
+        dear = make_variant(product=product, price=90_000)
+        cheap = make_variant(product=product, price=30_000)
         assert get_purchasable_variants(product) == [cheap, dear]
 
 

@@ -7,8 +7,8 @@ from shop.models import Category, Color, Product, ProductVariant
 
 User = get_user_model()
 
-TAX_RATE = Decimal("0.10")
-SHIPPING_COST = Decimal("9.99")
+TAX_PERCENT = Decimal("10")
+SHIPPING_COST = 99_900
 
 
 # ─── Fixture helpers ───────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ def make_product(
     *,
     name="T-Shirt",
     slug="t-shirt",
-    price="25.00",
+    price=250_000,
     stock=10,
     category=None,
 ):
@@ -36,7 +36,7 @@ def make_product(
     return Product.objects.create(
         name=name,
         slug=slug,
-        price=Decimal(price),
+        price=price,
         stock=stock,
         category=category,
     )
@@ -75,7 +75,7 @@ def make_variant(
         product=product,
         sku=sku,
         color=color,
-        price=Decimal(price),
+        price=price,
         stock=stock,
         is_active=is_active,
         expiration_date=expiration_date,
@@ -165,7 +165,7 @@ def make_shipping_rate(
         city=city,
         min_weight_g=min_weight_g,
         max_weight_g=max_weight_g,
-        defaults={"price": Decimal(price), "is_active": is_active},
+        defaults={"price": price, "is_active": is_active},
     )
     return rate
 

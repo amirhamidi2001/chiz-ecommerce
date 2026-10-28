@@ -4,15 +4,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import CouponInput from '../components/CouponInput';
 import { isAuthenticated } from '../services/api';
+import { formatToman, percentOfRial } from '../utils/money';
+import { CART_FREE_SHIPPING_FALLBACK, CART_SHIPPING_OPTIONS, TAX_BASIS_POINTS } from '../constants/pricing';
 
 // ─── Shipping options ──────────────────────────────────────────────────────
-const SHIPPING_OPTIONS = [
-  { id: 'standard', label: 'Standard Delivery', price: 4.99, eta: '5-7 days' },
-  { id: 'express', label: 'Express Delivery', price: 12.99, eta: '2-3 days' },
-  { id: 'free', label: 'Free Shipping', price: 0, eta: '7-14 days', minOrder: 300 },
-];
-
-const TAX_RATE = 0.10; // 10%
+// Shipping estimate options and the tax rate live in constants/pricing.js (Rial
+// integers / basis points) — no dollar-shaped values and no float tax math here.
+const SHIPPING_OPTIONS = CART_SHIPPING_OPTIONS;
 
 // ─── Toast notification ────────────────────────────────────────────────────
 const Toast = ({ message, type, onClose }) => {
@@ -113,11 +111,11 @@ const CartItemRow = ({ item, onUpdateQty, onRemove, updatingId }) => {
         <div className="text-right md:text-center">
           {original && original > price ? (
             <>
-              <span className="text-gray-400 line-through text-xs block">${original.toFixed(2)}</span>
-              <span className="font-semibold text-teal-700">${price.toFixed(2)}</span>
+              <span className="text-gray-400 line-through text-xs block">{formatToman(original)}</span>
+              <span className="font-semibold text-teal-700">{formatToman(price)}</span>
             </>
           ) : (
-            <span className="font-semibold text-gray-800">${price.toFixed(2)}</span>
+            <span className="font-semibold text-gray-800">{formatToman(price)}</span>
           )}
         </div>
       </div>
@@ -149,7 +147,7 @@ const CartItemRow = ({ item, onUpdateQty, onRemove, updatingId }) => {
       {/* Line Total */}
       <div className="flex items-center justify-between md:justify-center md:col-span-2">
         <span className="md:hidden text-sm text-gray-500 font-medium">Total:</span>
-        <span className="font-bold text-gray-800">${subtotal.toFixed(2)}</span>
+        <span className="font-bold text-gray-800">{formatToman(subtotal)}</span>
       </div>
     </div>
   );
@@ -185,12 +183,12 @@ const Cart = () => {
   const getShippingCost = () => {
     const option = SHIPPING_OPTIONS.find((o) => o.id === shippingMethod);
     if (!option) return 0;
-    if (option.id === 'free' && subtotal < (option.minOrder ?? 0)) return 12.99;
+    if (option.id === 'free' && subtotal < (option.minOrder ?? 0)) return CART_FREE_SHIPPING_FALLBACK;
     return option.price;
   };
 
   const shippingCost = getShippingCost();
-  const tax = subtotal * TAX_RATE;
+  const tax = percentOfRial(subtotal, TAX_BASIS_POINTS);
 
   // The coupon lives on the server-side cart; everything below is read from
   // what GET /cart/ says right now (recomputed there on every fetch), never
@@ -386,7 +384,7 @@ const Cart = () => {
                       <span className="text-gray-600">
                         Subtotal ({cart.total_items} {cart.total_items === 1 ? 'item' : 'items'})
                       </span>
-                      <span className="font-semibold">${subtotal.toFixed(2)}</span>
+                      <span className="font-semibold">{formatToman(subtotal)}</span>
                     </div>
 
                     {/* Shipping Options */}
@@ -416,13 +414,13 @@ const Cart = () => {
                                   <span className="text-xs text-gray-400 block">{opt.eta}</span>
                                   {opt.id === 'free' && disabled && (
                                     <span className="text-xs text-amber-600">
-                                      (Requires ${(opt.minOrder ?? 0).toFixed(0)}+ order)
+                                      (Requires {formatToman(opt.minOrder ?? 0)}+ order)
                                     </span>
                                   )}
                                 </div>
                               </div>
                               <span className="text-sm font-semibold text-teal-700">
-                                {opt.price === 0 && !disabled ? 'FREE' : `$${opt.price.toFixed(2)}`}
+                                {opt.price === 0 && !disabled ? 'FREE' : `${formatToman(opt.price)}`}
                               </span>
                             </label>
                           );
@@ -433,7 +431,7 @@ const Cart = () => {
                     {/* Tax */}
                     <div className="flex justify-between border-t border-gray-200 pt-3">
                       <span className="text-gray-600">Tax (10%)</span>
-                      <span className="font-medium">${tax.toFixed(2)}</span>
+                      <span className="font-medium">{formatToman(tax)}</span>
                     </div>
 
                     {/* Discount */}
@@ -442,14 +440,14 @@ const Cart = () => {
                         <span className="flex items-center gap-1">
                           <i className="bi bi-tag-fill"></i> Coupon ({couponCode})
                         </span>
-                        <span className="font-semibold">-${discount.toFixed(2)}</span>
+                        <span className="font-semibold">-{formatToman(discount)}</span>
                       </div>
                     )}
 
                     {/* Total */}
                     <div className="flex justify-between border-t-2 border-gray-200 pt-4 mt-2">
                       <span className="text-lg font-bold text-gray-800">Total</span>
-                      <span className="text-xl font-bold text-teal-700">${total.toFixed(2)}</span>
+                      <span className="text-xl font-bold text-teal-700">{formatToman(total)}</span>
                     </div>
                   </div>
 

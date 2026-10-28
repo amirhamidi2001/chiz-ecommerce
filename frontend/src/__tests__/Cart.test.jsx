@@ -27,14 +27,15 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 import { useCart } from '../context/CartContext';
 import { isAuthenticated } from '../services/api';
+import { formatToman } from '../utils/money';
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
 const makeItem = (overrides = {}) => ({
     id: 1,
     quantity: 2,
-    unit_price: '10.00',
-    subtotal: '20.00',
+    unit_price: 100_000,
+    subtotal: 200_000,
     product: {
         name: 'Product 1',
         slug: 'product-1',
@@ -46,7 +47,7 @@ const makeItem = (overrides = {}) => ({
 
 const makeCart = (overrides = {}) => ({
     items: [makeItem()],
-    subtotal: '20.00',
+    subtotal: 200_000,
     total_items: 2,
     ...overrides,
 });
@@ -170,7 +171,7 @@ describe('Cart', () => {
             isAuthenticated.mockReturnValue(true);
             useCart.mockReturnValue({
                 ...defaultUseCartValue,
-                cart: makeCart({ items: [], total_items: 0, subtotal: '0.00' }),
+                cart: makeCart({ items: [], total_items: 0, subtotal: 0 }),
             });
 
             renderCart();
@@ -182,7 +183,7 @@ describe('Cart', () => {
             isAuthenticated.mockReturnValue(true);
             useCart.mockReturnValue({
                 ...defaultUseCartValue,
-                cart: makeCart({ items: [], total_items: 0, subtotal: '0.00' }),
+                cart: makeCart({ items: [], total_items: 0, subtotal: 0 }),
             });
 
             renderCart();
@@ -196,7 +197,7 @@ describe('Cart', () => {
             isAuthenticated.mockReturnValue(true);
             useCart.mockReturnValue({
                 ...defaultUseCartValue,
-                cart: makeCart({ items: [], total_items: 0, subtotal: '0.00' }),
+                cart: makeCart({ items: [], total_items: 0, subtotal: 0 }),
             });
 
             renderCart();
@@ -222,7 +223,7 @@ describe('Cart', () => {
 
                 renderCart();
 
-                expect(screen.getByText('$10.00')).toBeInTheDocument();
+                expect(screen.getByText(formatToman(100_000))).toBeInTheDocument();
             });
 
             it('displays the line subtotal', () => {
@@ -230,7 +231,7 @@ describe('Cart', () => {
 
                 renderCart();
 
-                expect(screen.getAllByText('$20.00').length).toBeGreaterThan(0);
+                expect(screen.getAllByText(formatToman(200_000)).length).toBeGreaterThan(0);
             });
 
             it('shows the item count in the page heading', () => {
@@ -313,8 +314,8 @@ describe('Cart', () => {
                 useCart.mockReturnValue({
                     ...defaultUseCartValue,
                     cart: makeCart({
-                        items: [makeItem({ quantity: 1, subtotal: '10.00' })],
-                        subtotal: '10.00',
+                        items: [makeItem({ quantity: 1, subtotal: 100_000 })],
+                        subtotal: 100_000,
                         total_items: 1,
                     }),
                 });
@@ -503,7 +504,7 @@ describe('Cart', () => {
 
         it('sends the typed code through the context applyCoupon (not a client-side check)', async () => {
             const user = userEvent.setup();
-            const ctx = setupAuthenticated({ subtotal: '100.00', total_items: 1 });
+            const ctx = setupAuthenticated({ subtotal: 1_000_000, total_items: 1 });
 
             renderCart();
             await typeAndApply(user, 'SUMMER20');
@@ -526,7 +527,7 @@ describe('Cart', () => {
             const user = userEvent.setup();
             // The server (mocked here) is the only authority on validity.
             setupAuthenticated(
-                { subtotal: '100.00', total_items: 1 },
+                { subtotal: 1_000_000, total_items: 1 },
                 {
                     applyCoupon: vi.fn().mockResolvedValue({
                         success: false,
@@ -539,13 +540,13 @@ describe('Cart', () => {
             await typeAndApply(user, 'DISCOUNT20');
 
             expect(await screen.findByText('Invalid coupon code.')).toBeInTheDocument();
-            expect(screen.queryByText('-$20.00')).not.toBeInTheDocument();
+            expect(screen.queryByText('-' + formatToman(200_000))).not.toBeInTheDocument();
         });
 
         it('shows the backend’s specific rejection message inline, without applying anything', async () => {
             const user = userEvent.setup();
             setupAuthenticated(
-                { subtotal: '100.00', total_items: 1 },
+                { subtotal: 1_000_000, total_items: 1 },
                 {
                     applyCoupon: vi.fn().mockResolvedValue({
                         success: false,
@@ -565,10 +566,10 @@ describe('Cart', () => {
         it('shows the applied code, a discount line and the reduced total', () => {
             // subtotal 100, standard shipping 4.99, tax 10.00, discount 10.00
             setupAuthenticated({
-                subtotal: '100.00',
+                subtotal: 1_000_000,
                 total_items: 1,
                 coupon_code: 'SUMMER20',
-                coupon_discount: '10.00',
+                coupon_discount: 100_000,
                 coupon_error: null,
             });
 
@@ -576,15 +577,15 @@ describe('Cart', () => {
 
             expect(screen.getByText(/SUMMER20/, { selector: 'strong' })).toBeInTheDocument();
             expect(screen.getByText('Coupon (SUMMER20)')).toBeInTheDocument();
-            expect(screen.getByText('-$10.00')).toBeInTheDocument();
-            expect(screen.getByText('$104.99')).toBeInTheDocument();
+            expect(screen.getByText('-' + formatToman(100_000))).toBeInTheDocument();
+            expect(screen.getByText(formatToman(1_049_900))).toBeInTheDocument();
             // Entry form is replaced by the applied state.
             expect(screen.queryByPlaceholderText(/coupon code/i)).not.toBeInTheDocument();
         });
 
         it('restores the undiscounted total when the cart has no coupon', () => {
             setupAuthenticated({
-                subtotal: '100.00',
+                subtotal: 1_000_000,
                 total_items: 1,
                 coupon_code: null,
                 coupon_discount: '0',
@@ -593,17 +594,17 @@ describe('Cart', () => {
 
             renderCart();
 
-            expect(screen.queryByText('-$10.00')).not.toBeInTheDocument();
-            expect(screen.getByText('$114.99')).toBeInTheDocument(); // 100 + 4.99 + 10.00
+            expect(screen.queryByText('-' + formatToman(100_000))).not.toBeInTheDocument();
+            expect(screen.getByText(formatToman(1_149_900))).toBeInTheDocument(); // 100 + 4.99 + 10.00
         });
 
         it('removes the coupon through the context and shows a toast', async () => {
             const user = userEvent.setup();
             const ctx = setupAuthenticated({
-                subtotal: '100.00',
+                subtotal: 1_000_000,
                 total_items: 1,
                 coupon_code: 'SUMMER20',
-                coupon_discount: '10.00',
+                coupon_discount: 100_000,
                 coupon_error: null,
             });
 
@@ -616,7 +617,7 @@ describe('Cart', () => {
 
         describe('attached coupon that has since become invalid', () => {
             const invalidCart = {
-                subtotal: '100.00',
+                subtotal: 1_000_000,
                 total_items: 1,
                 coupon_code: 'SUMMER20',
                 coupon_discount: '0',
@@ -633,13 +634,13 @@ describe('Cart', () => {
             });
 
             it('does not subtract anything from the total', () => {
-                setupAuthenticated({ ...invalidCart, coupon_discount: '10.00' });
+                setupAuthenticated({ ...invalidCart, coupon_discount: 100_000 });
 
                 renderCart();
 
                 expect(screen.queryByText(/^Coupon \(/)).not.toBeInTheDocument();
-                expect(screen.queryByText('-$10.00')).not.toBeInTheDocument();
-                expect(screen.getByText('$114.99')).toBeInTheDocument();
+                expect(screen.queryByText('-' + formatToman(100_000))).not.toBeInTheDocument();
+                expect(screen.getByText(formatToman(1_149_900))).toBeInTheDocument();
             });
 
             it('offers a way to remove it, which calls removeCoupon', async () => {
@@ -659,7 +660,7 @@ describe('Cart', () => {
 
     describe('shipping', () => {
         it('defaults to Standard Delivery ($4.99)', () => {
-            setupAuthenticated({ subtotal: '20.00', total_items: 1 });
+            setupAuthenticated({ subtotal: 200_000, total_items: 1 });
 
             renderCart();
 
@@ -668,7 +669,7 @@ describe('Cart', () => {
 
         it('updates the selected shipping method when Express Delivery is chosen', async () => {
             const user = userEvent.setup();
-            setupAuthenticated({ subtotal: '20.00', total_items: 1 });
+            setupAuthenticated({ subtotal: 200_000, total_items: 1 });
 
             renderCart();
 
@@ -681,17 +682,17 @@ describe('Cart', () => {
         it('reflects the Express Delivery cost ($12.99) in the order total', async () => {
             const user = userEvent.setup();
             // subtotal=20, tax=2, express=12.99 → total=34.99
-            setupAuthenticated({ subtotal: '20.00', total_items: 1 });
+            setupAuthenticated({ subtotal: 200_000, total_items: 1 });
 
             renderCart();
 
             await user.click(screen.getByRole('radio', { name: /express delivery/i }));
 
-            expect(screen.getByText('$34.99')).toBeInTheDocument();
+            expect(screen.getByText(formatToman(349_900))).toBeInTheDocument();
         });
 
         it('disables Free Shipping when the order subtotal is below $300', () => {
-            setupAuthenticated({ subtotal: '20.00', total_items: 1 });
+            setupAuthenticated({ subtotal: 200_000, total_items: 1 });
 
             renderCart();
 
@@ -699,7 +700,7 @@ describe('Cart', () => {
         });
 
         it('enables Free Shipping when the order subtotal meets the $300 threshold', () => {
-            setupAuthenticated({ subtotal: '300.00', total_items: 30 });
+            setupAuthenticated({ subtotal: 3_000_000, total_items: 30 });
 
             renderCart();
 

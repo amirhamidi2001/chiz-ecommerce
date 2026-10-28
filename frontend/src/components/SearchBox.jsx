@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getProductSuggestions } from '../services/api';
+import { formatToman } from '../utils/money';
 
 export const SUGGEST_DEBOUNCE_MS = 300;
 export const SUGGEST_MIN_LENGTH = 2; // mirrors the backend short-circuit
@@ -195,7 +196,7 @@ const SearchBox = ({ className = '', inputClass = '', buttonClass = '', onSubmit
                       {product.name}
                     </span>
                     <span className="text-sm font-semibold text-teal-700 flex-shrink-0">
-                      ${Number(product.price).toFixed(2)}
+                      {formatToman(product.price)}
                     </span>
                   </Link>
                 </li>

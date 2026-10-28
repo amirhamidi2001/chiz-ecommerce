@@ -20,6 +20,9 @@ import {
 } from '../utils/categoryFilters';
 import { applyParamUpdates } from '../utils/urlParams';
 import { useCart } from '../context/CartContext';
+import { formatToman, toTomanLoose, tomanToRial } from '../utils/money';
+import { PRICE_FILTER_MAX_TOMAN, PRICE_FILTER_STEP_TOMAN } from '../constants/pricing';
+import { formatRating, formatReviewCount } from '../utils/numerals';
 
 // ─── Loading Spinner ────────────────────────────────────────────────────────
 const Spinner = () => (
@@ -168,17 +171,17 @@ const ProductCard = ({ product, onAddToCart }) => {
               <FlashSalePrice product={product} size="lg" />
             ) : product.original_price ? (
               <>
-                <span className="text-lg font-bold text-teal-700">${Number(product.price).toFixed(2)}</span>
-                <span className="text-sm text-gray-400 line-through ml-2">${Number(product.original_price).toFixed(2)}</span>
+                <span className="text-lg font-bold text-teal-700">{formatToman(product.price)}</span>
+                <span className="text-sm text-gray-400 line-through ml-2">{formatToman(product.original_price)}</span>
               </>
             ) : (
-              <span className="text-lg font-bold text-gray-800">${Number(product.price).toFixed(2)}</span>
+              <span className="text-lg font-bold text-gray-800">{formatToman(product.price)}</span>
             )}
           </div>
           <div className="flex items-center gap-1 text-sm">
             <i className="bi bi-star-fill text-yellow-400"></i>
-            <span>{product.rating}</span>
-            <span className="text-gray-400">({product.reviews_count})</span>
+            <span>{formatRating(product.rating)}</span>
+            <span className="text-gray-400">({formatReviewCount(product.reviews_count)})</span>
           </div>
         </div>
         {/* Add to Cart button below card */}
@@ -268,32 +271,35 @@ const CategoryTree = ({ categories, selectedCategory, onSelectCategory, loading 
 };
 
 // ─── Price Range Slider ───────────────────────────────────────────────────────
+// minPrice / maxPrice arrive and leave as RIAL (the URL/API unit); the slider
+// itself works in whole TOMAN, converting only through utils/money.js.
 const PriceRangeSlider = ({ minPrice, maxPrice, onPriceChange }) => {
-  const [minVal, setMinVal] = useState(minPrice);
-  const [maxVal, setMaxVal] = useState(maxPrice);
+  const [minVal, setMinVal] = useState(toTomanLoose(minPrice) ?? 0);
+  const [maxVal, setMaxVal] = useState(toTomanLoose(maxPrice) ?? PRICE_FILTER_MAX_TOMAN);
   const GLOBAL_MIN = 0;
-  const GLOBAL_MAX = 1000;
+  const GLOBAL_MAX = PRICE_FILTER_MAX_TOMAN;
+  const STEP = PRICE_FILTER_STEP_TOMAN;
 
-  useEffect(() => { setMinVal(minPrice); }, [minPrice]);
-  useEffect(() => { setMaxVal(maxPrice); }, [maxPrice]);
+  useEffect(() => { setMinVal(toTomanLoose(minPrice) ?? 0); }, [minPrice]);
+  useEffect(() => { setMaxVal(toTomanLoose(maxPrice) ?? PRICE_FILTER_MAX_TOMAN); }, [maxPrice]);
 
   const handleMin = (e) => {
-    const val = Math.min(Number(e.target.value), maxVal - 10);
+    const val = Math.min(Math.max(Math.round(Number(e.target.value)) || 0, GLOBAL_MIN), maxVal - STEP);
     setMinVal(val);
-    onPriceChange({ min: val, max: maxVal });
+    onPriceChange({ min: tomanToRial(val), max: tomanToRial(maxVal) });
   };
   const handleMax = (e) => {
-    const val = Math.max(Number(e.target.value), minVal + 10);
+    const val = Math.max(Math.min(Math.round(Number(e.target.value)) || 0, GLOBAL_MAX), minVal + STEP);
     setMaxVal(val);
-    onPriceChange({ min: minVal, max: val });
+    onPriceChange({ min: tomanToRial(minVal), max: tomanToRial(val) });
   };
 
   return (
     <div className="widget-item mb-6">
       <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Price Range</h3>
       <div className="mb-3 flex justify-between text-sm font-medium">
-        <span>${minVal}</span>
-        <span>${maxVal}</span>
+        <span>{formatToman(tomanToRial(minVal))}</span>
+        <span>{formatToman(tomanToRial(maxVal))}</span>
       </div>
       <div className="relative h-1 bg-gray-200 rounded">
         <div
@@ -301,12 +307,12 @@ const PriceRangeSlider = ({ minPrice, maxPrice, onPriceChange }) => {
           style={{ left: `${(minVal / GLOBAL_MAX) * 100}%`, right: `${100 - (maxVal / GLOBAL_MAX) * 100}%` }}
         />
         <input
-          type="range" min={GLOBAL_MIN} max={GLOBAL_MAX} step={10} value={minVal}
+          type="range" min={GLOBAL_MIN} max={GLOBAL_MAX} step={STEP} value={minVal}
           onChange={handleMin}
           className="absolute w-full top-0 left-0 appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-600 [&::-webkit-slider-thumb]:cursor-pointer"
         />
         <input
-          type="range" min={GLOBAL_MIN} max={GLOBAL_MAX} step={10} value={maxVal}
+          type="range" min={GLOBAL_MIN} max={GLOBAL_MAX} step={STEP} value={maxVal}
           onChange={handleMax}
           className="absolute w-full top-0 left-0 appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-600 [&::-webkit-slider-thumb]:cursor-pointer"
         />
@@ -645,10 +651,10 @@ const Category = () => {
       clear: () => toggleColor(name),
     });
   });
-  if (priceRange.min > 0 || priceRange.max < 1000) {
+  if (priceRange.min > PRICE_MIN || priceRange.max < PRICE_MAX) {
     activeFilters.push({
       type: 'Price',
-      value: `$${priceRange.min} – $${priceRange.max}`,
+      value: `${formatToman(priceRange.min)} – ${formatToman(priceRange.max)}`,
       clear: () => updateParams({ min_price: null, max_price: null }),
     });
   }
@@ -898,8 +904,8 @@ const Category = () => {
                           <h4 className="font-semibold text-lg truncate">{product.name}</h4>
                           <div className="flex items-center gap-2 mt-1">
                             <i className="bi bi-star-fill text-yellow-400 text-sm"></i>
-                            <span className="text-sm text-gray-700">{product.rating}</span>
-                            <span className="text-sm text-gray-400">({product.reviews_count} reviews)</span>
+                            <span className="text-sm text-gray-700">{formatRating(product.rating)}</span>
+                            <span className="text-sm text-gray-400">({formatReviewCount(product.reviews_count)} reviews)</span>
                           </div>
                           <div className="mt-2">
                             <FlashSaleBadge product={product} className="mb-1" />
@@ -907,11 +913,11 @@ const Category = () => {
                               <div><FlashSalePrice product={product} size="xl" /></div>
                             ) : product.original_price ? (
                               <>
-                                <span className="text-xl font-bold text-teal-700">${Number(product.price).toFixed(2)}</span>
-                                <span className="text-gray-400 line-through ml-2">${Number(product.original_price).toFixed(2)}</span>
+                                <span className="text-xl font-bold text-teal-700">{formatToman(product.price)}</span>
+                                <span className="text-gray-400 line-through ml-2">{formatToman(product.original_price)}</span>
                               </>
                             ) : (
-                              <span className="text-xl font-bold">${Number(product.price).toFixed(2)}</span>
+                              <span className="text-xl font-bold">{formatToman(product.price)}</span>
                             )}
                           </div>
                           <div className="mt-3 flex gap-2">

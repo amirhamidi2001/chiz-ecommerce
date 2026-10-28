@@ -56,7 +56,7 @@ class TestProductListCacheInvalidation:
 
     def test_variant_price_change_clears_all_cached_entries(self, api_client):
         product = ProductFactory()
-        variant = ProductVariantFactory(product=product, price=10, stock=5)
+        variant = ProductVariantFactory(product=product, price=100_000, stock=5)
         _populate_several_cached_filter_combinations(api_client)
 
         assert len(_product_list_cache_keys()) == 3, (
@@ -64,7 +64,7 @@ class TestProductListCacheInvalidation:
             "before the change."
         )
 
-        variant.price = 25
+        variant.price = 250_000
         variant.save()
 
         assert _product_list_cache_keys() == [], (
@@ -74,7 +74,7 @@ class TestProductListCacheInvalidation:
 
     def test_variant_stock_only_change_does_not_clear_cache(self, api_client):
         product = ProductFactory()
-        variant = ProductVariantFactory(product=product, price=10, stock=5)
+        variant = ProductVariantFactory(product=product, price=100_000, stock=5)
         _populate_several_cached_filter_combinations(api_client)
 
         assert len(_product_list_cache_keys()) == 3
@@ -105,7 +105,7 @@ class TestProductListCacheInvalidation:
 
     def test_deleting_variant_invalidates_cache(self, api_client):
         product = ProductFactory()
-        variant = ProductVariantFactory(product=product, price=10, stock=5)
+        variant = ProductVariantFactory(product=product, price=100_000, stock=5)
         _populate_several_cached_filter_combinations(api_client)
         assert len(_product_list_cache_keys()) == 3
 
@@ -118,7 +118,7 @@ class TestProductListCacheInvalidation:
         _populate_several_cached_filter_combinations(api_client)
         assert len(_product_list_cache_keys()) == 3
 
-        ProductVariantFactory(product=product, price=15, stock=3)
+        ProductVariantFactory(product=product, price=150_000, stock=3)
 
         assert _product_list_cache_keys() == []
 
@@ -175,7 +175,7 @@ class TestFlashSaleCacheInvalidation:
         assert _product_list_cache_keys() == []
 
     def test_adding_a_product_to_a_sale_clears_cached_lists(self, api_client):
-        product = ProductVariantFactory(price=10).product
+        product = ProductVariantFactory(price=100_000).product
         sale = self._make_sale()
         _populate_several_cached_filter_combinations(api_client)
 
@@ -184,7 +184,7 @@ class TestFlashSaleCacheInvalidation:
         assert _product_list_cache_keys() == []
 
     def test_adding_from_the_product_side_also_clears(self, api_client):
-        product = ProductVariantFactory(price=10).product
+        product = ProductVariantFactory(price=100_000).product
         sale = self._make_sale()
         _populate_several_cached_filter_combinations(api_client)
 
@@ -193,7 +193,7 @@ class TestFlashSaleCacheInvalidation:
         assert _product_list_cache_keys() == []
 
     def test_removing_a_product_from_a_sale_clears_cached_lists(self, api_client):
-        product = ProductVariantFactory(price=10).product
+        product = ProductVariantFactory(price=100_000).product
         sale = self._make_sale(product)
         _populate_several_cached_filter_combinations(api_client)
 
@@ -202,7 +202,7 @@ class TestFlashSaleCacheInvalidation:
         assert _product_list_cache_keys() == []
 
     def test_the_next_request_reflects_a_newly_created_sale(self, api_client):
-        product = ProductVariantFactory(price=80).product
+        product = ProductVariantFactory(price=800_000).product
         before = api_client.get(url("product-list"))
         assert before.data["results"][0]["is_on_flash_sale"] is False
 

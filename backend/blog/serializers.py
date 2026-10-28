@@ -1,3 +1,4 @@
+from django.utils.translation import gettext as _
 from rest_framework import serializers
 
 from .models import Category, Comment, Post
@@ -52,7 +53,7 @@ class CommentCreateSerializer(serializers.ModelSerializer):
         post = self.context.get("post")
         if post and value.post_id != post.pk:
             raise serializers.ValidationError(
-                "Parent comment does not belong to this post."
+                _("Parent comment does not belong to this post.")
             )
         return value
 

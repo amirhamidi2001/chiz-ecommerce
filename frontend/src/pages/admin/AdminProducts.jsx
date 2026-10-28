@@ -3,8 +3,9 @@ import { adminAPI } from "../../services/api";
 import DataTable from "../../components/admin/DataTable";
 import ConfirmModal from "../../components/admin/ConfirmModal";
 import Toast, { useToast } from "../../components/admin/Toast";
+import { formatToman, parseTomanInput, toTomanNumber, tomanToRial } from '../../utils/money';
 
-const fmt = (n) => `$${parseFloat(n || 0).toFixed(2)}`;
+const fmt = (n) => formatToman(n);
 
 // ── Standalone Field Component (Moved Outside to Prevent Focus Loss) ──────────
 const Field = ({ name, label, form, handleChange, errors, type = "text", textarea }) => (
@@ -27,8 +28,9 @@ const ProductModal = ({ product, categories, brands, onClose, onSaved }) => {
     name: product?.name || "",
     category: product?.category || "",
     brand: product?.brand || "",
-    price: product?.price || "",
-    original_price: product?.original_price || "",
+    // The form edits TOMAN; the API stores/accepts Rial (converted only here).
+    price: product?.price != null ? String(toTomanNumber(product.price)) : "",
+    original_price: product?.original_price != null ? String(toTomanNumber(product.original_price)) : "",
     stock: product?.stock || 0,
     short_description: product?.short_description || "",
     description: product?.description || "",
@@ -57,7 +59,7 @@ const ProductModal = ({ product, categories, brands, onClose, onSaved }) => {
   const validate = () => {
     const e = {};
     if (!form.name.trim()) e.name = "Required";
-    if (!form.price) e.price = "Required";
+    if (parseTomanInput(form.price) === null) e.price = "Enter a whole number of Toman";
     if (!form.category) e.category = "Required";
     return e;
   };
@@ -69,7 +71,15 @@ const ProductModal = ({ product, categories, brands, onClose, onSaved }) => {
     setSaving(true);
     try {
       const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => fd.append(k, v));
+      Object.entries(form).forEach(([k, v]) => {
+        if (k === "price" || k === "original_price") {
+          const toman = parseTomanInput(v);
+          if (toman !== null) fd.append(k, tomanToRial(toman));
+          else if (k === "original_price") fd.append(k, "");
+          return;
+        }
+        fd.append(k, v);
+      });
       if (thumbFile) fd.append("thumbnail", thumbFile);
       if (product) {
         await adminAPI.updateProduct(product.id, fd);
@@ -117,8 +127,8 @@ const ProductModal = ({ product, categories, brands, onClose, onSaved }) => {
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
-            <Field name="price" label="Price ($)" type="number" form={form} handleChange={handleChange} errors={errors} />
-            <Field name="original_price" label="Original Price ($)" type="number" form={form} handleChange={handleChange} errors={errors} />
+            <Field name="price" label="Price (Toman)" type="number" form={form} handleChange={handleChange} errors={errors} />
+            <Field name="original_price" label="Original Price (Toman)" type="number" form={form} handleChange={handleChange} errors={errors} />
             <Field name="stock" label="Stock Quantity" type="number" form={form} handleChange={handleChange} errors={errors} />
             <Field name="short_description" label="Short Description" textarea form={form} handleChange={handleChange} errors={errors} />
             <Field name="description" label="Full Description" textarea form={form} handleChange={handleChange} errors={errors} />

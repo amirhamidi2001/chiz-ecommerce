@@ -64,7 +64,7 @@ class ShippingQuoteView(APIView):
                         "carrier_id": carrier.id,
                         "carrier_name": carrier.display_name,
                         "rate_id": rate.id,
-                        "price": str(rate.price),
+                        "price": rate.price,
                         "estimated_days_min": rate.estimated_days_min,
                         "estimated_days_max": rate.estimated_days_max,
                     }

@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import Count, F, Prefetch, prefetch_related_objects
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from django_filters import utils as filter_utils
 from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order, OrderItem
@@ -604,7 +605,11 @@ class ProductReviewCreateView(generics.CreateAPIView):
         if images and not is_verified:
             # Rejected before ANY write: no Review row, no files on disk.
             raise serializers.ValidationError(
-                {"images": ["Only verified purchasers can attach photos to a review."]}
+                {
+                    "images": [
+                        _("Only verified purchasers can attach photos to a review.")
+                    ]
+                }
             )
 
         auto_approve = is_verified and settings.REVIEW_AUTO_APPROVE_VERIFIED_PURCHASES
@@ -692,9 +697,9 @@ class ReviewReportCreateView(APIView):
         return Response(
             {
                 "detail": (
-                    "Report submitted."
+                    _("Report submitted.")
                     if created
-                    else "You have already reported this review."
+                    else _("You have already reported this review.")
                 )
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -722,7 +727,7 @@ class StockAlertSubscriptionView(APIView):
         variant = get_object_or_404(ProductVariant, pk=variant_id)
         if variant.stock > 0:
             return Response(
-                {"detail": "This item is currently in stock."},
+                {"detail": _("This item is currently in stock.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         subscription, created = StockAlertSubscription.objects.get_or_create(

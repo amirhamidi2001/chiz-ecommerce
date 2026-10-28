@@ -1,3 +1,4 @@
+from core.money import format_rial
 from django.contrib import admin
 
 from .models import Cart, CartItem
@@ -10,10 +11,10 @@ class CartItemInline(admin.TabularInline):
     fields = ("variant", "quantity", "unit_price", "subtotal", "added_at")
 
     def unit_price(self, obj):
-        return f"${obj.unit_price:.2f}"
+        return format_rial(obj.unit_price)
 
     def subtotal(self, obj):
-        return f"${obj.subtotal:.2f}"
+        return format_rial(obj.subtotal)
 
     unit_price.short_description = "Unit Price"
     subtotal.short_description = "Subtotal"
@@ -32,7 +33,7 @@ class CartAdmin(admin.ModelAdmin):
         return obj.user.email
 
     def cart_subtotal(self, obj):
-        return f"${obj.subtotal:.2f}"
+        return format_rial(obj.subtotal)
 
     def total_items(self, obj):
         return obj.total_items
@@ -71,10 +72,10 @@ class CartItemAdmin(admin.ModelAdmin):
         return f"{obj.variant.product.name} — {obj.variant.color.name if obj.variant.color_id else obj.variant.sku}"
 
     def unit_price_display(self, obj):
-        return f"${obj.unit_price:.2f}"
+        return format_rial(obj.unit_price)
 
     def item_subtotal(self, obj):
-        return f"${obj.subtotal:.2f}"
+        return format_rial(obj.subtotal)
 
     cart_user.short_description = "User"
     variant_label.short_description = "Variant"

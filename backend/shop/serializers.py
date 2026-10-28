@@ -1,3 +1,5 @@
+from core.serializers import RialSerializerField
+from django.utils.translation import gettext as _
 from rest_framework import serializers
 
 from .models import (
@@ -65,22 +67,13 @@ class ProductColorSerializer(serializers.ModelSerializer):
         fields = ("id", "color")
 
 
-def _money(value):
-    """Format like every other DecimalField in the API (honours DRF settings)."""
-    return serializers.DecimalField(max_digits=10, decimal_places=2).to_representation(
-        value
-    )
-
-
 class ProductVariantSerializer(serializers.ModelSerializer):
     color = ColorSerializer(read_only=True)
     # `price` / `original_price` stay the plain stored values; `effective_price`
     # is `price` with any current flash-sale discount applied (equal to
     # `price` when there is none). Flash-sale resolution lives on the model
     # (ProductVariant.active_flash_sale).
-    effective_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2, read_only=True
-    )
+    effective_price = RialSerializerField(read_only=True)
     is_on_flash_sale = serializers.SerializerMethodField()
     # Lets the frontend render a countdown without a second request.
     flash_sale_ends_at = serializers.SerializerMethodField()
@@ -202,7 +195,7 @@ class ReviewCreateSerializer(serializers.ModelSerializer):
             and Review.objects.filter(product=product, user=user).exists()
         ):
             raise serializers.ValidationError(
-                {"detail": "You have already reviewed this product."}
+                {"detail": _("You have already reviewed this product.")}
             )
 
         return attrs
@@ -225,14 +218,14 @@ class ReviewCreateSerializer(serializers.ModelSerializer):
     def validate_rating(self, value: int) -> int:
         if not (1 <= value <= 5):
             raise serializers.ValidationError(
-                "Rating must be an integer between 1 and 5."
+                _("Rating must be an integer between 1 and 5.")
             )
         return value
 
     def validate_comment(self, value: str) -> str:
         value = value.strip()
         if not value:
-            raise serializers.ValidationError("Review comment cannot be blank.")
+            raise serializers.ValidationError(_("Review comment cannot be blank."))
         return value
 
     def validate_headline(self, value: str) -> str:
@@ -343,11 +336,11 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     def get_flash_sale_price(self, obj):
         pricing = self._flash_pricing(obj)
-        return _money(pricing.price) if pricing else None
+        return pricing.price if pricing else None
 
     def get_flash_sale_original_price(self, obj):
         pricing = self._flash_pricing(obj)
-        return _money(pricing.original_price) if pricing else None
+        return pricing.original_price if pricing else None
 
     def get_flash_sale_price_varies(self, obj):
         pricing = self._flash_pricing(obj)

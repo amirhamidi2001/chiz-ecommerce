@@ -56,10 +56,11 @@ vi.mock("../../services/api", () => ({
 
 // pull the mock after module hoisting
 import { adminAPI } from "../../services/api";
+import { formatToman } from '../../utils/money';
 
 // ─── Fixture factories ────────────────────────────────────────────────────────
 const makeOverview = (overrides = {}) => ({
-  revenue: { current: 120000, change: 8.5 },
+  revenue: { current: 1_200_000_000, change: 8.5 },
   orders: { current: 340, change: -2.1 },
   users: { current: 55, change: 12 },
   order_status_distribution: [
@@ -74,13 +75,13 @@ const makeOverview = (overrides = {}) => ({
 
 const makeRevenueData = (overrides = {}) => ({
   monthly_revenue: [
-    { month: "Jan", revenue: 8000, orders: 30 },
-    { month: "Feb", revenue: 9500, orders: 35 },
-    { month: "Mar", revenue: 11000, orders: 42 },
+    { month: "Jan", revenue: 80_000_000, orders: 30 },
+    { month: "Feb", revenue: 95_000_000, orders: 35 },
+    { month: "Mar", revenue: 110_000_000, orders: 42 },
   ],
   top_products: [
-    { product_name: "Widget A", revenue: 5000, total_sold: 120 },
-    { product_name: "Widget B", revenue: 3000, total_sold: 80 },
+    { product_name: "Widget A", revenue: 50_000_000, total_sold: 120 },
+    { product_name: "Widget B", revenue: 30_000_000, total_sold: 80 },
   ],
   ...overrides,
 });
@@ -217,7 +218,7 @@ describe("AdminAnalytics", () => {
       await waitFor(() => {
         const card = screen.getByTestId("stat-card-revenue");
         expect(within(card).getByTestId("stat-value")).toHaveTextContent(
-          "$120,000"
+          formatToman(1_200_000_000)
         );
       });
     });
@@ -255,17 +256,15 @@ describe("AdminAnalytics", () => {
     });
 
     it("derives Avg Order Value as revenue / orders", async () => {
-      // 120000 / 340 ≈ $353
+      // 1,200,000,000 Rial / 340 orders = 3,529,411.76 Rial, rounded ONCE to the nearest
+      // whole Toman (multiple of 10, ties up) = 3,529,410 Rial = 352,941 Toman
       mockSuccess();
       render(<AdminAnalytics />);
 
       await waitFor(() => {
         const card = screen.getByTestId("stat-card-avg-order-value");
         const value = within(card).getByTestId("stat-value").textContent;
-        // formatted as USD integer
-        expect(value).toMatch(/\$\d{3}/);
-        // exact: 120000/340 = 352.94... => $353
-        expect(value).toBe("$353");
+        expect(value).toBe(formatToman(3_529_410));
       });
     });
 
@@ -568,7 +567,7 @@ describe("AdminAnalytics", () => {
 
       await waitFor(() => {
         // Widget A revenue = 5000 → $5,000
-        expect(screen.getAllByText("$5,000").length).toBeGreaterThan(0);
+        expect(screen.getAllByText(formatToman(50_000_000)).length).toBeGreaterThan(0);
       });
     });
 
@@ -813,26 +812,26 @@ describe("AdminAnalytics", () => {
 
   // ── 12. fmt currency helper (via rendered output) ─────────────────────────
   describe("Currency formatting", () => {
-    it("formats zero revenue as $0", async () => {
+    it("formats zero revenue as zero Toman", async () => {
       mockSuccess(makeOverview({ revenue: { current: 0, change: 0 } }));
       render(<AdminAnalytics />);
 
       await waitFor(() => {
         const card = screen.getByTestId("stat-card-revenue");
-        expect(within(card).getByTestId("stat-value")).toHaveTextContent("$0");
+        expect(within(card).getByTestId("stat-value")).toHaveTextContent(formatToman(0));
       });
     });
 
     it("formats large revenue with thousand separator", async () => {
       mockSuccess(
-        makeOverview({ revenue: { current: 1500000, change: 5 } })
+        makeOverview({ revenue: { current: 15_000_000_000, change: 5 } })
       );
       render(<AdminAnalytics />);
 
       await waitFor(() => {
         const card = screen.getByTestId("stat-card-revenue");
         expect(within(card).getByTestId("stat-value")).toHaveTextContent(
-          "$1,500,000"
+          formatToman(15_000_000_000)
         );
       });
     });

@@ -31,11 +31,11 @@ def make_order(user, **kwargs):
         shipping_zip="97201",
         shipping_country="US",
         payment_method=Order.PaymentMethod.CREDIT_CARD,
-        subtotal=Decimal("50.00"),
-        shipping_cost=Decimal("9.99"),
-        tax=Decimal("5.00"),
-        discount=Decimal("0.00"),
-        total=Decimal("64.99"),
+        subtotal=500_000,
+        shipping_cost=99_900,
+        tax=50_000,
+        discount=0,
+        total=649_900,
         status=Order.Status.PENDING,
     )
     defaults.update(kwargs)
@@ -322,7 +322,7 @@ class PaymentCallbackViewTests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.order = make_order(self.user, total=Decimal("100.00"))
+        self.order = make_order(self.user, total=1_000_000)
         self.variant = make_variant(stock=5)
         self.order_item = make_order_item(self.order, self.variant, quantity=2)
         self.authority = "A00000000000000000000000000000000wOGYpd"

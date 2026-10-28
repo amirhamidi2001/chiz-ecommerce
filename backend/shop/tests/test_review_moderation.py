@@ -36,18 +36,18 @@ def _order_for(user, product, order_status=Order.Status.DELIVERED, n=[0]):
         shipping_zip="90001",
         shipping_country="US",
         payment_method="card",
-        subtotal=Decimal("10.00"),
-        shipping_cost=Decimal("0.00"),
-        tax=Decimal("0.00"),
-        discount=Decimal("0.00"),
-        total=Decimal("10.00"),
+        subtotal=100_000,
+        shipping_cost=0,
+        tax=0,
+        discount=0,
+        total=100_000,
     )
     OrderItem.objects.create(
         order=order,
         product=product,
         product_name=product.name,
         product_slug=product.slug,
-        unit_price=Decimal("10.00"),
+        unit_price=100_000,
         quantity=1,
     )
     return order

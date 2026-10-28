@@ -1,3 +1,4 @@
+from django.utils.translation import gettext as _
 from rest_framework import serializers
 
 from .models import ContactMessage
@@ -19,19 +20,19 @@ class ContactMessageSerializer(serializers.ModelSerializer):
     def validate_name(self, value: str) -> str:
         value = value.strip()
         if not value:
-            raise serializers.ValidationError("Name is required.")
+            raise serializers.ValidationError(_("Name is required."))
         return value
 
     def validate_subject(self, value: str) -> str:
         value = value.strip()
         if not value:
-            raise serializers.ValidationError("Subject is required.")
+            raise serializers.ValidationError(_("Subject is required."))
         return value
 
     def validate_message(self, value: str) -> str:
         value = value.strip()
         if not value:
-            raise serializers.ValidationError("Message is required.")
+            raise serializers.ValidationError(_("Message is required."))
         return value
 
     def validate_email(self, value: str) -> str:

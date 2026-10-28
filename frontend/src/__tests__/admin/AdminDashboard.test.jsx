@@ -87,10 +87,11 @@ vi.mock('../../services/api', () => ({
   adminAPI: { getOverview: vi.fn() },
 }));
 import { adminAPI } from '../../services/api';
+import { formatToman } from '../../utils/money';
 
 // ─── Fixture factory ──────────────────────────────────────────────────────────
 const makeOverview = (overrides = {}) => ({
-  revenue: { current: 125000, change: 8.2 },
+  revenue: { current: 1_250_000_000, change: 8.2 },
   orders: { current: 340, change: -1.5 },
   users: { current: 58, change: 12.3 },
   products: { total: 412 },
@@ -103,23 +104,23 @@ const makeOverview = (overrides = {}) => ({
     { status: 'cancelled', count: 8 },
   ],
   revenue_chart: [
-    { date: '06-01', revenue: 4000 },
-    { date: '06-02', revenue: 7000 },
-    { date: '06-03', revenue: 5000 },
+    { date: '06-01', revenue: 40_000_000 },
+    { date: '06-02', revenue: 70_000_000 },
+    { date: '06-03', revenue: 50_000_000 },
   ],
   recent_orders: [
     {
       id: 1, order_number: 'ORD-1001', full_name: 'Alice Smith',
-      email: 'alice@test.com', status: 'pending', total: 89.5,
+      email: 'alice@test.com', status: 'pending', total: 895_000,
     },
     {
       id: 2, order_number: 'ORD-1002', full_name: null,
-      email: 'bob@test.com', status: 'delivered', total: 240,
+      email: 'bob@test.com', status: 'delivered', total: 2_400_000,
     },
   ],
   top_products: [
-    { product_id: 1, product_name: 'Widget A', total_sold: 120, revenue: 5400 },
-    { product_id: 2, product_name: 'Widget B', total_sold: 80, revenue: 3200 },
+    { product_id: 1, product_name: 'Widget A', total_sold: 120, revenue: 54_000_000 },
+    { product_id: 2, product_name: 'Widget B', total_sold: 80, revenue: 32_000_000 },
   ],
   ...overrides,
 });
@@ -268,7 +269,7 @@ describe('AdminDashboard', () => {
       render(<AdminDashboard />);
       await waitFor(() => {
         const card = screen.getByTestId('stat-revenue');
-        expect(within(card).getByTestId('stat-value')).toHaveTextContent('$125,000');
+        expect(within(card).getByTestId('stat-value')).toHaveTextContent(formatToman(1_250_000_000));
         expect(card).not.toHaveAttribute('role', 'button');
       });
     });
@@ -447,9 +448,9 @@ describe('AdminDashboard', () => {
     it('renders one bar element per data point', async () => {
       okOverview(makeOverview({
         revenue_chart: [
-          { date: 'd1', revenue: 100 },
-          { date: 'd2', revenue: 200 },
-          { date: 'd3', revenue: 300 },
+          { date: 'd1', revenue: 1_000_000 },
+          { date: 'd2', revenue: 2_000_000 },
+          { date: 'd3', revenue: 3_000_000 },
         ],
       }));
       const { container } = render(<AdminDashboard />);
@@ -475,8 +476,8 @@ describe('AdminDashboard', () => {
     it('sets the tallest bar height to 100% for the max value', async () => {
       okOverview(makeOverview({
         revenue_chart: [
-          { date: 'low', revenue: 10 },
-          { date: 'high', revenue: 100 },
+          { date: 'low', revenue: 100_000 },
+          { date: 'high', revenue: 1_000_000 },
         ],
       }));
       const { container } = render(<AdminDashboard />);
@@ -489,11 +490,11 @@ describe('AdminDashboard', () => {
 
     it('shows formatted currency value in the tooltip', async () => {
       okOverview(makeOverview({
-        revenue_chart: [{ date: 'Jun 1', revenue: 4000 }],
+        revenue_chart: [{ date: 'Jun 1', revenue: 40_000_000 }],
       }));
       render(<AdminDashboard />);
       await waitFor(() => {
-        expect(screen.getByText('$4,000')).toBeInTheDocument();
+        expect(screen.getByText(formatToman(40_000_000))).toBeInTheDocument();
         expect(screen.getByText('Jun 1')).toBeInTheDocument();
       });
     });
@@ -589,8 +590,8 @@ describe('AdminDashboard', () => {
     it('renders formatted order totals', async () => {
       render(<AdminDashboard />);
       await waitFor(() => {
-        expect(screen.getByText('$90')).toBeInTheDocument();   // 89.5 rounds to $90 (maximumFractionDigits:0)
-        expect(screen.getByText('$240')).toBeInTheDocument();
+        expect(screen.getByText(formatToman(895_000))).toBeInTheDocument();   // 89.5 -> 895,000 Rial, shown exactly (no rounding)
+        expect(screen.getByText(formatToman(2_400_000))).toBeInTheDocument();
       });
     });
 
@@ -645,8 +646,8 @@ describe('AdminDashboard', () => {
     it('renders formatted revenue per product', async () => {
       render(<AdminDashboard />);
       await waitFor(() => {
-        expect(screen.getByText('$5,400')).toBeInTheDocument();
-        expect(screen.getByText('$3,200')).toBeInTheDocument();
+        expect(screen.getByText(formatToman(54_000_000))).toBeInTheDocument();
+        expect(screen.getByText(formatToman(32_000_000))).toBeInTheDocument();
       });
     });
 
@@ -693,21 +694,21 @@ describe('AdminDashboard', () => {
 
   // ── 10. Currency formatting ──────────────────────────────────────────────
   describe('Currency formatting (fmt helper)', () => {
-    it('formats zero revenue as $0', async () => {
+    it('formats zero revenue as zero Toman', async () => {
       okOverview(makeOverview({ revenue: { current: 0, change: 0 } }));
       render(<AdminDashboard />);
       await waitFor(() => {
         const card = screen.getByTestId('stat-revenue');
-        expect(within(card).getByTestId('stat-value')).toHaveTextContent('$0');
+        expect(within(card).getByTestId('stat-value')).toHaveTextContent(formatToman(0));
       });
     });
 
     it('formats large revenue with thousand separators and no decimals', async () => {
-      okOverview(makeOverview({ revenue: { current: 2350000, change: 1 } }));
+      okOverview(makeOverview({ revenue: { current: 23_500_000_000, change: 1 } }));
       render(<AdminDashboard />);
       await waitFor(() => {
         const card = screen.getByTestId('stat-revenue');
-        expect(within(card).getByTestId('stat-value')).toHaveTextContent('$2,350,000');
+        expect(within(card).getByTestId('stat-value')).toHaveTextContent(formatToman(23_500_000_000));
       });
     });
   });

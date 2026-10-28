@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 
 class ContactMessage(models.Model):
@@ -10,8 +11,8 @@ class ContactMessage(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "Contact Message"
-        verbose_name_plural = "Contact Messages"
+        verbose_name = _("Contact Message")
+        verbose_name_plural = _("Contact Messages")
 
     def __str__(self) -> str:
         return f"[{self.created_at:%Y-%m-%d}] {self.subject} — {self.email}"

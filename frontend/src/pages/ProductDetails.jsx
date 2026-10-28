@@ -6,6 +6,8 @@ import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { STORE_NAME } from '../constants/store';
 import { addRecentlyViewed } from '../utils/recentlyViewed';
+import { formatToman } from '../utils/money';
+import { formatRating, formatReviewCount } from '../utils/numerals';
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 const Spinner = () => (
@@ -86,10 +88,10 @@ const RelatedCard = ({ product }) => {
           </Link>
         </h5>
         <div className="flex items-center justify-between mt-2">
-          <span className="font-bold text-teal-700">${Number(product.price).toFixed(2)}</span>
+          <span className="font-bold text-teal-700">{formatToman(product.price)}</span>
           <div className="flex items-center gap-1 text-xs text-gray-500">
             <i className="bi bi-star-fill text-yellow-400" />
-            {product.rating}
+            {formatRating(product.rating)}
           </div>
         </div>
       </div>
@@ -549,7 +551,7 @@ const ProductDetails = () => {
     : [product.thumbnail_url || '/assets/img/product/product-3.webp'];
 
   const savings = product.original_price
-    ? (Number(product.original_price) - Number(product.price)).toFixed(2)
+    ? Number(product.original_price) - Number(product.price)
     : null;
   const discountPercent = product.discount_percent || 0;
 
@@ -712,7 +714,7 @@ const ProductDetails = () => {
                 </span>
                 <div className="flex items-center gap-2">
                   <Stars rating={Number(product.rating)} />
-                  <span className="text-gray-500 text-sm">({product.reviews_count} reviews)</span>
+                  <span className="text-gray-500 text-sm">({formatReviewCount(product.reviews_count)} reviews)</span>
                 </div>
               </div>
 
@@ -733,17 +735,17 @@ const ProductDetails = () => {
               <div className="mb-4">
                 <div className="flex items-baseline gap-3">
                   <span className="text-3xl font-bold text-teal-700">
-                    ${Number(product.price).toFixed(2)}
+                    {formatToman(product.price)}
                   </span>
                   {product.original_price && (
                     <span className="text-gray-400 line-through">
-                      ${Number(product.original_price).toFixed(2)}
+                      {formatToman(product.original_price)}
                     </span>
                   )}
                 </div>
                 {savings && (
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="text-teal-600 text-sm">Save ${savings}</span>
+                    <span className="text-teal-600 text-sm">Save {formatToman(savings)}</span>
                     {discountPercent > 0 && (
                       <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full">
                         ({discountPercent}% off)
@@ -951,7 +953,7 @@ const ProductDetails = () => {
                   { id: 'overview', label: 'Overview' },
                   { id: 'specifications', label: 'Specifications' },
                   { id: 'technical', label: 'Technical Details' },
-                  { id: 'reviews', label: `Reviews (${product.reviews_count || 0})` },
+                  { id: 'reviews', label: `Reviews (${formatReviewCount(product.reviews_count || 0)})` },
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -1063,7 +1065,7 @@ const ProductDetails = () => {
                     </div>
                     <div className="flex justify-between p-3">
                       <span className="text-gray-600">Rating</span>
-                      <span className="font-medium">{product.rating} / 5</span>
+                      <span className="font-medium">{formatRating(product.rating)} / {formatRating(5)}</span>
                     </div>
                   </div>
                 </div>
@@ -1091,14 +1093,14 @@ const ProductDetails = () => {
                     <div className="flex justify-between p-3">
                       <span className="text-gray-600">Current Price</span>
                       <span className="font-bold text-teal-700">
-                        ${Number(product.price).toFixed(2)}
+                        {formatToman(product.price)}
                       </span>
                     </div>
                     {product.original_price && (
                       <div className="flex justify-between p-3">
                         <span className="text-gray-600">Original Price</span>
                         <span className="font-medium line-through text-gray-400">
-                          ${Number(product.original_price).toFixed(2)}
+                          {formatToman(product.original_price)}
                         </span>
                       </div>
                     )}
@@ -1121,11 +1123,11 @@ const ProductDetails = () => {
                   {/* Aggregate score */}
                   <div className="md:w-1/4 flex flex-col items-center justify-center bg-gray-50 rounded-2xl p-6 text-center">
                     <span className="text-6xl font-bold text-gray-800 leading-none">
-                      {Number(product.rating).toFixed(1)}
+                      {formatRating(Number(product.rating).toFixed(1))}
                     </span>
                     <Stars rating={Number(product.rating)} size="text-xl" />
                     <p className="text-sm text-gray-500 mt-2">
-                      {reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}
+                      {formatReviewCount(reviews.length)} {reviews.length === 1 ? 'review' : 'reviews'}
                     </p>
                   </div>
 

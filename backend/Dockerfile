@@ -21,12 +21,16 @@ WORKDIR /app
 # only Pango, HarfBuzz-subset and a font are required.
 #   fonts-dejavu-core: python:3.11-slim ships NO fonts, so without one the PDF
 #   text would render blank. DejaVu Sans also covers Arabic-script glyphs.
+#   gettext: GNU gettext binaries (msgfmt/xgettext/msgmerge). A SYSTEM tool,
+#   not a pip package — Django's makemessages/compilemessages shell out to it
+#   and fail outright without it (Epic 14 i18n).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
         libharfbuzz-subset0 \
         fonts-dejavu-core \
+        gettext \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -37,6 +41,15 @@ RUN pip config --user set global.index https://mirror-pypi.runflare.com/simple \
     && pip install -r requirements.txt
 
 COPY . .
+
+# Compile locale/*/LC_MESSAGES/django.po -> django.mo. The .mo is gitignored
+# and built here, so every image ships a catalog that matches its .po.
+# Deliberately `django-admin` with NO settings module: it just compiles the
+# ./locale tree, so it needs no database or .env values and cannot break the
+# build (production settings would demand ALLOWED_HOSTS etc. at build time).
+# The development stage ALSO compiles at container start (docker-compose.dev.yml)
+# because its source is bind-mounted over /app, which hides this build output.
+RUN django-admin compilemessages
 
 # ─── Stage 2: development — Django dev server (hot reload via volume mount) ───
 FROM base AS development

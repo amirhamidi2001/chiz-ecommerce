@@ -18,6 +18,7 @@ from accounts.sms.base import get_sms_provider
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 logger = logging.getLogger("accounts.otp")
 
@@ -161,8 +162,7 @@ def generate_otp(phone_number: str, purpose: str) -> str:
         expires_at=now + timezone.timedelta(seconds=settings.OTP_CODE_TTL_SECONDS),
     )
 
-    # TODO: Epic 14 — localize this message to Persian.
-    message = f"Your verification code is: {raw_code}"
+    message = _("Your verification code is: %(code)s") % {"code": raw_code}
 
     try:
         sent = get_sms_provider().send(phone_number, message)

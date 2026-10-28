@@ -48,10 +48,10 @@ def make_order(user=None, status=Order.Status.PENDING, **overrides):
         shipping_state="CA",
         shipping_zip="90001",
         shipping_country="US",
-        subtotal=Decimal("10.00"),
-        shipping_cost=Decimal("0.00"),
-        tax=Decimal("0.00"),
-        total=Decimal("10.00"),
+        subtotal=100_000,
+        shipping_cost=0,
+        tax=0,
+        total=100_000,
     )
     data.update(overrides)
     return Order.objects.create(**data)

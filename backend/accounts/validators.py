@@ -13,13 +13,14 @@ a 10-digit subscriber number starting with 9 (e.g. "9123456789").
 import re
 
 from django.core.validators import RegexValidator
+from django.utils.translation import gettext_lazy as _
 
 # Accepts: 09123456789, +989123456789, 00989123456789 — rejects anything
 # that doesn't start with 9 (after any recognized prefix) followed by
 # exactly 9 more digits (10 digits total after the prefix).
 iranian_phone_regex = RegexValidator(
     regex=r"^(\+98|0098|0)?9\d{9}$",
-    message="Enter a valid Iranian mobile number (e.g. 09123456789).",
+    message=_("Enter a valid Iranian mobile number (e.g. 09123456789)."),
 )
 
 _PREFIX_RE = re.compile(r"^(\+98|0098|0)?(9\d{9})$")

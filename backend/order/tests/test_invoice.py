@@ -29,8 +29,8 @@ def pdf_text(pdf_bytes):
     return squash("\n".join(page.extract_text() for page in reader.pages))
 
 
-def make_invoice_order(user, variant, *, quantity=2, unit_price="25.00", **extra):
-    unit = Decimal(unit_price)
+def make_invoice_order(user, variant, *, quantity=2, unit_price=250_000, **extra):
+    unit = unit_price
     order = Order.objects.create(
         user=user,
         status=Order.Status.PROCESSING,
@@ -47,10 +47,10 @@ def make_invoice_order(user, variant, *, quantity=2, unit_price="25.00", **extra
         payment_method="credit_card",
         card_last_four="4242",
         subtotal=unit * quantity,
-        shipping_cost=Decimal("9.99"),
-        tax=Decimal("4.50"),
-        discount=Decimal("3.00"),
-        total=unit * quantity + Decimal("9.99") + Decimal("4.50") - Decimal("3.00"),
+        shipping_cost=99_900,
+        tax=45_000,
+        discount=30_000,
+        total=unit * quantity + 99_900 + 45_000 - 30_000,
         **extra,
     )
     OrderItem.objects.create(
@@ -76,7 +76,7 @@ class OrderInvoiceEndpointTests(APITestCase):
         self.admin.save(update_fields=["type"])
         self.staff = make_user(email="staff@example.com", is_staff=True)
 
-        self.variant = make_variant(name="Silk Scarf", slug="silk-scarf", price="25.00")
+        self.variant = make_variant(name="Silk Scarf", slug="silk-scarf", price=250_000)
         self.order = make_invoice_order(self.owner, self.variant)
         self.url = f"/api/orders/{self.order.pk}/invoice/"
 
@@ -139,7 +139,7 @@ class OrderInvoiceEndpointTests(APITestCase):
 class InvoiceContentTests(APITestCase):
     def setUp(self):
         self.user = make_user(email="buyer@example.com")
-        self.variant = make_variant(name="Silk Scarf", slug="silk-scarf", price="25.00")
+        self.variant = make_variant(name="Silk Scarf", slug="silk-scarf", price=250_000)
         self.order = make_invoice_order(self.user, self.variant)
 
     def test_invoice_contains_order_customer_items_and_totals(self):
@@ -153,12 +153,15 @@ class InvoiceContentTests(APITestCase):
             "Silk Scarf",
             "Color: Rose",
             self.variant.sku,
-            "25.00",  # unit price
-            "50.00",  # line total (2 x 25.00)
-            "9.99",  # shipping
-            "4.50",  # tax
-            "3.00",  # discount
-            "61.49",  # grand total
+            # The invoice prints Rial with thousands separators (ADR 0001 §6),
+            # and the grand total again in Toman.
+            "250,000",  # unit price
+            "500,000",  # line total (2 x 250,000)
+            "99,900",  # shipping
+            "45,000",  # tax
+            "30,000",  # discount
+            "614,900",  # grand total (Rial)
+            "61,490 Toman",  # grand total (Toman = Rial / 10)
             "**** 4242",
         ):
             self.assertIn(squash(expected), text, f"missing from invoice: {expected!r}")
@@ -167,26 +170,26 @@ class InvoiceContentTests(APITestCase):
         """Reprice/rename the product AFTER the order: invoice must not change."""
         product = self.variant.product
         product.name = "Renamed Scarf Deluxe"
-        product.price = Decimal("99.00")
+        product.price = 990_000
         product.save()
-        self.variant.price = Decimal("99.00")
+        self.variant.price = 990_000
         self.variant.save(update_fields=["price"])
 
         text = pdf_text(generate_invoice_pdf(Order.objects.get(pk=self.order.pk)))
 
         self.assertIn(squash("Silk Scarf"), text)
-        self.assertIn(squash("25.00"), text)
+        self.assertIn(squash("250,000"), text)
         self.assertNotIn(squash("Renamed Scarf Deluxe"), text)
-        self.assertNotIn(squash("99.00"), text)
+        self.assertNotIn(squash("990,000"), text)
 
     def test_invoice_survives_deleted_product_and_variant(self):
         self.variant.product.delete()  # FKs are SET_NULL; snapshot remains
         text = pdf_text(generate_invoice_pdf(Order.objects.get(pk=self.order.pk)))
         self.assertIn(squash("Silk Scarf"), text)
-        self.assertIn(squash("25.00"), text)
+        self.assertIn(squash("250,000"), text)
 
     def test_discount_row_omitted_when_no_discount(self):
-        Order.objects.filter(pk=self.order.pk).update(discount=Decimal("0"))
+        Order.objects.filter(pk=self.order.pk).update(discount=0)
         text = pdf_text(generate_invoice_pdf(Order.objects.get(pk=self.order.pk)))
         self.assertNotIn(squash("Discount"), text)
 
@@ -210,7 +213,7 @@ class InvoiceContentTests(APITestCase):
                 order=self.order,
                 product_name=f"Bulk item {i}",
                 product_slug=f"bulk-{i}",
-                unit_price=Decimal("1.00"),
+                unit_price=10_000,
                 quantity=1,
             )
         pdf = generate_invoice_pdf(Order.objects.get(pk=self.order.pk))

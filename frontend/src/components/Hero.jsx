@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { getProducts } from '../services/api';
+import { formatToman } from '../utils/money';
+import { formatReviewCount } from '../utils/numerals';
 
 // ─── Skeleton for the hero product card ──────────────────────────────────────
 const HeroCardSkeleton = () => (
@@ -53,7 +55,7 @@ const Hero = () => {
 
   const img = featuredProduct?.thumbnail_url || '/logo.webp';
   const savings = featuredProduct?.original_price
-    ? (Number(featuredProduct.original_price) - Number(featuredProduct.price)).toFixed(2)
+    ? Number(featuredProduct.original_price) - Number(featuredProduct.price)
     : null;
 
   return (
@@ -109,7 +111,7 @@ const Hero = () => {
             <div className="mt-8 inline-flex items-center gap-3 bg-white border border-gray-200 rounded-full px-5 py-2 shadow-sm">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-xs text-gray-500">
-                <strong className="text-gray-800">{featuredProduct.reviews_count}+</strong> happy customers already
+                <strong className="text-gray-800">{formatReviewCount(featuredProduct.reviews_count)}+</strong> happy customers already
               </span>
             </div>
           )}
@@ -147,17 +149,17 @@ const Hero = () => {
                 <Stars rating={featuredProduct.rating} />
                 <div className="flex justify-center items-baseline gap-2 mt-2">
                   <span className="text-2xl font-bold text-teal-700">
-                    ${Number(featuredProduct.price).toFixed(2)}
+                    {formatToman(featuredProduct.price)}
                   </span>
                   {featuredProduct.original_price && (
                     <span className="text-gray-400 line-through text-sm">
-                      ${Number(featuredProduct.original_price).toFixed(2)}
+                      {formatToman(featuredProduct.original_price)}
                     </span>
                   )}
                 </div>
                 {savings && (
                   <p className="text-xs text-teal-600 mt-0.5 font-medium">
-                    You save ${savings}!
+                    You save {formatToman(savings)}!
                   </p>
                 )}
 

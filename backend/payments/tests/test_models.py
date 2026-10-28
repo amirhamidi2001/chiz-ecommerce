@@ -18,11 +18,11 @@ def make_order(**kwargs):
         shipping_zip="97201",
         shipping_country="US",
         payment_method=Order.PaymentMethod.CREDIT_CARD,
-        subtotal=Decimal("50.00"),
-        shipping_cost=Decimal("9.99"),
-        tax=Decimal("5.00"),
-        discount=Decimal("0.00"),
-        total=Decimal("64.99"),
+        subtotal=500_000,
+        shipping_cost=99_900,
+        tax=50_000,
+        discount=0,
+        total=649_900,
     )
     defaults.update(kwargs)
     return Order.objects.create(**defaults)
@@ -36,7 +36,7 @@ class PaymentTransactionModelTests(TestCase):
         transaction = PaymentTransaction.objects.create(
             order=self.order,
             gateway=PaymentTransaction.Gateway.ZARINPAL,
-            amount=Decimal("64.99"),
+            amount=649_900,
         )
         self.assertEqual(transaction.order, self.order)
         self.assertIn(transaction, self.order.payment_transactions.all())
@@ -45,7 +45,7 @@ class PaymentTransactionModelTests(TestCase):
         transaction = PaymentTransaction.objects.create(
             order=self.order,
             gateway=PaymentTransaction.Gateway.ZIBAL,
-            amount=Decimal("10.00"),
+            amount=100_000,
         )
         self.assertEqual(transaction.status, PaymentTransaction.Status.PENDING)
 
@@ -53,7 +53,7 @@ class PaymentTransactionModelTests(TestCase):
         transaction = PaymentTransaction.objects.create(
             order=self.order,
             gateway=PaymentTransaction.Gateway.IDPAY,
-            amount=Decimal("20.00"),
+            amount=200_000,
         )
         expected = (
             f"{transaction.gateway} — {self.order.order_number} — "

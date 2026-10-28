@@ -40,7 +40,7 @@ def make_products(count):
             Product.objects.create(
                 name=f"Flash Product {_n[0]}",
                 slug=f"flash-product-{_n[0]}",
-                price=Decimal("20.00"),
+                price=200_000,
                 stock=5,
             )
         )

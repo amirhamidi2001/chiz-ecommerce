@@ -10,7 +10,7 @@ from payments.gateways.zibal import ZibalGateway
 class ZibalRequestPaymentTests(SimpleTestCase):
     def setUp(self):
         self.gateway = ZibalGateway()
-        self.amount = Decimal("150000")
+        self.amount = 1_500_000_000
         self.callback_url = "https://example.test/payments/callback/"
 
     @responses.activate
@@ -123,7 +123,7 @@ class ZibalRequestPaymentTests(SimpleTestCase):
 class ZibalVerifyPaymentTests(SimpleTestCase):
     def setUp(self):
         self.gateway = ZibalGateway()
-        self.amount = Decimal("150000")
+        self.amount = 1_500_000_000
         self.authority = "1533727744287"
 
     @responses.activate

@@ -5,10 +5,11 @@ import { useWishlist } from '../context/WishlistContext';
 import { useCart } from '../context/CartContext';
 import { dashboardAPI } from '../services/api';
 import VariantPicker from './VariantPicker';
+import { formatToman } from '../utils/money';
+import { formatReviewCount } from '../utils/numerals';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const fmt = (n) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n ?? 0);
+const fmt = (n) => formatToman(n);
 
 // ─── A product with several options: pick one, then confirm ──────────────────
 // Shown when the server answers "move to cart" with 300 (single item) or lists
@@ -364,7 +365,7 @@ const WishlistTab = () => {
                           }`}
                       />
                     ))}
-                    <span className="text-gray-400 ml-1">({p.reviews_count ?? 0})</span>
+                    <span className="text-gray-400 ml-1">({formatReviewCount(p.reviews_count ?? 0)})</span>
                   </div>
 
                   {/* Price */}

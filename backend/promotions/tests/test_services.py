@@ -18,7 +18,7 @@ from .factories import (
     make_variant,
 )
 
-SUBTOTAL = Decimal("100.00")
+SUBTOTAL = 1_000_000
 
 
 class ValidateCouponTestBase(TestCase):
@@ -37,7 +37,7 @@ class RejectionTests(ValidateCouponTestBase):
         self.assertIsInstance(result, CouponValidationResult)
         self.assertFalse(result.valid)
         self.assertEqual(result.error, error)
-        self.assertEqual(result.discount_amount, Decimal("0"))
+        self.assertEqual(result.discount_amount, 0)
         self.assertIsNone(result.coupon)
 
     def test_nonexistent_code(self):
@@ -66,13 +66,15 @@ class RejectionTests(ValidateCouponTestBase):
         self.assertRejected(result, "This coupon has expired.")
 
     def test_subtotal_below_min_order_amount(self):
-        make_saved_coupon(min_order_amount=Decimal("150.00"))
-        result = validate_coupon("SUMMER20", self.user, self.cart_of("149.99"))
-        self.assertRejected(result, "This coupon requires a minimum order of 150.00.")
+        make_saved_coupon(min_order_amount=1_500_000)
+        result = validate_coupon("SUMMER20", self.user, self.cart_of(1_499_900))
+        self.assertRejected(
+            result, "This coupon requires a minimum order of 150,000 Toman."
+        )
 
     def test_subtotal_exactly_at_min_order_amount_is_accepted(self):
-        make_saved_coupon(min_order_amount=Decimal("150.00"))
-        result = validate_coupon("SUMMER20", self.user, self.cart_of("150.00"))
+        make_saved_coupon(min_order_amount=1_500_000)
+        result = validate_coupon("SUMMER20", self.user, self.cart_of(1_500_000))
         self.assertTrue(result.valid)
 
     def test_max_uses_reached_by_completed_redemptions(self):
@@ -139,40 +141,39 @@ class SuccessTests(ValidateCouponTestBase):
         result = validate_coupon("  summer20 ", self.user, self.cart)
         self.assertTrue(result.valid)
 
-    def test_percent_discount_is_rounded_to_two_places(self):
+    def test_percent_discount_is_rounded_to_a_whole_toman_ties_up(self):
         make_saved_coupon(
-            discount_type=Coupon.DiscountType.PERCENT, value=Decimal("15.00")
+            discount_type=Coupon.DiscountType.PERCENT, percent_off=Decimal("15.00")
         )
-        # 99.99 * 15% = 14.9985 -> 15.00
-        result = validate_coupon("SUMMER20", self.user, self.cart_of("99.99"))
+        # 999,900 Rial * 15% = 149,985 Rial = 14,998.5 Toman, an exact tie ->
+        # ROUND_HALF_UP gives 14,999 Toman = 149,990 Rial (HALF_EVEN would
+        # give 149,980).
+        result = validate_coupon("SUMMER20", self.user, self.cart_of(999_900))
         self.assertTrue(result.valid)
-        self.assertEqual(result.discount_amount, Decimal("15.00"))
-        # exponent is exactly two places, not just numerically equal
-        self.assertEqual(result.discount_amount.as_tuple().exponent, -2)
+        self.assertEqual(result.discount_amount, 149_990)
+        # a plain int, and a whole number of Toman — nothing left to round at display
+        self.assertIs(type(result.discount_amount), int)
+        self.assertEqual(result.discount_amount % 10, 0)
 
-    def test_percent_discount_rounds_down_when_below_half_cent(self):
+    def test_percent_discount_rounds_down_when_below_half_a_toman(self):
         make_saved_coupon(
-            discount_type=Coupon.DiscountType.PERCENT, value=Decimal("10.00")
+            discount_type=Coupon.DiscountType.PERCENT, percent_off=Decimal("10.00")
         )
-        # 33.33 * 10% = 3.333 -> 3.33
-        result = validate_coupon("SUMMER20", self.user, self.cart_of("33.33"))
-        self.assertEqual(result.discount_amount, Decimal("3.33"))
+        # 333,330 Rial * 10% = 33,333 Rial = 3,333.3 Toman -> 3,333 Toman
+        result = validate_coupon("SUMMER20", self.user, self.cart_of(333_330))
+        self.assertEqual(result.discount_amount, 33_330)
 
     def test_fixed_discount_below_subtotal(self):
-        make_saved_coupon(
-            discount_type=Coupon.DiscountType.FIXED, value=Decimal("10.00")
-        )
-        result = validate_coupon("SUMMER20", self.user, self.cart_of("100.00"))
+        make_saved_coupon(discount_type=Coupon.DiscountType.FIXED, fixed_amount=100_000)
+        result = validate_coupon("SUMMER20", self.user, self.cart_of(1_000_000))
         self.assertTrue(result.valid)
-        self.assertEqual(result.discount_amount, Decimal("10.00"))
+        self.assertEqual(result.discount_amount, 100_000)
 
     def test_fixed_discount_is_capped_at_subtotal(self):
-        make_saved_coupon(
-            discount_type=Coupon.DiscountType.FIXED, value=Decimal("50.00")
-        )
-        result = validate_coupon("SUMMER20", self.user, self.cart_of("20.00"))
+        make_saved_coupon(discount_type=Coupon.DiscountType.FIXED, fixed_amount=500_000)
+        result = validate_coupon("SUMMER20", self.user, self.cart_of(200_000))
         self.assertTrue(result.valid)
-        self.assertEqual(result.discount_amount, Decimal("20.00"))
+        self.assertEqual(result.discount_amount, 200_000)
 
 
 class RestrictedCouponTests(TestCase):
@@ -190,9 +191,9 @@ class RestrictedCouponTests(TestCase):
         self.skincare = make_category("Skincare")
         self.makeup = make_category("Makeup")
         self.haircare = make_category("Haircare")
-        self.serum = make_variant("20.00", self.skincare, name="Serum")
-        self.cleanser = make_variant("30.00", self.skincare, name="Cleanser")
-        self.lipstick = make_variant("50.00", self.makeup, name="Lipstick")
+        self.serum = make_variant(200_000, self.skincare, name="Serum")
+        self.cleanser = make_variant(300_000, self.skincare, name="Cleanser")
+        self.lipstick = make_variant(500_000, self.makeup, name="Lipstick")
         self.cart = make_cart(
             self.user, (self.serum, 1), (self.cleanser, 2), (self.lipstick, 1)
         )
@@ -200,7 +201,7 @@ class RestrictedCouponTests(TestCase):
     def percent_coupon(self, value="20.00", **overrides):
         return make_saved_coupon(
             discount_type=Coupon.DiscountType.PERCENT,
-            value=Decimal(value),
+            percent_off=Decimal(value),
             **overrides,
         )
 
@@ -212,7 +213,7 @@ class RestrictedCouponTests(TestCase):
         self.percent_coupon()
         result = self.validate()
         self.assertTrue(result.valid)
-        self.assertEqual(result.discount_amount, Decimal("26.00"))  # 20% of 130.00
+        self.assertEqual(result.discount_amount, 260_000)  # 20% of 130.00
 
     # 2. Category restriction: only matching items count (mixed cart).
     def test_category_restricted_coupon_discounts_only_matching_items(self):
@@ -223,7 +224,7 @@ class RestrictedCouponTests(TestCase):
 
         self.assertTrue(result.valid)
         # 20% of the Skincare items (20 + 60 = 80.00), NOT of 130.00.
-        self.assertEqual(result.discount_amount, Decimal("16.00"))
+        self.assertEqual(result.discount_amount, 160_000)
 
     # 3. Category the cart has nothing in.
     def test_category_with_no_items_in_cart_is_rejected(self):
@@ -237,7 +238,7 @@ class RestrictedCouponTests(TestCase):
             result.error, "This coupon does not apply to any items in your cart."
         )
         self.assertIsNone(result.coupon)
-        self.assertEqual(result.discount_amount, Decimal("0"))
+        self.assertEqual(result.discount_amount, 0)
 
     # 4. Product restriction, independent of the category path.
     def test_product_restricted_coupon_discounts_only_those_products(self):
@@ -247,10 +248,10 @@ class RestrictedCouponTests(TestCase):
         result = self.validate()
 
         self.assertTrue(result.valid)
-        self.assertEqual(result.discount_amount, Decimal("10.00"))  # 20% of 50.00
+        self.assertEqual(result.discount_amount, 100_000)  # 20% of 50.00
 
     def test_product_restriction_with_product_not_in_cart_is_rejected(self):
-        other = make_variant("99.00", self.haircare, name="Shampoo")
+        other = make_variant(990_000, self.haircare, name="Shampoo")
         coupon = self.percent_coupon()
         coupon.products.add(other.product)
 
@@ -270,7 +271,7 @@ class RestrictedCouponTests(TestCase):
         result = self.validate()
 
         self.assertTrue(result.valid)
-        self.assertEqual(result.discount_amount, Decimal("26.00"))  # 20% of 130.00
+        self.assertEqual(result.discount_amount, 260_000)  # 20% of 130.00
 
     def test_item_matching_both_restrictions_is_counted_once(self):
         coupon = self.percent_coupon()
@@ -280,49 +281,50 @@ class RestrictedCouponTests(TestCase):
         result = self.validate()
 
         # Skincare only (80.00); the serum is not double-counted.
-        self.assertEqual(result.discount_amount, Decimal("16.00"))
+        self.assertEqual(result.discount_amount, 160_000)
 
     # ── Amount rules apply to the ELIGIBLE portion ───────────────────────────
     def test_fixed_discount_is_capped_at_the_eligible_subtotal(self):
         coupon = make_saved_coupon(
-            discount_type=Coupon.DiscountType.FIXED, value=Decimal("100.00")
+            discount_type=Coupon.DiscountType.FIXED, fixed_amount=1_000_000
         )
         coupon.categories.add(self.skincare)  # eligible 80.00 of a 130.00 cart
 
         result = self.validate()
 
         self.assertTrue(result.valid)
-        self.assertEqual(result.discount_amount, Decimal("80.00"))
+        self.assertEqual(result.discount_amount, 800_000)
 
     def test_min_order_amount_is_checked_against_the_eligible_subtotal(self):
         # Whole cart (130.00) clears the 100.00 minimum; Skincare (80.00) doesn't.
-        coupon = self.percent_coupon(min_order_amount=Decimal("100.00"))
+        coupon = self.percent_coupon(min_order_amount=1_000_000)
         coupon.categories.add(self.skincare)
 
         result = self.validate()
 
         self.assertFalse(result.valid)
         self.assertEqual(
-            result.error, "This coupon requires a minimum eligible order of 100.00."
+            result.error,
+            "This coupon requires a minimum eligible order of 100,000 Toman.",
         )
 
     def test_min_order_amount_met_by_the_eligible_subtotal_is_accepted(self):
-        coupon = self.percent_coupon(min_order_amount=Decimal("80.00"))
+        coupon = self.percent_coupon(min_order_amount=800_000)
         coupon.categories.add(self.skincare)
         self.assertTrue(self.validate().valid)
 
     def test_unrestricted_min_order_message_keeps_the_plain_wording(self):
-        self.percent_coupon(min_order_amount=Decimal("500.00"))
+        self.percent_coupon(min_order_amount=5_000_000)
         result = self.validate()
         self.assertEqual(
-            result.error, "This coupon requires a minimum order of 500.00."
+            result.error, "This coupon requires a minimum order of 500,000 Toman."
         )
 
     # ── Matching semantics worth pinning down ───────────────────────────────
     def test_category_match_is_exact_and_does_not_include_subcategories(self):
         beauty = make_category("Beauty")
         eyes = make_category("Eyes", parent=beauty)
-        mascara = make_variant("15.00", eyes, name="Mascara")
+        mascara = make_variant(150_000, eyes, name="Mascara")
         self.cart = make_cart(self.user, (mascara, 1))
         coupon = self.percent_coupon()
         coupon.categories.add(beauty)  # parent only
@@ -335,10 +337,10 @@ class RestrictedCouponTests(TestCase):
         )
         # Selecting the sub-category as well makes it eligible.
         coupon.categories.add(eyes)
-        self.assertEqual(self.validate().discount_amount, Decimal("3.00"))
+        self.assertEqual(self.validate().discount_amount, 30_000)
 
     def test_uncategorised_product_matches_by_product_only(self):
-        loose = make_variant("40.00", None, name="Gift Card")
+        loose = make_variant(400_000, None, name="Gift Card")
         self.cart = make_cart(self.user, (loose, 1))
 
         by_category = self.percent_coupon(code="BYCAT")
@@ -349,7 +351,7 @@ class RestrictedCouponTests(TestCase):
         self.assertFalse(validate_coupon("BYCAT", self.user, self.cart).valid)
         result = validate_coupon("BYPROD", self.user, self.cart)
         self.assertTrue(result.valid)
-        self.assertEqual(result.discount_amount, Decimal("8.00"))
+        self.assertEqual(result.discount_amount, 80_000)
 
     # ── `lines` override (used by checkout's locked price snapshot) ─────────
     def test_explicit_lines_are_used_instead_of_the_carts_contents(self):
@@ -358,13 +360,13 @@ class RestrictedCouponTests(TestCase):
             CouponLine(
                 product_id=self.serum.product_id,
                 category_id=self.skincare.pk,
-                amount=Decimal("40.00"),
+                amount=400_000,
             )
         ]
 
         result = self.validate(lines=lines)
 
-        self.assertEqual(result.discount_amount, Decimal("8.00"))  # 20% of 40.00
+        self.assertEqual(result.discount_amount, 80_000)  # 20% of 40.00
 
     def test_explicit_lines_are_filtered_by_the_restrictions_too(self):
         coupon = self.percent_coupon()
@@ -373,18 +375,18 @@ class RestrictedCouponTests(TestCase):
             CouponLine(
                 product_id=self.serum.product_id,
                 category_id=self.skincare.pk,
-                amount=Decimal("40.00"),
+                amount=400_000,
             ),
             CouponLine(
                 product_id=self.lipstick.product_id,
                 category_id=self.makeup.pk,
-                amount=Decimal("500.00"),
+                amount=5_000_000,
             ),
         ]
 
         result = self.validate(lines=lines)
 
-        self.assertEqual(result.discount_amount, Decimal("8.00"))
+        self.assertEqual(result.discount_amount, 80_000)
 
     def test_empty_cart_is_rejected_as_not_applicable(self):
         self.percent_coupon()

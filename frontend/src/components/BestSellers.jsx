@@ -4,6 +4,8 @@ import { FlashSalePrice } from './FlashSalePrice';
 import { isOnFlashSale } from '../utils/flashSale';
 import { Link } from 'react-router-dom';
 import { getProducts } from '../services/api';
+import { formatToman } from '../utils/money';
+import { formatReviewCount } from '../utils/numerals';
 
 // ─── Shared star renderer ───────────────────────────────────────────────────
 const Stars = ({ rating }) => {
@@ -109,7 +111,7 @@ export const ProductCard = ({ product }) => {
 
         <div className="flex items-center gap-2 mt-2">
           <Stars rating={product.rating} />
-          <span className="text-xs text-gray-400">({product.reviews_count})</span>
+          <span className="text-xs text-gray-400">({formatReviewCount(product.reviews_count)})</span>
         </div>
 
         <div className="mt-2">
@@ -118,11 +120,11 @@ export const ProductCard = ({ product }) => {
           ) : (
             <>
               <span className="text-lg font-bold text-gray-900">
-                ${Number(product.price).toFixed(2)}
+                {formatToman(product.price)}
               </span>
               {product.original_price && (
                 <span className="text-sm text-gray-400 line-through ml-2">
-                  ${Number(product.original_price).toFixed(2)}
+                  {formatToman(product.original_price)}
                 </span>
               )}
             </>

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { getOrderDetail, isAuthenticated } from '../services/api';
 import { useCart } from '../context/CartContext';
+import { formatToman } from '../utils/money';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 const STATUS_STEPS = ['pending', 'processing', 'shipped', 'delivered'];
@@ -210,25 +211,25 @@ const OrderConfirmation = () => {
                 <ul className="space-y-2 text-sm">
                   <li className="flex justify-between">
                     <span className="text-white/70">Subtotal</span>
-                    <span>${Number(order.subtotal).toFixed(2)}</span>
+                    <span>{formatToman(order.subtotal)}</span>
                   </li>
                   <li className="flex justify-between">
                     <span className="text-white/70">Shipping</span>
-                    <span>${Number(order.shipping_cost).toFixed(2)}</span>
+                    <span>{formatToman(order.shipping_cost)}</span>
                   </li>
                   <li className="flex justify-between">
                     <span className="text-white/70">Tax</span>
-                    <span>${Number(order.tax).toFixed(2)}</span>
+                    <span>{formatToman(order.tax)}</span>
                   </li>
                   {Number(order.discount) > 0 && (
                     <li className="flex justify-between text-teal-300">
                       <span>Discount</span>
-                      <span>-${Number(order.discount).toFixed(2)}</span>
+                      <span>-{formatToman(order.discount)}</span>
                     </li>
                   )}
                   <li className="flex justify-between text-lg font-bold pt-2 border-t border-white/20 mt-2">
                     <span>Total</span>
-                    <span>${Number(order.total).toFixed(2)}</span>
+                    <span>{formatToman(order.total)}</span>
                   </li>
                 </ul>
               </div>
@@ -377,10 +378,10 @@ const OrderConfirmation = () => {
                         </h4>
                         <div className="flex justify-between items-center mt-2">
                           <span className="text-sm text-gray-500">
-                            {item.quantity} × ${Number(item.unit_price).toFixed(2)}
+                            {item.quantity} × {formatToman(item.unit_price)}
                           </span>
                           <span className="font-semibold text-gray-800">
-                            ${Number(item.subtotal).toFixed(2)}
+                            {formatToman(item.subtotal)}
                           </span>
                         </div>
                       </div>

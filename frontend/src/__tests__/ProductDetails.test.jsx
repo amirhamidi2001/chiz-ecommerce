@@ -7,6 +7,7 @@ import ProductDetails from '../pages/ProductDetails';
 import * as api from '../services/api';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
+import { formatToman } from '../utils/money';
 
 // ─── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -34,8 +35,8 @@ const MOCK_PRODUCT = {
   id: 42,
   slug: 'test-widget-pro',
   name: 'Test Widget Pro',
-  price: '49.99',
-  original_price: '69.99',
+  price: 499_900,
+  original_price: 699_900,
   discount_percent: 28,
   description: 'A top-quality widget for all your widget needs.',
   short_description: 'Best widget ever.',
@@ -55,7 +56,7 @@ const MOCK_RELATED = [
     id: 7,
     slug: 'related-widget-a',
     name: 'Related Widget A',
-    price: '29.99',
+    price: 299_900,
     rating: '4.0',
     thumbnail_url: '/assets/img/product/product-2.webp',
     category: { name: 'Widgets' },
@@ -66,7 +67,7 @@ const MOCK_RELATED = [
     id: 8,
     slug: 'related-widget-b',
     name: 'Related Widget B',
-    price: '39.99',
+    price: 399_900,
     rating: '3.5',
     thumbnail_url: '/assets/img/product/product-3.webp',
     category: { name: 'Widgets' },
@@ -80,7 +81,7 @@ const MOCK_FBT = [
     id: 21,
     slug: 'bought-together-x',
     name: 'Bought Together X',
-    price: '19.99',
+    price: 199_900,
     rating: '4.2',
     thumbnail_url: '/assets/img/product/product-4.webp',
     category: { name: 'Accessories' },
@@ -91,7 +92,7 @@ const MOCK_FBT = [
     id: 22,
     slug: 'bought-together-y',
     name: 'Bought Together Y',
-    price: '59.99',
+    price: 599_900,
     rating: '4.8',
     thumbnail_url: '/assets/img/product/product-5.webp',
     category: { name: 'Accessories' },
@@ -187,7 +188,7 @@ describe('ProductDetails', () => {
     it('renders the formatted product price', async () => {
       renderProductDetails();
       // The component formats price with toFixed(2) and prefixes "$"
-      expect(await screen.findByText('$49.99')).toBeInTheDocument();
+      expect(await screen.findByText(formatToman(499_900))).toBeInTheDocument();
     });
 
     it('renders the product description', async () => {
@@ -250,8 +251,8 @@ describe('ProductDetails', () => {
 
     it('renders related product prices', async () => {
       renderProductDetails();
-      expect(await screen.findByText('$29.99')).toBeInTheDocument();
-      expect(await screen.findByText('$39.99')).toBeInTheDocument();
+      expect(await screen.findByText(formatToman(299_900))).toBeInTheDocument();
+      expect(await screen.findByText(formatToman(399_900))).toBeInTheDocument();
     });
 
     it('links each related product card to the correct product URL', async () => {
@@ -288,7 +289,7 @@ describe('ProductDetails', () => {
       ).toBeInTheDocument();
       expect(screen.getByText('Bought Together X')).toBeInTheDocument();
       expect(screen.getByText('Bought Together Y')).toBeInTheDocument();
-      expect(screen.getByText('$19.99')).toBeInTheDocument();
+      expect(screen.getByText(formatToman(199_900))).toBeInTheDocument();
     });
 
     it('fetches using the product slug from the route', async () => {
@@ -611,8 +612,8 @@ describe('ProductDetails', () => {
       stock: 5, // legacy aggregate field still shows stock from OTHER variants
       colors: [{ color: RED }, { color: BLUE }],
       variants: [
-        { id: 501, color: RED, stock: 0, price: '49.99', is_active: true },
-        { id: 502, color: BLUE, stock: 5, price: '49.99', is_active: true },
+        { id: 501, color: RED, stock: 0, price: 499_900, is_active: true },
+        { id: 502, color: BLUE, stock: 5, price: 499_900, is_active: true },
       ],
     };
 
@@ -630,8 +631,8 @@ describe('ProductDetails', () => {
         resolveWith({
           ...OUT_OF_STOCK_VARIANT_PRODUCT,
           variants: [
-            { id: 501, color: RED, stock: 8, price: '49.99', is_active: true },
-            { id: 502, color: BLUE, stock: 5, price: '49.99', is_active: true },
+            { id: 501, color: RED, stock: 8, price: 499_900, is_active: true },
+            { id: 502, color: BLUE, stock: 5, price: 499_900, is_active: true },
           ],
         }),
       );
@@ -742,6 +743,48 @@ describe('ProductDetails', () => {
 
       expect(await screen.findByText('Lovely shade.')).toBeInTheDocument();
       expect(screen.queryByTestId('store-response')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Numeral styles (Task 14.1.2.4) ─────────────────────────────────────────
+  // Ratings and review counts: Persian digits. Prices: Western digits.
+  describe('numeral styles', () => {
+    it('shows the rating and review counts in Persian digits and the price in Western', async () => {
+      renderProductDetails();
+
+      expect(await screen.findByText(formatToman(499_900))).toBeInTheDocument();
+      expect(screen.getByText('(۲۳ reviews)')).toBeInTheDocument(); // beside the stars
+      expect(screen.getByRole('button', { name: 'Reviews (۲۳)' })).toBeInTheDocument();
+
+      expect(screen.queryByText('(23 reviews)')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reviews (23)' })).not.toBeInTheDocument();
+    });
+
+    it('the Technical Details tab shows "rating / 5" in Persian digits', async () => {
+      const user = userEvent.setup();
+      renderProductDetails();
+      await user.click(await screen.findByRole('button', { name: 'Technical Details' }));
+
+      expect(await screen.findByText('۴.۵ / ۵')).toBeInTheDocument();
+      expect(screen.queryByText('4.5 / 5')).not.toBeInTheDocument();
+    });
+
+    it('the Reviews tab shows the aggregate score and review total in Persian digits', async () => {
+      const user = userEvent.setup();
+      renderProductDetails();
+      await user.click(await screen.findByRole('button', { name: 'Reviews (۲۳)' }));
+
+      expect(await screen.findByText('۴.۵')).toBeInTheDocument(); // the big aggregate score
+      expect(screen.getByText(/^[۰-۹]+ reviews?$/)).toBeInTheDocument();
+      expect(screen.queryByText('4.5')).not.toBeInTheDocument();
+    });
+
+    it('related products show their ratings in Persian digits', async () => {
+      renderProductDetails();
+      await screen.findByText(formatToman(499_900));
+
+      expect((await screen.findAllByText('۴.۰')).length).toBeGreaterThan(0);
+      expect(screen.queryByText('4.0')).not.toBeInTheDocument();
     });
   });
 });

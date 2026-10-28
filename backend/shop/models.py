@@ -1,6 +1,8 @@
 from decimal import Decimal
 from typing import NamedTuple
 
+from core.fields import RialField, whole_toman_constraint
+from core.money import percent_of
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
@@ -9,24 +11,25 @@ from django.core.validators import MaxValueValidator
 from django.db import models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
+from django.utils.translation import gettext_lazy as _
 
 from .search import SEARCH_VECTOR_SOURCE_FIELDS, refresh_product_search_vectors
 from .text_utils import normalize_persian_text
 from .validators import validate_ean13
 
 
-def discounted_price(price, sale):
-    """`price` reduced by `sale.discount_percent`, rounded to 2 places."""
-    multiplier = (Decimal("100") - sale.discount_percent) / Decimal("100")
-    return (price * multiplier).quantize(Decimal("0.01"))
+def discounted_price(price: int, sale) -> int:
+    """`price` (Rial) reduced by `sale.discount_percent`, rounded ONCE to a whole
+    Toman (ADR 0001 invariant I-3)."""
+    return percent_of(price, Decimal("100") - sale.discount_percent)
 
 
 class FlashSaleCardPricing(NamedTuple):
     """What a product CARD shows for a product that is currently on sale."""
 
     sale: object  # promotions.FlashSale
-    original_price: Decimal  # lowest regular price among the product's variants
-    price: Decimal  # that price with the sale applied ("starting at")
+    original_price: int  # lowest regular price (Rial) among the product's variants
+    price: int  # that price with the sale applied ("starting at")
     price_varies: bool  # variants differ in price, so "from" is the honest label
 
 
@@ -44,7 +47,7 @@ class Category(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name_plural = "Categories"
+        verbose_name_plural = _("Categories")
         ordering = ["name"]
 
     def save(self, *args, **kwargs):
@@ -91,26 +94,26 @@ class Color(models.Model):
 
 
 class SkinType(models.TextChoices):
-    OILY = "oily", "Oily"
-    DRY = "dry", "Dry"
-    COMBINATION = "combination", "Combination"
-    SENSITIVE = "sensitive", "Sensitive"
-    NORMAL = "normal", "Normal"
-    ALL = "all", "All Skin Types"
+    OILY = "oily", _("Oily")
+    DRY = "dry", _("Dry")
+    COMBINATION = "combination", _("Combination")
+    SENSITIVE = "sensitive", _("Sensitive")
+    NORMAL = "normal", _("Normal")
+    ALL = "all", _("All Skin Types")
 
 
 class HairType(models.TextChoices):
-    STRAIGHT = "straight", "Straight"
-    WAVY = "wavy", "Wavy"
-    CURLY = "curly", "Curly"
-    COILY = "coily", "Coily"
-    ALL = "all", "All Hair Types"
+    STRAIGHT = "straight", _("Straight")
+    WAVY = "wavy", _("Wavy")
+    CURLY = "curly", _("Curly")
+    COILY = "coily", _("Coily")
+    ALL = "all", _("All Hair Types")
 
 
 class ProductGender(models.TextChoices):
-    UNISEX = "unisex", "Unisex"
-    FEMALE = "female", "Female"
-    MALE = "male", "Male"
+    UNISEX = "unisex", _("Unisex")
+    FEMALE = "female", _("Female")
+    MALE = "male", _("Male")
 
 
 class Product(models.Model):
@@ -166,10 +169,8 @@ class Product(models.Model):
     # something typed into the code field. See clean() below for the
     # optional, settings-driven publish-guard this enables.
     regulatory_verified = models.BooleanField(default=False)
-    price = models.DecimalField(max_digits=10, decimal_places=2)
-    original_price = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
-    )
+    price = RialField()
+    original_price = RialField(null=True, blank=True)
     stock = models.PositiveIntegerField(default=0)
     rating = models.DecimalField(max_digits=3, decimal_places=1, default=0.0)
     reviews_count = models.PositiveIntegerField(default=0)
@@ -244,6 +245,10 @@ class Product(models.Model):
         indexes = [
             GinIndex(fields=["search_vector"], name="product_search_vector_idx"),
         ]
+        constraints = [
+            whole_toman_constraint("price"),
+            whole_toman_constraint("original_price"),
+        ]
 
     def clean(self):
         super().clean()
@@ -262,7 +267,7 @@ class Product(models.Model):
         ):
             raise ValidationError(
                 {
-                    "regulatory_verified": (
+                    "regulatory_verified": _(
                         "This product has an IRC regulatory code entered but "
                         "has not been verified by a staff member yet."
                     )
@@ -453,7 +458,7 @@ class ProductVariant(models.Model):
         max_length=20,
         blank=True,
         validators=[validate_ean13],
-        help_text="EAN-13 barcode (13 digits with a valid check digit). Optional.",
+        help_text=_("EAN-13 barcode (13 digits with a valid check digit). Optional."),
     )
     color = models.ForeignKey(
         Color,
@@ -462,10 +467,8 @@ class ProductVariant(models.Model):
         blank=True,
         related_name="variants",
     )
-    price = models.DecimalField(max_digits=10, decimal_places=2)
-    original_price = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
-    )
+    price = RialField()
+    original_price = RialField(null=True, blank=True)
     stock = models.PositiveIntegerField(default=0)
     low_stock_threshold = models.PositiveIntegerField(default=5)
     is_active = models.BooleanField(default=True)
@@ -504,6 +507,10 @@ class ProductVariant(models.Model):
 
     class Meta:
         ordering = ["id"]
+        constraints = [
+            whole_toman_constraint("price"),
+            whole_toman_constraint("original_price"),
+        ]
 
     def clean(self):
         super().clean()
@@ -515,7 +522,11 @@ class ProductVariant(models.Model):
             and self.expiration_date <= self.manufacture_date
         ):
             raise ValidationError(
-                {"expiration_date": "Expiration date must be after manufacture date."}
+                {
+                    "expiration_date": _(
+                        "Expiration date must be after manufacture date."
+                    )
+                }
             )
 
     def save(self, *args, **kwargs):
@@ -597,21 +608,21 @@ class ProductVariant(models.Model):
 
 class StockMovement(models.Model):
     class Reason(models.TextChoices):
-        SALE = "sale", "Sale"
-        CANCELLATION = "cancellation", "Order Cancellation"
-        MANUAL = "manual", "Manual Adjustment"
-        RESTOCK = "restock", "Restock"
-        EXPIRY_SWEEP = "expiry_sweep", "Expiry Deactivation"
+        SALE = "sale", _("Sale")
+        CANCELLATION = "cancellation", _("Order Cancellation")
+        MANUAL = "manual", _("Manual Adjustment")
+        RESTOCK = "restock", _("Restock")
+        EXPIRY_SWEEP = "expiry_sweep", _("Expiry Deactivation")
 
     variant = models.ForeignKey(
         "shop.ProductVariant", on_delete=models.CASCADE, related_name="stock_movements"
     )
     reason = models.CharField(max_length=20, choices=Reason.choices)
     quantity_delta = models.IntegerField(
-        help_text="Positive for increases, negative for decreases."
+        help_text=_("Positive for increases, negative for decreases.")
     )
     stock_after = models.PositiveIntegerField(
-        help_text="Variant's stock value immediately after this movement."
+        help_text=_("Variant's stock value immediately after this movement.")
     )
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -619,7 +630,9 @@ class StockMovement(models.Model):
         null=True,
         blank=True,
         related_name="stock_movements",
-        help_text="Admin user who triggered this (manual adjustments only); null for system-triggered movements.",
+        help_text=_(
+            "Admin user who triggered this (manual adjustments only); null for system-triggered movements."
+        ),
     )
     note = models.CharField(max_length=255, blank=True)
     related_order = models.ForeignKey(
@@ -730,10 +743,10 @@ class ReviewReport(models.Model):
     """A customer's flag on an (already published) review."""
 
     class Reason(models.TextChoices):
-        SPAM = "spam", "Spam or fake"
-        OFFENSIVE = "offensive", "Offensive content"
-        IRRELEVANT = "irrelevant", "Not relevant to the product"
-        OTHER = "other", "Other"
+        SPAM = "spam", _("Spam or fake")
+        OFFENSIVE = "offensive", _("Offensive content")
+        IRRELEVANT = "irrelevant", _("Not relevant to the product")
+        OTHER = "other", _("Other")
 
     review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name="reports")
     reported_by = models.ForeignKey(
@@ -772,13 +785,14 @@ class ProductPriceSnapshot(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="price_snapshots"
     )
-    price = models.DecimalField(max_digits=10, decimal_places=2)
+    price = RialField()
     recorded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         # "-id" breaks ties between snapshots written within the same
         # clock tick, so .first() is always genuinely the latest.
         ordering = ["-recorded_at", "-id"]
+        constraints = [whole_toman_constraint("price")]
 
     def __str__(self):
         return f"{self.product_id} @ {self.price} ({self.recorded_at:%Y-%m-%d %H:%M})"

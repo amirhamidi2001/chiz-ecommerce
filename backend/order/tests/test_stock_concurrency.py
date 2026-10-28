@@ -225,10 +225,10 @@ class StockConcurrencyTests(TransactionTestCase):
         color_a = make_color(name="Shade A")
         color_b = make_color(name="Shade B")
         shade_a = make_variant(
-            product=product, sku="FOUND-A", color=color_a, price="30.00", stock=1
+            product=product, sku="FOUND-A", color=color_a, price=300_000, stock=1
         )
         shade_b = make_variant(
-            product=product, sku="FOUND-B", color=color_b, price="30.00", stock=1
+            product=product, sku="FOUND-B", color=color_b, price=300_000, stock=1
         )
 
         user_a = make_user(email="shade-a-buyer@example.com")

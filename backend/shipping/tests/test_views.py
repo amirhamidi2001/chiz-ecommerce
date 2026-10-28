@@ -27,7 +27,7 @@ def make_rate(
     city="",
     min_weight_g=0,
     max_weight_g=1_000_000,
-    price="9.99",
+    price=99_900,
     estimated_days_min=1,
     estimated_days_max=3,
     is_active=True,
@@ -38,7 +38,7 @@ def make_rate(
         city=city,
         min_weight_g=min_weight_g,
         max_weight_g=max_weight_g,
-        price=Decimal(price),
+        price=price,
         estimated_days_min=estimated_days_min,
         estimated_days_max=estimated_days_max,
         is_active=is_active,
@@ -59,7 +59,7 @@ class ShippingQuoteViewAuthenticatedCartTests(APITestCase):
         # A single variant with an explicit weight_g (not the flat-estimate
         # fallback) so the weight-bracket assertions are exact and don't
         # depend on ProductVariant.DEFAULT_ESTIMATED_WEIGHT_G's value.
-        self.variant = make_variant(price="50.00", stock=10)
+        self.variant = make_variant(price=500_000, stock=10)
         self.variant.weight_g = 500
         self.variant.save(update_fields=["weight_g"])
         make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])
@@ -72,7 +72,7 @@ class ShippingQuoteViewAuthenticatedCartTests(APITestCase):
             province="tehran",
             min_weight_g=0,
             max_weight_g=2000,
-            price="45000.00",
+            price=450_000_000,
             estimated_days_min=2,
             estimated_days_max=4,
         )
@@ -89,7 +89,7 @@ class ShippingQuoteViewAuthenticatedCartTests(APITestCase):
                     "carrier_id": carrier.id,
                     "carrier_name": carrier.display_name,
                     "rate_id": rate.id,
-                    "price": "45000.00",
+                    "price": 450_000_000,
                     "estimated_days_min": 2,
                     "estimated_days_max": 4,
                 }
@@ -105,14 +105,14 @@ class ShippingQuoteViewAuthenticatedCartTests(APITestCase):
             province="tehran",
             min_weight_g=0,
             max_weight_g=999,
-            price="10000.00",
+            price=100_000_000,
         )
         heavier_rate = make_rate(
             carrier=carrier,
             province="tehran",
             min_weight_g=1000,
             max_weight_g=5000,
-            price="20000.00",
+            price=200_000_000,
         )
 
         response = self.client.post(
@@ -123,13 +123,13 @@ class ShippingQuoteViewAuthenticatedCartTests(APITestCase):
         self.assertEqual(len(response.data["options"]), 1)
         option = response.data["options"][0]
         self.assertEqual(option["rate_id"], heavier_rate.id)
-        self.assertEqual(option["price"], "20000.00")
+        self.assertEqual(option["price"], 200_000_000)
 
     def test_multiple_active_carriers_with_matching_rates_all_appear(self):
         post = make_carrier(code=ShippingCarrier.Code.POST)
         tipax = make_carrier(code=ShippingCarrier.Code.TIPAX)
-        make_rate(carrier=post, province="tehran", price="10000.00")
-        make_rate(carrier=tipax, province="tehran", price="15000.00")
+        make_rate(carrier=post, province="tehran", price=100_000_000)
+        make_rate(carrier=tipax, province="tehran", price=150_000_000)
 
         response = self.client.post(
             QUOTE_URL, {"province": "tehran", "city": "Tehran"}, format="json"
@@ -189,9 +189,9 @@ class ShippingQuoteViewAuthenticatedCartTests(APITestCase):
 
     def test_city_specific_rate_is_preferred_over_province_wide(self):
         carrier = make_carrier(code=ShippingCarrier.Code.ALOPEYK)
-        make_rate(carrier=carrier, province="tehran", city="", price="10000.00")
+        make_rate(carrier=carrier, province="tehran", city="", price=100_000_000)
         city_rate = make_rate(
-            carrier=carrier, province="tehran", city="Tehran", price="5000.00"
+            carrier=carrier, province="tehran", city="Tehran", price=50_000_000
         )
 
         response = self.client.post(
@@ -200,7 +200,7 @@ class ShippingQuoteViewAuthenticatedCartTests(APITestCase):
 
         self.assertEqual(len(response.data["options"]), 1)
         self.assertEqual(response.data["options"][0]["rate_id"], city_rate.id)
-        self.assertEqual(response.data["options"][0]["price"], "5000.00")
+        self.assertEqual(response.data["options"][0]["price"], 50_000_000)
 
     def test_missing_province_is_a_400(self):
         response = self.client.post(QUOTE_URL, {"city": "Tehran"}, format="json")
@@ -229,7 +229,7 @@ class ShippingQuoteViewGuestCartTests(APITestCase):
 
     def setUp(self):
         self.client = APIClient()
-        self.variant = make_variant(price="30.00", stock=10)
+        self.variant = make_variant(price=300_000, stock=10)
         self.variant.weight_g = 400
         self.variant.save(update_fields=["weight_g"])
 

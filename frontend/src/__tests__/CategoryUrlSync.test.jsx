@@ -18,10 +18,12 @@ vi.mock('../context/CartContext', () => ({
 import {
   getProducts, getCategories, getBrands, getColors, getProductFacetCounts,
 } from '../services/api';
+import { PRICE_FILTER_MAX_TOMAN } from '../constants/pricing';
+import { formatToman } from '../utils/money';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 const PRODUCT = {
-  id: 1, slug: 'test-product', name: 'Test Product', price: '49.99', original_price: null,
+  id: 1, slug: 'test-product', name: 'Test Product', price: 499_900, original_price: null,
   rating: 4.5, reviews_count: 10, stock: 5, is_new: false, is_sale: false,
   discount_percent: 0, thumbnail_url: '/img/t.webp', images: [], category: { name: 'Skincare' },
 };
@@ -99,7 +101,7 @@ const forward = (user) => user.click(screen.getByRole('button', { name: 'history
 const chip = (text) => screen.getByText(text);
 
 const FULL_URL =
-  '/category?category=skincare&search=rose&brand=acme,zen&color=Red&min_price=100&max_price=500' +
+  '/category?category=skincare&search=rose&brand=acme,zen&color=Red&min_price=1000000&max_price=5000000' +
   '&skin_type=oily,dry&hair_type=curly&gender=female&min_spf=30&max_spf=50' +
   '&is_cruelty_free=true&is_vegan=true&ordering=price&page=2&page_size=24&flash_sale=7';
 
@@ -136,8 +138,8 @@ describe('Category URL sync — a URL restores the page', () => {
       search: 'rose',
       brand: 'acme,zen',
       color: 'Red',
-      min_price: 100,
-      max_price: 500,
+      min_price: 1_000_000,
+      max_price: 5_000_000,
       flash_sale: '7',
       skin_type: 'oily,dry',
       hair_type: 'curly',
@@ -161,8 +163,9 @@ describe('Category URL sync — a URL restores the page', () => {
     expect(colorBox('Red')).toBeChecked();
     expect(colorBox('Deep Blue')).not.toBeChecked();
     const [minPrice, maxPrice] = priceInputs();
-    expect(minPrice).toHaveValue(100);
-    expect(maxPrice).toHaveValue(500);
+    // inputs are in TOMAN; the URL carries RIAL
+    expect(minPrice).toHaveValue(100_000);
+    expect(maxPrice).toHaveValue(500_000);
     expect(sortSelect()).toHaveValue('price');
     expect(pageSizeSelect()).toHaveValue('24');
     expect(screen.getByRole('button', { name: 'Skincare' })).toHaveClass('text-teal-600');
@@ -186,7 +189,7 @@ describe('Category URL sync — a URL restores the page', () => {
     await sidebarReady();
     ['Skin Type: Oily', 'Skin Type: Dry', 'Hair Type: Curly', 'Gender: Female',
       'Certification: Vegan', 'Brand: Acme', 'Brand: Zen', 'Color: Red', 'Search: rose',
-      'Category: Skincare', 'Price: $100 – $500', 'SPF: 30 – 50'].forEach((text) =>
+      'Category: Skincare', `Price: ${formatToman(1_000_000)} – ${formatToman(5_000_000)}`, 'SPF: 30 – 50'].forEach((text) =>
       expect(chip(text)).toBeInTheDocument(),
     );
   });
@@ -247,7 +250,7 @@ describe('Category URL sync — changes write the URL', () => {
 
     await user.click(screen.getByRole('button', { name: 'Skincare' }));
     await user.click(colorBox('Deep Blue'));
-    fireEvent.change(priceInputs()[0], { target: { value: '100' } });
+    fireEvent.change(priceInputs()[0], { target: { value: '100000' } }); // Toman
     await user.click(box('Curly'));
     await user.click(radio('Male'));
     await user.type(screen.getByLabelText('Minimum SPF'), '15');
@@ -260,7 +263,7 @@ describe('Category URL sync — changes write the URL', () => {
     expect(Object.fromEntries(url())).toEqual({
       category: 'skincare',
       color: 'Deep Blue',
-      min_price: '100',
+      min_price: '1000000', // Rial
       hair_type: 'curly',
       gender: 'male',
       min_spf: '15',
@@ -453,17 +456,17 @@ describe('Category URL sync — browser history', () => {
   });
 
   it('the price slider follows the URL on Back', async () => {
-    const { user } = renderCategory({ entries: ['/category?min_price=100&max_price=500'] });
+    const { user } = renderCategory({ entries: ['/category?min_price=1000000&max_price=5000000'] });
     await settle();
-    expect(priceInputs()[0]).toHaveValue(100);
+    expect(priceInputs()[0]).toHaveValue(100_000);
 
     await user.click(screen.getByRole('button', { name: 'external-nav' })); // no price in this URL
     await waitFor(() => expect(priceInputs()[0]).toHaveValue(0));
-    expect(priceInputs()[1]).toHaveValue(1000);
+    expect(priceInputs()[1]).toHaveValue(PRICE_FILTER_MAX_TOMAN);
 
     await back(user);
-    await waitFor(() => expect(priceInputs()[0]).toHaveValue(100));
-    expect(priceInputs()[1]).toHaveValue(500);
+    await waitFor(() => expect(priceInputs()[0]).toHaveValue(100_000));
+    expect(priceInputs()[1]).toHaveValue(500_000);
   });
 
   it('a refresh restores the same filters, sidebar and results (state lives in the URL)', async () => {
@@ -475,9 +478,9 @@ describe('Category URL sync — browser history', () => {
     await first.user.click(box('Vegan'));
     await first.user.click(box('Acme'));
     await first.user.selectOptions(sortSelect(), '-price');
-    fireEvent.change(priceInputs()[1], { target: { value: '400' } });
-    await waitFor(() => expect(url().get('max_price')).toBe('400'));
-    await waitFor(() => expect(lastParams().max_price).toBe(400));
+    fireEvent.change(priceInputs()[1], { target: { value: '400000' } }); // Toman
+    await waitFor(() => expect(url().get('max_price')).toBe('4000000')); // Rial
+    await waitFor(() => expect(lastParams().max_price).toBe(4_000_000));
     const addressBar = locText();
     const requestBefore = lastParams();
 
@@ -493,7 +496,7 @@ describe('Category URL sync — browser history', () => {
     expect(box('Vegan')).toBeChecked();
     expect(box('Acme')).toBeChecked();
     expect(sortSelect()).toHaveValue('-price');
-    expect(priceInputs()[1]).toHaveValue(400);
+    expect(priceInputs()[1]).toHaveValue(400_000);
   });
 
   it('"Show all products" (flash sale) replaces, keeping the other filters', async () => {

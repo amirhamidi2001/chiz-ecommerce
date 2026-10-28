@@ -1,11 +1,10 @@
 from datetime import timedelta
-from decimal import Decimal
 
 from accounts.models import UserType
 from cart.models import CartItem
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.db.models import Avg, Count, DecimalField, F, Q, Sum
+from django.db.models import Avg, BigIntegerField, Count, F, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate, TruncMonth
 from django.utils import timezone
 from order.models import Order, OrderItem
@@ -48,10 +47,10 @@ def get_admin_overview(period: str = "30d") -> dict:
 
     # Revenue
     cur_rev = cur_orders.filter(status__in=_ACTIVE_STATUSES).aggregate(
-        t=Coalesce(Sum("total"), Decimal("0"))
+        t=Coalesce(Sum("total"), 0)
     )["t"]
     prev_rev = prev_orders.filter(status__in=_ACTIVE_STATUSES).aggregate(
-        t=Coalesce(Sum("total"), Decimal("0"))
+        t=Coalesce(Sum("total"), 0)
     )["t"]
 
     # Orders
@@ -86,14 +85,14 @@ def get_admin_overview(period: str = "30d") -> dict:
         )
         .annotate(date=TruncDate("created_at"))
         .values("date")
-        .annotate(revenue=Coalesce(Sum("total"), Decimal("0")), orders=Count("id"))
+        .annotate(revenue=Coalesce(Sum("total"), 0), orders=Count("id"))
         .order_by("date")
         .values("date", "revenue", "orders")
     )
 
     return {
         "revenue": {
-            "current": float(cur_rev),
+            "current": int(cur_rev),
             "change": _pct_change(cur_rev, prev_rev),
         },
         "orders": {
@@ -112,7 +111,7 @@ def get_admin_overview(period: str = "30d") -> dict:
         "revenue_chart": [
             {
                 "date": str(item["date"]),
-                "revenue": float(item["revenue"]),
+                "revenue": int(item["revenue"]),
                 "orders": item["orders"],
             }
             for item in revenue_chart
@@ -136,7 +135,7 @@ def get_monthly_revenue(months: int = 12) -> list:
         .annotate(month=TruncMonth("created_at"))
         .values("month")
         .annotate(
-            revenue=Coalesce(Sum("total"), Decimal("0")),
+            revenue=Coalesce(Sum("total"), 0),
             orders=Count("id"),
         )
         .order_by("month")
@@ -144,7 +143,7 @@ def get_monthly_revenue(months: int = 12) -> list:
     return [
         {
             "month": item["month"].strftime("%b %Y"),
-            "revenue": float(item["revenue"]),
+            "revenue": int(item["revenue"]),
             "orders": item["orders"],
         }
         for item in data
@@ -157,8 +156,8 @@ def get_top_products(limit: int = 10) -> list:
         .annotate(
             total_sold=Sum("quantity"),
             revenue=Coalesce(
-                Sum(F("unit_price") * F("quantity"), output_field=DecimalField()),
-                Decimal("0"),
+                Sum(F("unit_price") * F("quantity"), output_field=BigIntegerField()),
+                0,
             ),
         )
         .order_by("-total_sold")[:limit]
@@ -168,7 +167,7 @@ def get_top_products(limit: int = 10) -> list:
             "product_id": r["product_id"],
             "product_name": r["product_name"],
             "total_sold": r["total_sold"],
-            "revenue": float(r["revenue"]),
+            "revenue": int(r["revenue"]),
         }
         for r in rows
     ]
@@ -218,7 +217,7 @@ def get_recent_orders(limit: int = 10) -> list:
             "full_name": o.full_name,
             "email": o.email,
             "status": o.status,
-            "total": float(o.total),
+            "total": int(o.total),
             "items_count": o.items.count(),
             "created_at": o.created_at.isoformat(),
         }
@@ -234,7 +233,7 @@ def get_user_summary(user) -> dict:
 
     total_orders = user.orders.count()
     total_spent = user.orders.filter(status__in=_ACTIVE_STATUSES).aggregate(
-        t=Coalesce(Sum("total"), Decimal("0"))
+        t=Coalesce(Sum("total"), 0)
     )["t"]
     wishlist_count = Wishlist.objects.filter(user=user).count()
 
@@ -249,7 +248,7 @@ def get_user_summary(user) -> dict:
 
     return {
         "total_orders": total_orders,
-        "total_spent": float(total_spent),
+        "total_spent": int(total_spent),
         "wishlist_count": wishlist_count,
         "reviews_count": reviews_count,
         "pending_orders": pending_orders,

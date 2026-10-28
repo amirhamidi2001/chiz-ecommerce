@@ -134,9 +134,9 @@ class Profile(models.Model):
         upload_to="profiles/", default="profiles/default.webp", blank=True
     )
 
-    order_updates = models.BooleanField(default=True, verbose_name="Order Updates")
-    promotions = models.BooleanField(default=False, verbose_name="Promotions")
-    newsletter = models.BooleanField(default=True, verbose_name="Newsletter")
+    order_updates = models.BooleanField(default=True, verbose_name=_("Order Updates"))
+    promotions = models.BooleanField(default=False, verbose_name=_("Promotions"))
+    newsletter = models.BooleanField(default=True, verbose_name=_("Newsletter"))
 
     created_date = models.DateTimeField(auto_now_add=True)
     updated_date = models.DateTimeField(auto_now=True)
@@ -171,9 +171,9 @@ class OTPCode(models.Model):
     """
 
     class Purpose(models.TextChoices):
-        LOGIN = "login", "Login"
-        REGISTER = "register", "Register"
-        RESET = "reset", "Password Reset"
+        LOGIN = "login", _("Login")
+        REGISTER = "register", _("Register")
+        RESET = "reset", _("Password Reset")
 
     phone_number = models.CharField(max_length=15, db_index=True)
     purpose = models.CharField(max_length=20, choices=Purpose.choices)

@@ -1,6 +1,8 @@
 from accounts.models import UserType
+from core.money import rial_to_toman
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils.translation import gettext as _
 from payments.models import PaymentTransaction, RefundRequest
 from payments.serializers import RefundRequestCreateSerializer, RefundRequestSerializer
 from rest_framework import status
@@ -65,7 +67,7 @@ class OrderDetailView(APIView):
         order = self._get_order(request, pk)
         if not order:
             return Response(
-                {"detail": "Order not found."},
+                {"detail": _("Order not found.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
         serializer = OrderSerializer(order, context={"request": request})
@@ -76,14 +78,14 @@ class OrderDetailView(APIView):
         order = self._get_order(request, pk)
         if not order:
             return Response(
-                {"detail": "Order not found."},
+                {"detail": _("Order not found.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         requested_status = request.data.get("status")
         if requested_status != Order.Status.CANCELLED:
             return Response(
-                {"detail": "Only cancellation is allowed via this endpoint."},
+                {"detail": _("Only cancellation is allowed via this endpoint.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -95,7 +97,10 @@ class OrderDetailView(APIView):
         except ValueError:
             return Response(
                 {
-                    "detail": "Cannot cancel an order that has already been shipped or delivered."
+                    "detail": _(
+                        "Cannot cancel an order that has already been shipped or "
+                        "delivered."
+                    )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -135,16 +140,17 @@ class RefundRequestCreateView(APIView):
             # order belonging to someone else are indistinguishable from
             # the outside — both 404, never leaking which case it was.
             return Response(
-                {"detail": "Order not found."}, status=status.HTTP_404_NOT_FOUND
+                {"detail": _("Order not found.")}, status=status.HTTP_404_NOT_FOUND
             )
 
         if order.status not in self.ELIGIBLE_STATUSES:
             return Response(
                 {
-                    "detail": (
+                    "detail": _(
                         "This order isn't eligible for a refund request in its "
-                        f"current status ({order.get_status_display()})."
+                        "current status (%(status)s)."
                     )
+                    % {"status": order.get_status_display()}
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -161,7 +167,10 @@ class RefundRequestCreateView(APIView):
             amount = order.total
         elif amount > order.total:
             return Response(
-                {"amount": f"Cannot exceed the order total ({order.total})."},
+                {
+                    "amount": _("Cannot exceed the order total (%(total)s Toman).")
+                    % {"total": f"{rial_to_toman(order.total):,}"}
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -222,7 +231,7 @@ class OrderInvoiceView(APIView):
             user.is_staff or user.type in (UserType.ADMIN, UserType.SUPERUSER)
         ):
             return Response(
-                {"detail": "You do not have permission to view this invoice."},
+                {"detail": _("You do not have permission to view this invoice.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
         pdf_bytes = generate_invoice_pdf(order)

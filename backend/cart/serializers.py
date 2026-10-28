@@ -1,4 +1,6 @@
+from core.serializers import RialSerializerField
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from promotions.services import validate_coupon
 from rest_framework import serializers
 from shop.serializers import ColorSerializer
@@ -44,10 +46,8 @@ class CartItemVariantSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     sku = serializers.CharField()
     color = ColorSerializer(read_only=True, allow_null=True)
-    price = serializers.DecimalField(max_digits=10, decimal_places=2)
-    original_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2, allow_null=True
-    )
+    price = RialSerializerField()
+    original_price = RialSerializerField(allow_null=True)
     stock = serializers.IntegerField()
     product = CartItemProductSerializer(read_only=True)
 
@@ -55,10 +55,8 @@ class CartItemVariantSerializer(serializers.Serializer):
 class CartItemSerializer(serializers.ModelSerializer):
     variant = CartItemVariantSerializer(read_only=True)
     variant_id = serializers.IntegerField(write_only=True)
-    unit_price = serializers.DecimalField(
-        max_digits=10, decimal_places=2, read_only=True
-    )
-    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    unit_price = RialSerializerField(read_only=True)
+    subtotal = RialSerializerField(read_only=True)
 
     class Meta:
         model = CartItem
@@ -76,7 +74,7 @@ class CartItemSerializer(serializers.ModelSerializer):
 
     def validate_quantity(self, value):
         if value < 1:
-            raise serializers.ValidationError("Quantity must be at least 1.")
+            raise serializers.ValidationError(_("Quantity must be at least 1."))
         return value
 
     def validate_variant_id(self, value):
@@ -85,11 +83,13 @@ class CartItemSerializer(serializers.ModelSerializer):
         try:
             variant = ProductVariant.objects.get(pk=value)
         except ProductVariant.DoesNotExist:
-            raise serializers.ValidationError("Product variant not found.")
+            raise serializers.ValidationError(_("Product variant not found."))
         if not variant.is_active:
-            raise serializers.ValidationError("This product variant is unavailable.")
+            raise serializers.ValidationError(_("This product variant is unavailable."))
         if variant.stock < 1:
-            raise serializers.ValidationError("This product variant is out of stock.")
+            raise serializers.ValidationError(
+                _("This product variant is out of stock.")
+            )
         # A variant with expiration_date=None has no expiration data at
         # all — that is NOT treated as "expired"; only a set date in
         # the past blocks the add. NOTE: this block is currently
@@ -103,7 +103,7 @@ class CartItemSerializer(serializers.ModelSerializer):
             and variant.expiration_date < timezone.now().date()
         ):
             raise serializers.ValidationError(
-                "This product has expired and is no longer available for purchase."
+                _("This product has expired and is no longer available for purchase.")
             )
         return value
 
@@ -114,7 +114,7 @@ class CartApplyCouponSerializer(serializers.Serializer):
 
 class CartSerializer(serializers.ModelSerializer):
     items = CartItemSerializer(many=True, read_only=True)
-    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    subtotal = RialSerializerField(read_only=True)
     total_items = serializers.IntegerField(read_only=True)
     # Coupon display (Task 9.1.1.6). All three are recomputed live on every
     # serialization, so the cart always reflects the coupon's CURRENT
@@ -163,7 +163,7 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_coupon_discount(self, obj):
         result = self._coupon_check(obj)
-        return str(result.discount_amount) if result and result.valid else "0"
+        return result.discount_amount if result and result.valid else 0
 
     def get_coupon_error(self, obj):
         result = self._coupon_check(obj)

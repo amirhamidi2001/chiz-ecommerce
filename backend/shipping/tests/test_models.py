@@ -21,10 +21,10 @@ def make_order(user, **overrides):
         shipping_state=IranProvince.TEHRAN,
         shipping_zip="1234567890",
         shipping_country="IR",
-        subtotal=Decimal("100.00"),
-        shipping_cost=Decimal("9.99"),
-        tax=Decimal("10.00"),
-        total=Decimal("119.99"),
+        subtotal=1_000_000,
+        shipping_cost=99_900,
+        tax=100_000,
+        total=1_199_900,
     )
     fields.update(overrides)
     return Order.objects.create(**fields)
@@ -89,7 +89,7 @@ class ShippingRateFindRateTests(TestCase):
             province=IranProvince.TEHRAN,
             min_weight_g=0,
             max_weight_g=1000,
-            price=Decimal("50000.00"),
+            price=500_000_000,
         )
 
         found = ShippingRate.find_rate(
@@ -107,7 +107,7 @@ class ShippingRateFindRateTests(TestCase):
             province=IranProvince.TEHRAN,
             min_weight_g=0,
             max_weight_g=1000,
-            price=Decimal("50000.00"),
+            price=500_000_000,
         )
 
         found = ShippingRate.find_rate(
@@ -141,7 +141,7 @@ class ShippingRateFindRateTests(TestCase):
             city="",
             min_weight_g=0,
             max_weight_g=1000,
-            price=Decimal("50000.00"),
+            price=500_000_000,
         )
         city_specific = ShippingRate.objects.create(
             carrier=self.carrier,
@@ -149,7 +149,7 @@ class ShippingRateFindRateTests(TestCase):
             city="Tehran",
             min_weight_g=0,
             max_weight_g=1000,
-            price=Decimal("20000.00"),
+            price=200_000_000,
         )
 
         found = ShippingRate.find_rate(
@@ -168,7 +168,7 @@ class ShippingRateFindRateTests(TestCase):
             province=IranProvince.TEHRAN,
             min_weight_g=0,
             max_weight_g=1000,
-            price=Decimal("50000.00"),
+            price=500_000_000,
             is_active=False,
         )
 
@@ -192,7 +192,7 @@ class ShippingRateCleanTests(TestCase):
             province=IranProvince.TEHRAN,
             min_weight_g=1000,
             max_weight_g=1000,
-            price=Decimal("50000.00"),
+            price=500_000_000,
         )
 
         with self.assertRaises(ValidationError):

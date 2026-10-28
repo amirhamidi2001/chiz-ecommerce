@@ -8,7 +8,8 @@ class CouponAdmin(admin.ModelAdmin):
     list_display = (
         "code",
         "discount_type",
-        "value",
+        "percent_off",
+        "fixed_amount",
         "is_active",
         "valid_from",
         "valid_until",

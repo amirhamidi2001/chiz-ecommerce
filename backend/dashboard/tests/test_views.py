@@ -129,10 +129,10 @@ class TestUserSummaryView:
             assert field in res.data
 
     def test_reflects_created_order(self, customer_client, customer, make_order):
-        make_order(user=customer, status="delivered", total=Decimal("75.00"))
+        make_order(user=customer, status="delivered", total=750_000)
         res = customer_client.get(SUMMARY_URL)
         assert res.data["total_orders"] >= 1
-        assert res.data["total_spent"] >= 75.0
+        assert res.data["total_spent"] >= 750_000
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -679,7 +679,8 @@ EXPORT_URL = "/api/dashboard/admin/orders/export_csv/"
 EXPORT_HEADER = [
     "order_number", "created_at", "status", "first_name", "last_name",
     "email", "phone", "shipping_city", "shipping_state", "shipping_country",
-    "payment_method", "subtotal", "shipping_cost", "tax", "discount", "total",
+    "payment_method", "subtotal_rial", "shipping_cost_rial", "tax_rial",
+    "discount_rial", "total_rial",
 ]  # fmt: skip
 
 
@@ -707,14 +708,14 @@ class TestAdminOrderCsvExport:
     ):
         from order.models import Order
 
-        o1 = make_order(status="delivered", total=Decimal("120.50"))
-        o2 = make_order(status="pending", total=Decimal("30.00"))
+        o1 = make_order(status="delivered", total=1_205_000)
+        o2 = make_order(status="pending", total=300_000)
         Order.objects.filter(pk=o1.pk).update(
             first_name="Alice", last_name="Rahimi", email="alice@example.com",
             phone="09121111111", shipping_city="Tehran", shipping_state="tehran",
             shipping_country="IR", payment_method="paypal",
-            subtotal=Decimal("100.00"), shipping_cost=Decimal("15.50"),
-            tax=Decimal("10.00"), discount=Decimal("5.00"),
+            subtotal=1_000_000, shipping_cost=155_000,
+            tax=100_000, discount=50_000,
         )  # fmt: skip
 
         res = admin_client.get(EXPORT_URL)
@@ -735,11 +736,11 @@ class TestAdminOrderCsvExport:
         assert row["shipping_state"] == "tehran"
         assert row["shipping_country"] == "IR"
         assert row["payment_method"] == "paypal"
-        assert Decimal(row["subtotal"]) == Decimal("100.00")
-        assert Decimal(row["shipping_cost"]) == Decimal("15.50")
-        assert Decimal(row["tax"]) == Decimal("10.00")
-        assert Decimal(row["discount"]) == Decimal("5.00")
-        assert Decimal(row["total"]) == Decimal("120.50")
+        assert int(row["subtotal_rial"]) == 1_000_000
+        assert int(row["shipping_cost_rial"]) == 155_000
+        assert int(row["tax_rial"]) == 100_000
+        assert int(row["discount_rial"]) == 50_000
+        assert int(row["total_rial"]) == 1_205_000
         # ISO-8601, parseable, timezone-aware
         o1.refresh_from_db()
         assert row["created_at"] == o1.created_at.isoformat()
@@ -915,8 +916,10 @@ def _coupon_payload(**override):
     return {
         "code": "SUMMER20",
         "discount_type": "percent",
-        "value": "20.00",
-        "min_order_amount": "0.00",
+        # Two explicit columns (ADR 0001 §7.3): a percentage XOR a Rial amount.
+        "percent_off": "20.00",
+        "fixed_amount": None,
+        "min_order_amount": 0,
         "max_uses": None,
         "uses_per_user": 1,
         "valid_from": (now - timedelta(days=1)).isoformat(),
@@ -982,11 +985,12 @@ class TestAdminCouponCrud:
         # update
         res = admin_client.patch(
             coupon_detail(coupon_id),
-            {"value": "25.00", "max_uses": 100},
+            {"percent_off": "25.00", "max_uses": 100},
             format="json",
         )
         assert res.status_code == status.HTTP_200_OK, res.data
-        assert res.data["value"] == "25.00"
+        assert res.data["percent_off"] == "25.00"
+        assert res.data["fixed_amount"] is None
         assert res.data["max_uses"] == 100
         assert res.data["code"] == "SUMMER20"  # untouched by a partial update
 
@@ -1001,7 +1005,7 @@ class TestAdminCouponCrud:
 
         coupon = Coupon.objects.get(pk=coupon_id)
         assert coupon.is_active is False
-        assert coupon.value == Decimal("25.00")
+        assert coupon.percent_off == Decimal("25.00")
 
     def test_deactivated_coupon_is_rejected_by_validate_coupon(
         self, admin_client, customer, make_coupon
@@ -1010,7 +1014,7 @@ class TestAdminCouponCrud:
         from promotions.tests.factories import make_priced_cart
 
         coupon = make_coupon(code="LIVE")
-        cart = make_priced_cart(customer, "100.00")
+        cart = make_priced_cart(customer, 1_000_000)
         assert validate_coupon("LIVE", customer, cart).valid
 
         admin_client.patch(
@@ -1086,33 +1090,86 @@ class TestAdminCouponCrud:
 class TestAdminCouponValidation:
     """The API must enforce the Coupon.clean() rules itself."""
 
-    @pytest.mark.parametrize("value", ["0", "-5", "100.01", "150"])
-    def test_percent_value_outside_range_rejected(self, admin_client, value):
+    @pytest.mark.parametrize("percent", ["0", "-5", "100.01", "150"])
+    def test_percent_outside_range_rejected(self, admin_client, percent):
         res = admin_client.post(
             COUPONS_URL,
-            _coupon_payload(discount_type="percent", value=value),
+            _coupon_payload(discount_type="percent", percent_off=percent),
             format="json",
         )
         assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "value" in res.data
+        assert "percent_off" in res.data
 
-    def test_percent_value_of_exactly_100_accepted(self, admin_client):
+    def test_percent_of_exactly_100_accepted(self, admin_client):
         res = admin_client.post(
             COUPONS_URL,
-            _coupon_payload(discount_type="percent", value="100"),
+            _coupon_payload(discount_type="percent", percent_off="100"),
             format="json",
         )
         assert res.status_code == status.HTTP_201_CREATED, res.data
 
-    @pytest.mark.parametrize("value", ["0", "-10"])
-    def test_fixed_value_not_positive_rejected(self, admin_client, value):
+    @pytest.mark.parametrize("amount", [0, -10])
+    def test_fixed_amount_not_positive_rejected(self, admin_client, amount):
         res = admin_client.post(
             COUPONS_URL,
-            _coupon_payload(discount_type="fixed", value=value),
+            _coupon_payload(
+                discount_type="fixed", percent_off=None, fixed_amount=amount
+            ),
             format="json",
         )
         assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "value" in res.data
+        assert "fixed_amount" in res.data
+
+    def test_fixed_coupon_round_trips_a_rial_integer(self, admin_client):
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(
+                discount_type="fixed",
+                percent_off=None,
+                fixed_amount=500_000,
+                min_order_amount=2_000_000,
+            ),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_201_CREATED, res.data
+        # JSON integers (Rial), never strings
+        assert res.data["fixed_amount"] == 500_000
+        assert res.data["min_order_amount"] == 2_000_000
+        assert res.data["percent_off"] is None
+
+    @pytest.mark.parametrize("amount", [500_005, 100_000_000_010])
+    def test_fixed_amount_must_be_a_whole_toman_within_the_cap(
+        self, admin_client, amount
+    ):
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(
+                discount_type="fixed", percent_off=None, fixed_amount=amount
+            ),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "fixed_amount" in res.data
+
+    def test_a_percent_coupon_may_not_also_carry_a_fixed_amount(self, admin_client):
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(discount_type="percent", fixed_amount=100_000),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "fixed_amount" in res.data
+
+    def test_a_fixed_coupon_may_not_also_carry_a_percentage(self, admin_client):
+        res = admin_client.post(
+            COUPONS_URL,
+            _coupon_payload(
+                discount_type="fixed", percent_off="10.00", fixed_amount=100_000
+            ),
+            format="json",
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "percent_off" in res.data
 
     def test_valid_until_not_after_valid_from_rejected(self, admin_client):
         from django.utils import timezone
@@ -1148,17 +1205,18 @@ class TestAdminCouponValidation:
     ):
         from decimal import Decimal
 
-        coupon = make_coupon(discount_type="fixed", value=Decimal("500.00"))
+        coupon = make_coupon(discount_type="fixed", fixed_amount=5_000_000)
         res = admin_client.patch(
             coupon_detail(coupon.id), {"discount_type": "percent"}, format="json"
         )
         assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "value" in res.data
+        assert "percent_off" in res.data
 
     @pytest.mark.parametrize(
         "field,bad",
         [
-            ("min_order_amount", "-1.00"),
+            ("min_order_amount", -10),
+            ("min_order_amount", 5),
             ("uses_per_user", 0),
             ("max_uses", 0),
         ],
@@ -1173,7 +1231,7 @@ class TestAdminCouponValidation:
     def test_missing_required_fields_rejected(self, admin_client):
         res = admin_client.post(COUPONS_URL, {"code": "X"}, format="json")
         assert res.status_code == status.HTTP_400_BAD_REQUEST
-        for field in ("discount_type", "value", "valid_from", "valid_until"):
+        for field in ("discount_type", "valid_from", "valid_until"):
             assert field in res.data
 
 

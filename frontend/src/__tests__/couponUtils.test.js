@@ -11,6 +11,7 @@ import {
   toLocalInput,
   validateCouponForm,
 } from "../utils/coupon";
+import { formatToman } from "../utils/money";
 
 const valid = (overrides = {}) => ({
   ...EMPTY_COUPON_FORM,
@@ -39,6 +40,7 @@ describe("validateCouponForm", () => {
     expect(fixed("0").value).toBeTruthy();
     expect(fixed("-5").value).toBeTruthy();
     expect(fixed("500").value).toBeUndefined();
+    expect(fixed("12.5").value).toBeTruthy(); // fixed amounts are whole Toman
   });
 
   it("requires a code of at most 32 characters", () => {
@@ -90,12 +92,21 @@ describe("buildCouponPayload / couponToForm", () => {
     expect(payload.valid_from).toBe(new Date("2030-01-01T10:00").toISOString());
   });
 
+  it("sends percent_off XOR fixed_amount, with money converted Toman -> Rial", () => {
+    const fixed = buildCouponPayload(valid({ discount_type: "fixed", value: "5000", min_order_amount: "10000" }));
+    expect(fixed).toMatchObject({ percent_off: null, fixed_amount: 50_000, min_order_amount: 100_000 });
+    const percent = buildCouponPayload(valid({ discount_type: "percent", value: "12.5" }));
+    expect(percent).toMatchObject({ percent_off: "12.5", fixed_amount: null });
+    expect(percent).not.toHaveProperty("value");
+  });
+
   it("round-trips an API coupon through the form unchanged", () => {
     const coupon = {
       code: "X",
       discount_type: "fixed",
-      value: "5.00",
-      min_order_amount: "10.00",
+      percent_off: null,
+      fixed_amount: 50_000, // Rial (5,000 Toman)
+      min_order_amount: 100_000, // Rial (10,000 Toman)
       max_uses: 3,
       uses_per_user: 2,
       valid_from: "2030-01-01T10:00:00.000Z",
@@ -105,7 +116,8 @@ describe("buildCouponPayload / couponToForm", () => {
       products_detail: [],
     };
     const form = couponToForm(coupon);
-    expect(form).toMatchObject({ value: "5.00", max_uses: "3", is_active: false });
+    // the form is typed in TOMAN; the API carries RIAL
+    expect(form).toMatchObject({ value: "5000", min_order_amount: "10000", max_uses: "3", is_active: false });
     expect(changedFields(buildCouponPayload(form), buildCouponPayload(form))).toEqual({});
   });
 
@@ -153,8 +165,8 @@ describe("couponStatus / formatCouponValue", () => {
     expect(couponStatus(base, new Date("2027-06-01"))).toBe("Expired");
   });
   it("formats percent and fixed values", () => {
-    expect(formatCouponValue({ discount_type: "percent", value: "20.00" })).toBe("20%");
-    expect(formatCouponValue({ discount_type: "percent", value: "12.50" })).toBe("12.5%");
-    expect(formatCouponValue({ discount_type: "fixed", value: "5" })).toBe("$5.00");
+    expect(formatCouponValue({ discount_type: "percent", percent_off: "20.00" })).toBe("20%");
+    expect(formatCouponValue({ discount_type: "percent", percent_off: "12.50" })).toBe("12.5%");
+    expect(formatCouponValue({ discount_type: "fixed", fixed_amount: 50_000 })).toBe(formatToman(50_000));
   });
 });

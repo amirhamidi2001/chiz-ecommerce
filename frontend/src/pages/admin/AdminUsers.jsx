@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { adminAPI } from "../../services/api";
 import DataTable from "../../components/admin/DataTable";
 import Toast, { useToast } from "../../components/admin/Toast";
+import { formatToman } from '../../utils/money';
 
 const USER_TYPES = { 1: "Customer", 2: "Admin", 3: "Superuser" };
 
@@ -59,8 +60,7 @@ const AdminUsers = () => {
     }
   };
 
-  const fmt = (n) =>
-    new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+  const fmt = (n) => formatToman(n);
 
   const COLUMNS = [
     {

@@ -15,6 +15,7 @@ vi.mock('../services/api', () => ({
 
 // We import the mocked functions AFTER vi.mock so the references are the spies.
 import { getProducts, getCategories, getBrands } from '../services/api';
+import { formatToman } from '../utils/money';
 
 // Mock context hooks so we can control their return values per test.
 const mockAddToCart = vi.fn();
@@ -54,7 +55,7 @@ const makeProduct = (overrides = {}) => ({
   id: 1,
   name: 'Test Product',
   slug: 'test-product',
-  price: '29.99',
+  price: 299_900,
   sale_price: null,
   rating: 4.2,
   reviews_count: 17,
@@ -453,15 +454,16 @@ describe('Price range filter', () => {
     const minInputs = screen.getAllByPlaceholderText(/min/i);
     const maxInputs = screen.getAllByPlaceholderText(/max/i);
 
-    await user.type(minInputs[0], '10');
-    await user.type(maxInputs[0], '100');
+    // the inputs take TOMAN; the API param is RIAL (x10)
+    await user.type(minInputs[0], '100000');
+    await user.type(maxInputs[0], '1000000');
 
     const applyBtns = screen.getAllByRole('button', { name: /apply/i });
     await user.click(applyBtns[0]);
 
     await waitFor(() =>
       expect(getProducts).toHaveBeenCalledWith(
-        expect.objectContaining({ min_price: '10', max_price: '100' }),
+        expect.objectContaining({ min_price: '1000000', max_price: '10000000' }),
         expect.anything(),
       ),
     );
@@ -492,10 +494,12 @@ describe('Active filter chips', () => {
   it('renders an active chip for an applied price range', async () => {
     getProducts.mockReturnValue(resolvedProducts([makeProduct()]));
 
-    renderSearchResults('?min_price=10&max_price=100');
+    renderSearchResults('?min_price=1000000&max_price=10000000'); // Rial
 
     await waitFor(() =>
-      expect(screen.getByText(/price: \$10 – \$100/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(new RegExp(`price: ${formatToman(1_000_000)} – ${formatToman(10_000_000)}`, 'i')),
+      ).toBeInTheDocument(),
     );
   });
 
@@ -882,8 +886,8 @@ describe('ProductCard display', () => {
     const product = makeProduct({
       id: 99,
       name: 'Sale Item',
-      price: '50.00',
-      sale_price: '35.00',
+      price: 500_000,
+      sale_price: 350_000,
     });
     getProducts.mockReturnValue(resolvedProducts([product], 1));
 
@@ -893,8 +897,8 @@ describe('ProductCard display', () => {
       expect(screen.getByText('Sale Item')).toBeInTheDocument(),
     );
 
-    expect(screen.getByText('$35.00')).toBeInTheDocument();
-    expect(screen.getByText('$50.00')).toBeInTheDocument();
+    expect(screen.getByText(formatToman(350_000))).toBeInTheDocument();
+    expect(screen.getByText(formatToman(500_000))).toBeInTheDocument();
   });
 
   it('renders the "New" badge when product.is_new is true', async () => {
@@ -929,8 +933,8 @@ describe('ProductCard display', () => {
     const product = makeProduct({
       id: 22,
       name: 'Discounted Item',
-      price: '100.00',
-      sale_price: '75.00',
+      price: 1_000_000,
+      sale_price: 750_000,
     });
     getProducts.mockReturnValue(resolvedProducts([product], 1));
 

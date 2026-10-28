@@ -17,6 +17,7 @@ vi.mock('../context/CartContext', () => ({
 }));
 
 import { getOrderDetail } from '../services/api';
+import { formatToman } from '../utils/money';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,11 +49,11 @@ const buildOrder = (overrides = {}) => ({
   phone: '+1 555-0100',
   notes: '',
   // financial
-  subtotal: '89.99',
-  shipping_cost: '5.00',
-  tax: '7.20',
-  discount: '0.00',
-  total: '102.19',
+  subtotal: 899_900,
+  shipping_cost: 50_000,
+  tax: 72_000,
+  discount: 0,
+  total: 1_021_900,
   // shipping address
   shipping_address: '123 Main St',
   shipping_apartment: '',
@@ -73,8 +74,8 @@ const buildOrder = (overrides = {}) => ({
       product_slug: 'wireless-headphones',
       product_image: null,
       quantity: 2,
-      unit_price: '39.99',
-      subtotal: '79.98',
+      unit_price: 399_900,
+      subtotal: 799_800,
     },
     {
       id: 2,
@@ -82,8 +83,8 @@ const buildOrder = (overrides = {}) => ({
       product_slug: 'phone-case',
       product_image: null,
       quantity: 1,
-      unit_price: '9.99',
-      subtotal: '9.99',
+      unit_price: 99_900,
+      subtotal: 99_900,
     },
   ],
   ...overrides,
@@ -135,43 +136,43 @@ describe('OrderConfirmation', () => {
       renderWithRoute();
 
       // Total appears in the financial summary sidebar
-      await screen.findByText('$102.19');
+      await screen.findByText(formatToman(1_021_900));
     });
 
     it('renders subtotal, shipping cost, and tax line items', async () => {
       renderWithRoute();
 
-      await screen.findByText('$89.99');  // subtotal
-      await screen.findByText('$5.00');   // shipping
-      await screen.findByText('$7.20');   // tax
+      await screen.findByText(formatToman(899_900));  // subtotal
+      await screen.findByText(formatToman(50_000));   // shipping
+      await screen.findByText(formatToman(72_000));   // tax
     });
 
     it('renders a discount row only when a discount is applied', async () => {
       getOrderDetail.mockResolvedValue({
-        data: buildOrder({ discount: '15.00' }),
+        data: buildOrder({ discount: 150_000 }),
       });
 
       renderWithRoute();
 
-      await screen.findByText(/-\$15\.00/);
+      await screen.findByText('-' + formatToman(150_000));
     });
 
     it('does not render a discount row when discount is zero', async () => {
       renderWithRoute();
 
       await screen.findByText(/thanks for your order/i);
-      expect(screen.queryByText(/-\$0\.00/)).not.toBeInTheDocument();
+      expect(screen.queryByText('-' + formatToman(0))).not.toBeInTheDocument();
     });
 
     it('renders all order items with name, quantity, unit price, and subtotal', async () => {
       renderWithRoute();
 
       await screen.findByText('Wireless Headphones');
-      expect(screen.getByText(/2 × \$39\.99/)).toBeInTheDocument();
-      expect(screen.getByText(/\$79\.98/)).toBeInTheDocument();
+      expect(screen.getByText(`2 × ${formatToman(399_900)}`)).toBeInTheDocument();
+      expect(screen.getByText(formatToman(799_800))).toBeInTheDocument();
 
       expect(screen.getByText('Phone Case')).toBeInTheDocument();
-      expect(screen.getByText(/1 × \$9\.99/)).toBeInTheDocument();
+      expect(screen.getByText(`1 × ${formatToman(99_900)}`)).toBeInTheDocument();
     });
 
     it('renders shipping address details', async () => {

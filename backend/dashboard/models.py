@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 
 class IranProvince(models.TextChoices):
@@ -12,47 +13,47 @@ class IranProvince(models.TextChoices):
     affects real customers' ability to enter a valid shipping address.
     """
 
-    ALBORZ = "alborz", "Alborz"
-    ARDABIL = "ardabil", "Ardabil"
-    BUSHEHR = "bushehr", "Bushehr"
+    ALBORZ = "alborz", _("Alborz")
+    ARDABIL = "ardabil", _("Ardabil")
+    BUSHEHR = "bushehr", _("Bushehr")
     CHAHARMAHAL_AND_BAKHTIARI = (
         "chaharmahal_and_bakhtiari",
-        "Chaharmahal and Bakhtiari",
+        _("Chaharmahal and Bakhtiari"),
     )
-    EAST_AZERBAIJAN = "east_azerbaijan", "East Azerbaijan"
-    FARS = "fars", "Fars"
-    GILAN = "gilan", "Gilan"
-    GOLESTAN = "golestan", "Golestan"
-    HAMADAN = "hamadan", "Hamadan"
-    HORMOZGAN = "hormozgan", "Hormozgan"
-    ILAM = "ilam", "Ilam"
-    ISFAHAN = "isfahan", "Isfahan"
-    KERMAN = "kerman", "Kerman"
-    KERMANSHAH = "kermanshah", "Kermanshah"
-    KHUZESTAN = "khuzestan", "Khuzestan"
+    EAST_AZERBAIJAN = "east_azerbaijan", _("East Azerbaijan")
+    FARS = "fars", _("Fars")
+    GILAN = "gilan", _("Gilan")
+    GOLESTAN = "golestan", _("Golestan")
+    HAMADAN = "hamadan", _("Hamadan")
+    HORMOZGAN = "hormozgan", _("Hormozgan")
+    ILAM = "ilam", _("Ilam")
+    ISFAHAN = "isfahan", _("Isfahan")
+    KERMAN = "kerman", _("Kerman")
+    KERMANSHAH = "kermanshah", _("Kermanshah")
+    KHUZESTAN = "khuzestan", _("Khuzestan")
     KOHGILUYEH_AND_BOYER_AHMAD = (
         "kohgiluyeh_and_boyer_ahmad",
-        "Kohgiluyeh and Boyer-Ahmad",
+        _("Kohgiluyeh and Boyer-Ahmad"),
     )
-    KURDISTAN = "kurdistan", "Kurdistan"
-    LORESTAN = "lorestan", "Lorestan"
-    MARKAZI = "markazi", "Markazi"
-    MAZANDARAN = "mazandaran", "Mazandaran"
-    NORTH_KHORASAN = "north_khorasan", "North Khorasan"
-    QAZVIN = "qazvin", "Qazvin"
-    QOM = "qom", "Qom"
-    KHORASAN_RAZAVI = "khorasan_razavi", "Khorasan Razavi"
-    SEMNAN = "semnan", "Semnan"
-    SISTAN_AND_BALUCHESTAN = "sistan_and_baluchestan", "Sistan and Baluchestan"
-    SOUTH_KHORASAN = "south_khorasan", "South Khorasan"
-    TEHRAN = "tehran", "Tehran"
-    WEST_AZERBAIJAN = "west_azerbaijan", "West Azerbaijan"
-    YAZD = "yazd", "Yazd"
-    ZANJAN = "zanjan", "Zanjan"
+    KURDISTAN = "kurdistan", _("Kurdistan")
+    LORESTAN = "lorestan", _("Lorestan")
+    MARKAZI = "markazi", _("Markazi")
+    MAZANDARAN = "mazandaran", _("Mazandaran")
+    NORTH_KHORASAN = "north_khorasan", _("North Khorasan")
+    QAZVIN = "qazvin", _("Qazvin")
+    QOM = "qom", _("Qom")
+    KHORASAN_RAZAVI = "khorasan_razavi", _("Khorasan Razavi")
+    SEMNAN = "semnan", _("Semnan")
+    SISTAN_AND_BALUCHESTAN = "sistan_and_baluchestan", _("Sistan and Baluchestan")
+    SOUTH_KHORASAN = "south_khorasan", _("South Khorasan")
+    TEHRAN = "tehran", _("Tehran")
+    WEST_AZERBAIJAN = "west_azerbaijan", _("West Azerbaijan")
+    YAZD = "yazd", _("Yazd")
+    ZANJAN = "zanjan", _("Zanjan")
 
 
 iran_postal_code_validator = RegexValidator(
-    regex=r"^\d{10}$", message="Enter a valid 10-digit Iranian postal code."
+    regex=r"^\d{10}$", message=_("Enter a valid 10-digit Iranian postal code.")
 )
 
 
@@ -60,9 +61,9 @@ class Address(models.Model):
     """Saved shipping / billing address for a user."""
 
     class Label(models.TextChoices):
-        HOME = "home", "Home"
-        OFFICE = "office", "Office"
-        OTHER = "other", "Other"
+        HOME = "home", _("Home")
+        OFFICE = "office", _("Office")
+        OTHER = "other", _("Other")
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -92,8 +93,8 @@ class Address(models.Model):
 
     class Meta:
         ordering = ["-is_default", "-created_at"]
-        verbose_name = "Address"
-        verbose_name_plural = "Addresses"
+        verbose_name = _("Address")
+        verbose_name_plural = _("Addresses")
 
     def __str__(self):
         return f"{self.label} — {self.user.email}"
@@ -146,8 +147,8 @@ class Wishlist(models.Model):
         # hence the separate partial UniqueConstraint below.
         unique_together = ("user", "product")
         ordering = ["-added_at"]
-        verbose_name = "Wishlist Item"
-        verbose_name_plural = "Wishlist Items"
+        verbose_name = _("Wishlist Item")
+        verbose_name_plural = _("Wishlist Items")
         constraints = [
             models.CheckConstraint(
                 condition=(

@@ -35,10 +35,10 @@ def make_order(user, **overrides):
         shipping_state=IranProvince.TEHRAN,
         shipping_zip="1234567890",
         shipping_country="IR",
-        subtotal=Decimal("100.00"),
-        shipping_cost=Decimal("9.99"),
-        tax=Decimal("10.00"),
-        total=Decimal("119.99"),
+        subtotal=1_000_000,
+        shipping_cost=99_900,
+        tax=100_000,
+        total=1_199_900,
     )
     fields.update(overrides)
     return Order.objects.create(**fields)

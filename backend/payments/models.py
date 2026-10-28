@@ -1,17 +1,19 @@
+from core.fields import RialField, whole_toman_constraint
 from django.conf import settings
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 
 class PaymentTransaction(models.Model):
     class Gateway(models.TextChoices):
-        ZARINPAL = "zarinpal", "ZarinPal"
-        ZIBAL = "zibal", "Zibal"
-        IDPAY = "idpay", "IDPay"
+        ZARINPAL = "zarinpal", _("ZarinPal")
+        ZIBAL = "zibal", _("Zibal")
+        IDPAY = "idpay", _("IDPay")
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        SUCCESS = "success", "Success"
-        FAILED = "failed", "Failed"
+        PENDING = "pending", _("Pending")
+        SUCCESS = "success", _("Success")
+        FAILED = "failed", _("Failed")
 
     order = models.ForeignKey(
         "order.Order", on_delete=models.CASCADE, related_name="payment_transactions"
@@ -24,18 +26,24 @@ class PaymentTransaction(models.Model):
         max_length=100,
         blank=True,
         db_index=True,
-        help_text="Gateway-issued reference code for this transaction (ZarinPal calls this 'Authority').",
+        help_text=_(
+            "Gateway-issued reference code for this transaction (ZarinPal calls this 'Authority')."
+        ),
     )
     ref_id = models.CharField(
         max_length=100,
         blank=True,
-        help_text="Gateway-issued final transaction reference, populated on success.",
+        help_text=_(
+            "Gateway-issued final transaction reference, populated on success."
+        ),
     )
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    amount = RialField()
     raw_callback_payload = models.JSONField(
         null=True,
         blank=True,
-        help_text="Full raw payload received from the gateway's callback, stored for audit/debugging.",
+        help_text=_(
+            "Full raw payload received from the gateway's callback, stored for audit/debugging."
+        ),
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -43,6 +51,7 @@ class PaymentTransaction(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["gateway", "authority"])]
+        constraints = [whole_toman_constraint("amount")]
 
     def __str__(self):
         return f"{self.gateway} — {self.order.order_number} — {self.status}"
@@ -70,8 +79,10 @@ class PaymentGatewayConfig(models.Model):
         default=list,
         blank=True,
         help_text=(
-            "Ordered list of gateway names to try if the active gateway's "
-            "request fails, e.g. ['zibal', 'idpay']."
+            _(
+                "Ordered list of gateway names to try if the active gateway's "
+                "request fails, e.g. ['zibal', 'idpay']."
+            )
         ),
     )
     updated_at = models.DateTimeField(auto_now=True)
@@ -82,7 +93,7 @@ class PaymentGatewayConfig(models.Model):
 
     @classmethod
     def get_solo(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
+        obj, _created = cls.objects.get_or_create(pk=1)
         return obj
 
     def __str__(self):
@@ -142,10 +153,10 @@ class RefundRequest(models.Model):
     """
 
     class Status(models.TextChoices):
-        REQUESTED = "requested", "Requested"
-        APPROVED = "approved", "Approved"
-        PROCESSED = "processed", "Processed (refunded outside platform)"
-        REJECTED = "rejected", "Rejected"
+        REQUESTED = "requested", _("Requested")
+        APPROVED = "approved", _("Approved")
+        PROCESSED = "processed", _("Processed (refunded outside platform)")
+        REJECTED = "rejected", _("Rejected")
 
     order = models.ForeignKey(
         "order.Order", on_delete=models.CASCADE, related_name="refund_requests"
@@ -163,7 +174,7 @@ class RefundRequest(models.Model):
         null=True,
         related_name="refund_requests",
     )
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    amount = RialField()
     reason = models.TextField()
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.REQUESTED
@@ -174,6 +185,7 @@ class RefundRequest(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [whole_toman_constraint("amount")]
 
     def __str__(self):
         return f"Refund request for {self.order.order_number} — {self.status}"

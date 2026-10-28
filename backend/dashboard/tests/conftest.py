@@ -126,7 +126,7 @@ def make_product(db, make_category, make_brand):
 
     def _make(
         name: str | None = None,
-        price: Decimal = Decimal("99.99"),
+        price: Decimal = 999_900,
         stock: int = 10,
         is_sale: bool = False,
         is_new: bool = False,
@@ -157,7 +157,7 @@ def make_variant(db, make_product):
     def _make(
         product=None,
         sku: str | None = None,
-        price: Decimal = Decimal("99.99"),
+        price: Decimal = 999_900,
         stock: int = 10,
         low_stock_threshold: int = 5,
         is_active: bool = True,
@@ -187,7 +187,7 @@ def make_order(db, customer):
     def _make(
         user=None,
         status: str = "pending",
-        total: Decimal = Decimal("99.99"),
+        total: Decimal = 999_900,
     ) -> "Order":
         _counter[0] += 1
         return Order.objects.create(
@@ -205,9 +205,9 @@ def make_order(db, customer):
             shipping_country="US",
             payment_method="card",
             subtotal=total,
-            shipping_cost=Decimal("0.00"),
-            tax=Decimal("0.00"),
-            discount=Decimal("0.00"),
+            shipping_cost=0,
+            tax=0,
+            discount=0,
             total=total,
         )
 

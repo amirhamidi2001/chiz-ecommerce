@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { dashboardAPI, downloadOrderInvoice } from "../services/api";
 import { saveBlob } from "../utils/download";
 import ShipmentTrackingWidget from "./ShipmentTrackingWidget";
+import { formatToman } from '../utils/money';
 
 const STATUS_STYLES = {
   pending: "bg-gray-100 text-gray-700",
@@ -11,8 +12,7 @@ const STATUS_STYLES = {
   cancelled: "bg-red-100 text-red-700",
 };
 
-const fmt = (n) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+const fmt = (n) => formatToman(n);
 
 // ─── Order detail modal ───────────────────────────────────────────────────────
 const OrderDetailModal = ({ orderId, onClose }) => {

@@ -5,6 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
+from django.utils.translation import gettext as _
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
@@ -101,7 +102,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         if value:
             # Basic phone number validation – adapt regex to your requirements
             if not re.match(r"^\+?1?\d{9,15}$", value):
-                raise serializers.ValidationError("Enter a valid phone number.")
+                raise serializers.ValidationError(_("Enter a valid phone number."))
         return value
 
 
@@ -173,13 +174,13 @@ class ChangePasswordSerializer(serializers.Serializer):
     def validate_current_password(self, value):
         user = self.context["request"].user
         if not user.check_password(value):
-            raise serializers.ValidationError("Current password is incorrect.")
+            raise serializers.ValidationError(_("Current password is incorrect."))
         return value
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["confirm_password"]:
             raise serializers.ValidationError(
-                {"confirm_password": "Passwords do not match."}
+                {"confirm_password": _("Passwords do not match.")}
             )
         user = self.context["request"].user
         try:
@@ -226,18 +227,18 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             uid = force_str(urlsafe_base64_decode(attrs["uid"]))
             user = User.objects.get(pk=uid)
         except (User.DoesNotExist, ValueError, TypeError, OverflowError):
-            raise serializers.ValidationError({"uid": "Invalid reset link."})
+            raise serializers.ValidationError({"uid": _("Invalid reset link.")})
 
         # Validate token
         if not password_reset_token.check_token(user, attrs["token"]):
             raise serializers.ValidationError(
-                {"token": "Reset link is invalid or has expired."}
+                {"token": _("Reset link is invalid or has expired.")}
             )
 
         # Validate passwords match
         if attrs["new_password"] != attrs["confirm_password"]:
             raise serializers.ValidationError(
-                {"confirm_password": "Passwords do not match."}
+                {"confirm_password": _("Passwords do not match.")}
             )
 
         validate_password(attrs["new_password"], user)

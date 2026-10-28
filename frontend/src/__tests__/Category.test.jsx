@@ -21,13 +21,14 @@ vi.mock('../context/CartContext', () => ({
 }));
 
 import { getProducts, getCategories, getBrands, getColors } from '../services/api';
+import { formatToman } from '../utils/money';
 
 // ─── Shared fixtures ──────────────────────────────────────────────────────────
 const makeProduct = (overrides = {}) => ({
   id: 1,
   slug: 'test-product',
   name: 'Test Product',
-  price: '49.99',
+  price: 499_900,
   original_price: null,
   rating: 4.5,
   reviews_count: 10,
@@ -112,8 +113,8 @@ describe('Category', () => {
   describe('success', () => {
     it('renders a list of products after a successful fetch', async () => {
       const products = [
-        makeProduct({ id: 1, name: 'Alpha Widget', price: '19.99' }),
-        makeProduct({ id: 2, slug: 'beta-gadget', name: 'Beta Gadget', price: '34.50' }),
+        makeProduct({ id: 1, name: 'Alpha Widget', price: 199_900 }),
+        makeProduct({ id: 2, slug: 'beta-gadget', name: 'Beta Gadget', price: 345_000 }),
       ];
       getProducts.mockResolvedValue(makeProductsResponse(products));
       defaultMeta();
@@ -137,27 +138,27 @@ describe('Category', () => {
 
     it('shows the formatted price for each product', async () => {
       getProducts.mockResolvedValue(
-        makeProductsResponse([makeProduct({ price: '99.00' })])
+        makeProductsResponse([makeProduct({ price: 990_000 })])
       );
       defaultMeta();
 
       renderCategory();
 
-      expect(await screen.findByText('$99.00')).toBeInTheDocument();
+      expect(await screen.findByText(formatToman(990_000))).toBeInTheDocument();
     });
 
     it('shows original (strike-through) price when a product is on sale', async () => {
       getProducts.mockResolvedValue(
         makeProductsResponse([
-          makeProduct({ price: '59.99', original_price: '89.99' }),
+          makeProduct({ price: 599_900, original_price: 899_900 }),
         ])
       );
       defaultMeta();
 
       renderCategory();
 
-      expect(await screen.findByText('$59.99')).toBeInTheDocument();
-      expect(screen.getByText('$89.99')).toBeInTheDocument();
+      expect(await screen.findByText(formatToman(599_900))).toBeInTheDocument();
+      expect(screen.getByText(formatToman(899_900))).toBeInTheDocument();
     });
 
     it('displays the total product count returned by the API', async () => {
@@ -474,7 +475,7 @@ describe('Category', () => {
       await screen.findByText('Test Product');
 
       getProducts.mockClear();
-      getProducts.mockResolvedValue(makeProductsResponse([makeProduct({ name: 'Cheap Item', price: '5.00' })]));
+      getProducts.mockResolvedValue(makeProductsResponse([makeProduct({ name: 'Cheap Item', price: 50_000 })]));
 
       const sortSelect = screen.getByText('Sort By').nextElementSibling;
       await user.selectOptions(sortSelect, 'price');
@@ -544,7 +545,7 @@ describe('Category', () => {
   describe('pagination', () => {
     const multiPageResponse = (page = 1) =>
       makeProductsResponse(
-        [makeProduct({ id: page, name: `Product on page ${page}`, price: '10.00' })],
+        [makeProduct({ id: page, name: `Product on page ${page}`, price: 100_000 })],
         { count: 30, total_pages: 3 }
       );
 
@@ -633,7 +634,7 @@ describe('Category', () => {
         .mockResolvedValueOnce(multiPageResponse(2))
         .mockResolvedValueOnce(
           makeProductsResponse(
-            [makeProduct({ id: 3, name: 'Product on page 3', price: '10.00' })],
+            [makeProduct({ id: 3, name: 'Product on page 3', price: 100_000 })],
             { count: 30, total_pages: 3 }
           )
         );
@@ -766,10 +767,10 @@ describe('Category', () => {
         id: 11,
         name: 'Vitamin C Serum',
         slug: 'vitamin-c-serum',
-        price: '80.00',
+        price: 800_000,
         is_on_flash_sale: true,
-        flash_sale_price: '60.00',
-        flash_sale_original_price: '80.00',
+        flash_sale_price: 600_000,
+        flash_sale_original_price: 800_000,
         flash_sale_price_varies: false,
         flash_sale_discount_percent: '25.00',
         ...overrides,
@@ -783,8 +784,8 @@ describe('Category', () => {
 
       expect(await screen.findByText('Vitamin C Serum')).toBeInTheDocument();
       expect(screen.getByText(/flash sale -25%/i)).toBeInTheDocument();
-      expect(screen.getByText('$60.00')).toBeInTheDocument();
-      expect(screen.getByText('$80.00').tagName).toBe('DEL');
+      expect(screen.getByText(formatToman(600_000))).toBeInTheDocument();
+      expect(screen.getByText(formatToman(800_000)).tagName).toBe('DEL');
     });
 
     it('shows the same in list view', async () => {
@@ -795,8 +796,8 @@ describe('Category', () => {
       await user.click(document.querySelector('.bi-list-ul').closest('button'));
 
       expect(screen.getByText(/flash sale -25%/i)).toBeInTheDocument();
-      expect(screen.getByText('$60.00')).toBeInTheDocument();
-      expect(screen.getByText('$80.00').tagName).toBe('DEL');
+      expect(screen.getByText(formatToman(600_000))).toBeInTheDocument();
+      expect(screen.getByText(formatToman(800_000)).tagName).toBe('DEL');
     });
 
     it('labels a price range with "From"', async () => {
@@ -816,7 +817,7 @@ describe('Category', () => {
       await screen.findByText('Test Product');
 
       expect(screen.queryByText(/flash sale/i)).not.toBeInTheDocument();
-      expect(screen.getByText('$49.99')).toBeInTheDocument();
+      expect(screen.getByText(formatToman(499_900))).toBeInTheDocument();
       expect(document.querySelector('del')).toBeNull();
     });
 
@@ -859,4 +860,40 @@ describe('Category', () => {
     });
   });
 
+});
+
+// ─── Numeral styles (Task 14.1.2.4) ───────────────────────────────────────────
+// Ratings and review counts use Persian digits; the price beside them stays
+// Western. Config: constants/numerals.js.
+describe('Category — numeral styles', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('grid view: rating and review count are Persian, the price is Western', async () => {
+    getProducts.mockResolvedValue(makeProductsResponse([makeProduct()]));
+    defaultMeta();
+    renderCategory();
+
+    expect(await screen.findByText('Test Product')).toBeInTheDocument();
+    expect(screen.getByText('۴.۵')).toBeInTheDocument();
+    expect(screen.getByText('(۱۰)')).toBeInTheDocument();
+    expect(screen.queryByText('4.5')).not.toBeInTheDocument();
+    expect(screen.queryByText('(10)')).not.toBeInTheDocument();
+    expect(screen.getByText(formatToman(499_900))).toBeInTheDocument();
+    expect(formatToman(499_900)).not.toMatch(/[۰-۹]/);
+  });
+
+  it('list view: the same conversion, including the "(N reviews)" label', async () => {
+    getProducts.mockResolvedValue(makeProductsResponse([makeProduct()]));
+    defaultMeta();
+    const { user } = renderCategory();
+    await screen.findByText('Test Product');
+
+    await user.click(document.querySelector('.bi-list-ul').closest('button'));
+
+    expect(screen.getByText('۴.۵')).toBeInTheDocument();
+    expect(screen.getByText('(۱۰ reviews)')).toBeInTheDocument();
+    expect(screen.getByText(formatToman(499_900))).toBeInTheDocument();
+  });
 });

@@ -45,7 +45,7 @@ def make_stuck_transaction(
 class ReconcileStuckPaymentTransactionsTests(TestCase):
     def setUp(self):
         self.user = make_user()
-        self.order = make_order(self.user, total=Decimal("100.00"))
+        self.order = make_order(self.user, total=1_000_000)
         self.variant = make_variant(stock=5)
         self.order_item = make_order_item(self.order, self.variant, quantity=2)
         self.stock_after_order_creation = self.variant.stock
@@ -150,7 +150,7 @@ class ReconcileStuckPaymentTransactionsTests(TestCase):
             status=PaymentTransaction.Status.SUCCESS,
             authority="ALREADY-SUCCESS",
         )
-        other_order = make_order(self.user, total=Decimal("50.00"))
+        other_order = make_order(self.user, total=500_000)
         failed_txn = make_stuck_transaction(
             other_order,
             age_minutes=90,
@@ -171,12 +171,12 @@ class ReconcileStuckPaymentTransactionsTests(TestCase):
     def test_multiple_stuck_transactions_are_each_reconciled_independently(
         self, mock_get_gateway
     ):
-        order_a = make_order(self.user, total=Decimal("20.00"))
+        order_a = make_order(self.user, total=200_000)
         variant_a = make_variant(name="A", slug="a", stock=5)
         make_order_item(order_a, variant_a, quantity=1)
         txn_a = make_stuck_transaction(order_a, age_minutes=40, authority="AUTH-A")
 
-        order_b = make_order(self.user, total=Decimal("30.00"))
+        order_b = make_order(self.user, total=300_000)
         variant_b = make_variant(name="B", slug="b", stock=5)
         make_order_item(order_b, variant_b, quantity=1)
         txn_b = make_stuck_transaction(order_b, age_minutes=50, authority="AUTH-B")

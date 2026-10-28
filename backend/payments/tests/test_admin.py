@@ -18,7 +18,7 @@ FORCE_SUCCESS_URL = "/admin/payments/paymenttransaction/"
 class PaymentAdminForceOverrideTests(TestCase):
     def setUp(self):
         self.customer = make_user(email="buyer@example.com")
-        self.order = make_order(self.customer, total=Decimal("100.00"))
+        self.order = make_order(self.customer, total=1_000_000)
         self.variant = make_variant(stock=5)
         self.order_item = make_order_item(self.order, self.variant, quantity=2)
         self.stock_after_order_creation = self.variant.stock
@@ -220,7 +220,7 @@ class PaymentAdminOverrideAdminTests(TestCase):
             is_superuser=True,
         )
         self.customer = make_user(email="buyer2@example.com")
-        self.order = make_order(self.customer, total=Decimal("50.00"))
+        self.order = make_order(self.customer, total=500_000)
         self.txn = PaymentTransaction.objects.create(
             order=self.order,
             gateway="zarinpal",

@@ -327,7 +327,7 @@ class TestOTPVerifyCartMerge:
         existing_user = User.objects.create_user(
             email=None, phone_number=phone, is_verified=True
         )
-        variant = ProductVariantFactory(price=10, stock=5)
+        variant = ProductVariantFactory(price=100_000, stock=5)
 
         client = APIClient()
         add_res = client.post("/api/cart/", {"variant_id": variant.id, "quantity": 2})
@@ -353,7 +353,7 @@ class TestOTPVerifyCartMerge:
         from shop.tests.factories import ProductVariantFactory
 
         phone = "09121110088"
-        variant = ProductVariantFactory(price=10, stock=5)
+        variant = ProductVariantFactory(price=100_000, stock=5)
 
         client = APIClient()
         client.post("/api/cart/", {"variant_id": variant.id, "quantity": 1})

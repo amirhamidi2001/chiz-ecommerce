@@ -32,7 +32,7 @@ class CouponCartTestBase(APITestCase):
         # cache-backed AnonRateThrottle; same precedent as
         # CartAnonymousAccessTests in test_cart.py.
         cache.clear()
-        self.variant = make_variant(price="25.00", stock=20)
+        self.variant = make_variant(price=250_000, stock=20)
 
     def tearDown(self):
         cache.clear()
@@ -61,13 +61,13 @@ class AuthenticatedCartTestBase(CouponCartTestBase):
 class ApplyCouponTests(AuthenticatedCartTestBase):
     def test_valid_coupon_is_applied_to_the_cart(self):
         coupon = make_saved_coupon(
-            discount_type=Coupon.DiscountType.PERCENT, value=Decimal("20.00")
+            discount_type=Coupon.DiscountType.PERCENT, percent_off=Decimal("20.00")
         )
 
         res = self.apply()
 
         self.assertEqual(res.status_code, status.HTTP_200_OK, res.data)
-        self.assertEqual(res.data, {"code": "SUMMER20", "discount_amount": "10.00"})
+        self.assertEqual(res.data, {"code": "SUMMER20", "discount_amount": 100_000})
         self.cart.refresh_from_db()
         self.assertEqual(self.cart.coupon, coupon)
 
@@ -111,8 +111,8 @@ class ApplyCouponTests(AuthenticatedCartTestBase):
                 ),
             ),
             "BIGCART": (
-                "This coupon requires a minimum order of 500.00.",
-                dict(code="BIGCART", min_order_amount=Decimal("500.00")),
+                "This coupon requires a minimum order of 500,000 Toman.",
+                dict(code="BIGCART", min_order_amount=5_000_000),
             ),
         }
         for code, (error, overrides) in cases.items():
@@ -176,7 +176,7 @@ class RestrictedCouponCartTests(AuthenticatedCartTestBase):
     def setUp(self):
         super().setUp()
         self.skincare = make_category("Skincare")
-        self.serum = make_catalog_variant("30.00", self.skincare, name="Serum")
+        self.serum = make_catalog_variant(300_000, self.skincare, name="Serum")
         # Cart: 2 x 25.00 (uncategorised-by-coupon) + 30.00 Skincare = 80.00.
         from cart.models import CartItem
 
@@ -184,7 +184,7 @@ class RestrictedCouponCartTests(AuthenticatedCartTestBase):
 
     def skincare_coupon(self):
         coupon = make_saved_coupon(
-            discount_type=Coupon.DiscountType.PERCENT, value=Decimal("20.00")
+            discount_type=Coupon.DiscountType.PERCENT, percent_off=Decimal("20.00")
         )
         coupon.categories.add(self.skincare)
         return coupon
@@ -195,7 +195,7 @@ class RestrictedCouponCartTests(AuthenticatedCartTestBase):
         res = self.apply()
 
         self.assertEqual(res.status_code, status.HTTP_200_OK, res.data)
-        self.assertEqual(res.data["discount_amount"], "6.00")  # 20% of 30.00
+        self.assertEqual(res.data["discount_amount"], 60_000)  # 20% of 30.00
         self.cart.refresh_from_db()
         self.assertEqual(self.cart.coupon, coupon)
 
@@ -218,7 +218,7 @@ class RestrictedCouponCartTests(AuthenticatedCartTestBase):
         self.assertEqual(self.apply().status_code, status.HTTP_200_OK)
 
         res = self.client.get(CART_URL)
-        self.assertEqual(res.data["coupon_discount"], "6.00")
+        self.assertEqual(res.data["coupon_discount"], 60_000)
         self.assertIsNone(res.data["coupon_error"])
 
         self.cart.items.filter(variant=self.serum).delete()  # eligible item removed
@@ -226,7 +226,7 @@ class RestrictedCouponCartTests(AuthenticatedCartTestBase):
         res = self.client.get(CART_URL)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(res.data["coupon_code"], "SUMMER20")
-        self.assertEqual(res.data["coupon_discount"], "0")
+        self.assertEqual(res.data["coupon_discount"], 0)
         self.assertEqual(
             res.data["coupon_error"],
             "This coupon does not apply to any items in your cart.",
@@ -255,12 +255,12 @@ class CartRetrievalCouponFieldsTests(AuthenticatedCartTestBase):
         res = self.client.get(CART_URL)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertIsNone(res.data["coupon_code"])
-        self.assertEqual(res.data["coupon_discount"], "0")
+        self.assertEqual(res.data["coupon_discount"], 0)
         self.assertIsNone(res.data["coupon_error"])
 
     def test_get_after_applying_includes_code_and_discount(self):
         make_saved_coupon(
-            discount_type=Coupon.DiscountType.PERCENT, value=Decimal("20.00")
+            discount_type=Coupon.DiscountType.PERCENT, percent_off=Decimal("20.00")
         )
         self.assertEqual(self.apply().status_code, status.HTTP_200_OK)
 
@@ -268,12 +268,12 @@ class CartRetrievalCouponFieldsTests(AuthenticatedCartTestBase):
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(res.data["coupon_code"], "SUMMER20")
-        self.assertEqual(res.data["coupon_discount"], "10.00")
+        self.assertEqual(res.data["coupon_discount"], 100_000)
         self.assertIsNone(res.data["coupon_error"])
 
     def test_discount_tracks_the_cart_as_it_changes(self):
         make_saved_coupon(
-            discount_type=Coupon.DiscountType.PERCENT, value=Decimal("20.00")
+            discount_type=Coupon.DiscountType.PERCENT, percent_off=Decimal("20.00")
         )
         self.assertEqual(self.apply().status_code, status.HTTP_200_OK)
 
@@ -285,7 +285,7 @@ class CartRetrievalCouponFieldsTests(AuthenticatedCartTestBase):
 
         self.assertIn(res.status_code, (status.HTTP_200_OK, status.HTTP_201_CREATED))
         self.assertEqual(res.data["coupon_code"], "SUMMER20")
-        self.assertEqual(res.data["coupon_discount"], "20.00")
+        self.assertEqual(res.data["coupon_discount"], 200_000)
 
     def test_expired_since_applied_shows_error_without_failing_the_request(self):
         coupon = make_saved_coupon()
@@ -298,12 +298,12 @@ class CartRetrievalCouponFieldsTests(AuthenticatedCartTestBase):
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(res.data["coupon_code"], "SUMMER20")  # still attached
-        self.assertEqual(res.data["coupon_discount"], "0")
+        self.assertEqual(res.data["coupon_discount"], 0)
         self.assertEqual(res.data["coupon_error"], "This coupon has expired.")
         self.assertEqual(len(res.data["items"]), 1)  # the rest of the cart is intact
 
     def test_cart_falling_below_min_order_after_applying_shows_error(self):
-        make_saved_coupon(min_order_amount=Decimal("40.00"))
+        make_saved_coupon(min_order_amount=400_000)
         self.assertEqual(self.apply().status_code, status.HTTP_200_OK)
         item = self.cart.items.get()
         item.quantity = 1  # subtotal 25.00 < 40.00
@@ -312,9 +312,10 @@ class CartRetrievalCouponFieldsTests(AuthenticatedCartTestBase):
         res = self.client.get(CART_URL)
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(res.data["coupon_discount"], "0")
+        self.assertEqual(res.data["coupon_discount"], 0)
         self.assertEqual(
-            res.data["coupon_error"], "This coupon requires a minimum order of 40.00."
+            res.data["coupon_error"],
+            "This coupon requires a minimum order of 40,000 Toman.",
         )
 
     def test_deleted_coupon_simply_disappears_from_the_cart(self):
@@ -366,7 +367,7 @@ class GuestCartCouponTests(CouponCartTestBase):
         res = self.client.get(CART_URL)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertIsNone(res.data["coupon_code"])
-        self.assertEqual(res.data["coupon_discount"], "0")
+        self.assertEqual(res.data["coupon_discount"], 0)
         self.assertIsNone(res.data["coupon_error"])
 
     def test_guest_delete_is_a_harmless_204(self):
@@ -382,7 +383,7 @@ class GuestCartCouponTests(CouponCartTestBase):
         res = self.client.get(CART_URL)
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(res.data["coupon_discount"], "0")
+        self.assertEqual(res.data["coupon_discount"], 0)
         self.assertEqual(
             res.data["coupon_error"], "Please log in to use a coupon code."
         )

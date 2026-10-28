@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { dashboardAPI } from "../services/api";
+import { formatToman } from '../utils/money';
 
 const CARD_ICONS = {
   card: "bi-credit-card-2-front",
@@ -8,8 +9,7 @@ const CARD_ICONS = {
   cash_on_delivery: "bi-cash-coin",
 };
 
-const fmt = (n) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+const fmt = (n) => formatToman(n);
 
 const PaymentMethodsTab = () => {
   const [orders, setOrders] = useState([]);

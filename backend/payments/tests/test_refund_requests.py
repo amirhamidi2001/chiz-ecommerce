@@ -18,9 +18,7 @@ class RefundRequestCreateViewTests(APITestCase):
     def setUp(self):
         self.user = make_user(email="buyer@example.com")
         self.other_user = make_user(email="other@example.com")
-        self.order = make_order(
-            self.user, total=Decimal("64.99"), status=Order.Status.DELIVERED
-        )
+        self.order = make_order(self.user, total=649_900, status=Order.Status.DELIVERED)
         self.client.force_authenticate(user=self.user)
 
     def _post(self, order_id, data):
@@ -45,21 +43,21 @@ class RefundRequestCreateViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         refund_request = RefundRequest.objects.get()
         self.assertEqual(refund_request.amount, self.order.total)
-        self.assertEqual(Decimal(response.data["amount"]), self.order.total)
+        self.assertEqual(response.data["amount"], self.order.total)
 
     def test_explicit_partial_amount_is_honored(self):
         response = self._post(
             self.order.id,
-            {"reason": "Only one of two items was defective.", "amount": "20.00"},
+            {"reason": "Only one of two items was defective.", "amount": 200_000},
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         refund_request = RefundRequest.objects.get()
-        self.assertEqual(refund_request.amount, Decimal("20.00"))
+        self.assertEqual(refund_request.amount, 200_000)
 
     def test_amount_exceeding_order_total_is_rejected(self):
         response = self._post(
-            self.order.id, {"reason": "Trying to overclaim.", "amount": "999.00"}
+            self.order.id, {"reason": "Trying to overclaim.", "amount": 9_990_000}
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -67,7 +65,7 @@ class RefundRequestCreateViewTests(APITestCase):
 
     def test_rejected_for_pending_order_never_paid(self):
         pending_order = make_order(
-            self.user, total=Decimal("30.00"), status=Order.Status.PENDING
+            self.user, total=300_000, status=Order.Status.PENDING
         )
 
         response = self._post(pending_order.id, {"reason": "Changed my mind."})
@@ -77,7 +75,7 @@ class RefundRequestCreateViewTests(APITestCase):
 
     def test_rejected_for_cancelled_order(self):
         cancelled_order = make_order(
-            self.user, total=Decimal("30.00"), status=Order.Status.CANCELLED
+            self.user, total=300_000, status=Order.Status.CANCELLED
         )
 
         response = self._post(cancelled_order.id, {"reason": "Never received it."})
@@ -87,7 +85,7 @@ class RefundRequestCreateViewTests(APITestCase):
 
     def test_rejected_for_order_belonging_to_a_different_user(self):
         others_order = make_order(
-            self.other_user, total=Decimal("40.00"), status=Order.Status.DELIVERED
+            self.other_user, total=400_000, status=Order.Status.DELIVERED
         )
 
         response = self._post(
@@ -99,7 +97,7 @@ class RefundRequestCreateViewTests(APITestCase):
 
     def test_accepted_for_processing_and_shipped_orders_too(self):
         for order_status in (Order.Status.PROCESSING, Order.Status.SHIPPED):
-            order = make_order(self.user, total=Decimal("25.00"), status=order_status)
+            order = make_order(self.user, total=250_000, status=order_status)
             response = self._post(order.id, {"reason": f"Testing {order_status}."})
             self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
@@ -128,7 +126,7 @@ class RefundRequestAdminWorkflowTests(APITestCase):
         )
         self.customer = make_user(email="buyer2@example.com")
         self.order = make_order(
-            self.customer, total=Decimal("64.99"), status=Order.Status.DELIVERED
+            self.customer, total=649_900, status=Order.Status.DELIVERED
         )
         self.refund_request = RefundRequest.objects.create(
             order=self.order,

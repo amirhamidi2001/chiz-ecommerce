@@ -1,6 +1,8 @@
 // src/pages/ShippingInfo.jsx
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { formatToman } from '../utils/money';
+import { EXPRESS_SHIPPING_RIAL, FREE_SHIPPING_THRESHOLD_RIAL, STANDARD_SHIPPING_RIAL } from '../constants/pricing';
 
 const ShippingInfo = () => {
   // State for FAQ accordion (store which item is open)
@@ -100,16 +102,16 @@ const ShippingInfo = () => {
             </div>
             <div className="max-w-lg mx-auto space-y-4">
               <div className="bg-white border border-gray-100 rounded-xl p-4 flex justify-between items-center shadow-sm">
-                <div><span className="font-semibold">Standard Shipping</span><div className="text-sm text-gray-500">For orders under $50</div></div>
-                <span className="text-lg font-bold">$5.99</span>
+                <div><span className="font-semibold">Standard Shipping</span><div className="text-sm text-gray-500">For orders under {formatToman(FREE_SHIPPING_THRESHOLD_RIAL)}</div></div>
+                <span className="text-lg font-bold">{formatToman(STANDARD_SHIPPING_RIAL)}</span>
               </div>
               <div className="bg-teal-50 border border-teal-200 rounded-xl p-4 flex justify-between items-center shadow-sm">
-                <div><span className="font-semibold text-teal-800">Free Shipping</span><div className="text-sm text-teal-600">For orders over $50</div></div>
-                <span className="text-lg font-bold text-teal-700">$0.00</span>
+                <div><span className="font-semibold text-teal-800">Free Shipping</span><div className="text-sm text-teal-600">For orders over {formatToman(FREE_SHIPPING_THRESHOLD_RIAL)}</div></div>
+                <span className="text-lg font-bold text-teal-700">{formatToman(0)}</span>
               </div>
               <div className="bg-white border border-gray-100 rounded-xl p-4 flex justify-between items-center shadow-sm">
                 <div><span className="font-semibold">Express Shipping</span><div className="text-sm text-gray-500">1-2 business days delivery</div></div>
-                <span className="text-lg font-bold">$12.99</span>
+                <span className="text-lg font-bold">{formatToman(EXPRESS_SHIPPING_RIAL)}</span>
               </div>
             </div>
           </div>
@@ -128,7 +130,7 @@ const ShippingInfo = () => {
                 <p className="text-gray-500 text-sm">5-10 business days for most international destinations</p>
               </div>
               <div className="bg-gray-50 p-6 rounded-xl text-center">
-                <i className="bi bi-currency-dollar text-3xl text-teal-600 mb-3 block"></i>
+                <i className="bi bi-cash-stack text-3xl text-teal-600 mb-3 block"></i>
                 <h5 className="font-semibold text-lg mb-2">Customs & Duties</h5>
                 <p className="text-gray-500 text-sm">Import duties and taxes are not included in the shipping cost</p>
               </div>

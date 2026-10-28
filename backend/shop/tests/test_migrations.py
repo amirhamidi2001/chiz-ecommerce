@@ -79,10 +79,10 @@ class TestMigrateProductsToVariants:
         assert sum(v.stock for v in variants) == 31
 
     def test_colored_variants_get_price_and_original_price_from_product(self):
-        product = ProductFactory(price=99.99, original_price=149.99, stock=9)
+        product = ProductFactory(price=999_900, original_price=1_499_900, stock=9)
         for _ in range(3):
             ProductColorFactory(product=product, color=ColorFactory())
-        # Reload so `product.price`/`original_price` are the same Decimal
+        # Reload so `product.price`/`original_price` are the same int
         # types the DB (and thus the migration) actually reads/writes,
         # rather than the raw Python floats factory_boy assigned.
         product.refresh_from_db()
@@ -149,7 +149,7 @@ class TestMigrateProductsToVariants:
         assert variants[0].stock == 15
 
     def test_colorless_variant_gets_price_and_original_price_unchanged(self):
-        product = ProductFactory(price=59.5, original_price=None, stock=15)
+        product = ProductFactory(price=595_000, original_price=None, stock=15)
         product.refresh_from_db()
 
         run_forward()

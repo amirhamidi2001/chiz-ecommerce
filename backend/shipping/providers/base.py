@@ -17,13 +17,12 @@ first ones (Post, Tipax, SnapBox, AloPeyk).
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from decimal import Decimal
 
 
 @dataclass
 class RateQuoteResult:
     success: bool
-    price: Decimal = Decimal("0")
+    price: int = 0  # whole-Toman Rial (ADR 0001); adapters convert at the boundary
     estimated_days_min: int = 0
     estimated_days_max: int = 0
     error_message: str = ""

@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { adminAPI } from "../../services/api";
 import StatCard from "../../components/admin/StatCard";
+import { formatToman } from '../../utils/money';
 
-const fmt = (n) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+const fmt = (n) => formatToman(n);
 
 const STATUS_STYLES = {
   pending: "bg-gray-100 text-gray-700",
@@ -125,7 +125,7 @@ const AdminDashboard = () => {
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Revenue" icon="bi-currency-dollar" color="teal" loading={loading}
+          title="Revenue" icon="bi-cash-stack" color="teal" loading={loading}
           value={data ? fmt(data.revenue.current) : "—"}
           change={data?.revenue.change}
         />

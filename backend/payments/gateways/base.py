@@ -17,7 +17,6 @@ first one (ZarinPal).
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -45,14 +44,14 @@ class PaymentGateway(ABC):
 
     @abstractmethod
     def request_payment(
-        self, amount: Decimal, callback_url: str, description: str = ""
+        self, amount: int, callback_url: str, description: str = ""
     ) -> PaymentRequestResult:
         """Ask the gateway to initiate a payment. Returns an authority
         code and a URL to redirect the customer to."""
         raise NotImplementedError
 
     @abstractmethod
-    def verify_payment(self, authority: str, amount: Decimal) -> PaymentVerifyResult:
+    def verify_payment(self, authority: str, amount: int) -> PaymentVerifyResult:
         """Confirm a payment was actually completed successfully after
         the customer returns from the gateway."""
         raise NotImplementedError

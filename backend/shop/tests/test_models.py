@@ -134,24 +134,24 @@ class TestProductModel:
         # Force a second product with the same base slug
         p2 = Product.objects.create(
             name="Cool Shoes",
-            price=99,
+            price=990_000,
             stock=10,
         )
         assert p2.slug == "cool-shoes-1"
 
-        p3 = Product.objects.create(name="Cool Shoes", price=99, stock=5)
+        p3 = Product.objects.create(name="Cool Shoes", price=990_000, stock=5)
         assert p3.slug == "cool-shoes-2"
 
     def test_discount_percent_when_on_sale(self, db):
-        product = ProductFactory(price=80, original_price=100)
+        product = ProductFactory(price=800_000, original_price=1_000_000)
         assert product.discount_percent == 20
 
     def test_discount_percent_zero_when_no_original_price(self, db):
-        product = ProductFactory(price=80, original_price=None)
+        product = ProductFactory(price=800_000, original_price=None)
         assert product.discount_percent == 0
 
     def test_discount_percent_zero_when_price_equals_original(self, db):
-        product = ProductFactory(price=100, original_price=100)
+        product = ProductFactory(price=1_000_000, original_price=1_000_000)
         assert product.discount_percent == 0
 
     def test_ordering_newest_first(self, db):
@@ -515,13 +515,13 @@ class TestProductVariantModel:
     def test_variant_can_be_created_linked_to_existing_product(self, db):
         product = ProductFactory(name="Matte Foundation")
         variant = ProductVariantFactory(
-            product=product, sku="FOUND-SHADE-30", price=25, stock=15
+            product=product, sku="FOUND-SHADE-30", price=250_000, stock=15
         )
 
         assert variant.pk is not None
         assert variant.product_id == product.id
         assert variant.sku == "FOUND-SHADE-30"
-        assert variant.price == 25
+        assert variant.price == 250_000
         assert variant.stock == 15
 
     def test_str_representation_includes_product_name_and_sku(self, db):
@@ -531,7 +531,7 @@ class TestProductVariantModel:
 
     def test_str_representation_falls_back_when_sku_blank(self, db):
         product = ProductFactory(name="Lip Tint")
-        variant = ProductVariant(product=product, price=10, stock=5)
+        variant = ProductVariant(product=product, price=100_000, stock=5)
         assert str(variant) == "Lip Tint — unsaved"
 
     def test_reverse_accessor_via_related_name_variants(self, db):
@@ -609,10 +609,10 @@ class TestProductVariantModel:
         # Force a second variant for the SAME product (so it would
         # naturally generate the identical base SKU) to prove the
         # collision-avoidance loop kicks in.
-        v2 = ProductVariant.objects.create(product=product, price=15, stock=5)
+        v2 = ProductVariant.objects.create(product=product, price=150_000, stock=5)
         assert v2.sku == f"SKI-LUX-{product.id}-1"
 
-        v3 = ProductVariant.objects.create(product=product, price=20, stock=3)
+        v3 = ProductVariant.objects.create(product=product, price=200_000, stock=3)
         assert v3.sku == f"SKI-LUX-{product.id}-2"
 
     def test_sku_not_regenerated_on_subsequent_save(self, db):
@@ -865,10 +865,10 @@ class TestStockMovementModel:
             # always resolved from a ShippingRate at checkout) — this
             # test doesn't go through checkout at all, so it must be
             # supplied explicitly like the other financial fields below.
-            shipping_cost=10,
-            subtotal=100,
-            tax=10,
-            total=110,
+            shipping_cost=100_000,
+            subtotal=1_000_000,
+            tax=100_000,
+            total=1_100_000,
         )
         movement = StockMovementFactory(
             reason=StockMovement.Reason.CANCELLATION,
@@ -1141,82 +1141,93 @@ def _sale(*products, percent="25.00", start_h=-1, end_h=1, active=True, name="Sa
 @pytest.mark.django_db
 class TestProductVariantFlashSalePricing:
     def test_no_sale_means_no_active_sale_and_unchanged_price(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         assert variant.active_flash_sale is None
-        assert variant.effective_price == Decimal("80.00")
+        assert variant.effective_price == 800_000
 
     def test_active_sale_discounts_the_price(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         sale = _sale(variant.product, percent="25.00")
         assert variant.active_flash_sale == sale
-        assert variant.effective_price == Decimal("60.00")
+        assert variant.effective_price == 600_000
 
     @pytest.mark.parametrize(
         "price,percent,expected",
         [
-            ("19.99", "15.00", "16.99"),  # 16.9915 -> rounds to 2 places
-            ("80.00", "12.50", "70.00"),  # fractional percent
-            ("100.00", "100", "0.00"),  # the validators allow 100%
-            ("100.00", "0.01", "99.99"),  # smallest allowed discount
+            (
+                199_900,
+                "15.00",
+                169_920,
+            ),  # 169,915 = exact tie at 16,991.5 Toman -> rounds UP
+            (800_000, "12.50", 700_000),  # fractional percent, exact
+            (1_000_000, "100", 0),  # the validators allow 100%
+            (1_000_000, "0.01", 999_900),  # smallest allowed discount
+            (
+                333_330,
+                "33.33",
+                222_230,
+            ),  # exact 222,229.99 Rial -> nearest whole Toman, 22,223
         ],
     )
     def test_discount_arithmetic_and_rounding(self, price, percent, expected):
-        variant = ProductVariantFactory(price=Decimal(price))
+        variant = ProductVariantFactory(price=price)
         _sale(variant.product, percent=percent)
-        assert variant.effective_price == Decimal(expected)
-        assert variant.effective_price.as_tuple().exponent == -2
+        assert variant.effective_price == expected
+        # a plain int, already a whole number of Toman: nothing left to round at display
+        assert type(variant.effective_price) is int
+        assert variant.effective_price % 10 == 0
 
     def test_stored_price_is_never_modified(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         _sale(variant.product)
         _ = variant.effective_price
         variant.refresh_from_db()
-        assert variant.price == Decimal("80.00")
+        assert variant.price == 800_000
 
     def test_upcoming_sale_does_not_apply(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         _sale(variant.product, start_h=1, end_h=2)
         assert variant.active_flash_sale is None
-        assert variant.effective_price == Decimal("80.00")
+        assert variant.effective_price == 800_000
 
     def test_ended_sale_does_not_apply(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         _sale(variant.product, start_h=-2, end_h=-1)
         assert variant.active_flash_sale is None
-        assert variant.effective_price == Decimal("80.00")
+        assert variant.effective_price == 800_000
 
     def test_deactivated_sale_does_not_apply_even_inside_its_window(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         _sale(variant.product, active=False)
         assert variant.active_flash_sale is None
-        assert variant.effective_price == Decimal("80.00")
+        assert variant.effective_price == 800_000
 
     def test_sale_on_a_different_product_does_not_apply(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         other = ProductVariantFactory()
         _sale(other.product)
         assert variant.active_flash_sale is None
-        assert variant.effective_price == Decimal("80.00")
+        assert variant.effective_price == 800_000
 
     def test_every_variant_of_a_sale_product_is_discounted(self):
-        first = ProductVariantFactory(price=Decimal("80.00"))
-        second = ProductVariantFactory(product=first.product, price=Decimal("40.00"))
+        first = ProductVariantFactory(price=800_000)
+        second = ProductVariantFactory(product=first.product, price=400_000)
         _sale(first.product, percent="50.00")
-        assert first.effective_price == Decimal("40.00")
-        assert second.effective_price == Decimal("20.00")
+        assert first.effective_price == 400_000
+        assert second.effective_price == 200_000
 
     # ── Overlapping sales: documented tie-break ──────────────────────────────
     def test_overlapping_sales_the_most_recently_started_wins_not_the_biggest_discount(
         self,
     ):
-        variant = ProductVariantFactory(price=Decimal("100.00"))
+        variant = ProductVariantFactory(price=1_000_000)
         _sale(variant.product, percent="50.00", start_h=-5, name="Big, older")
         newer = _sale(variant.product, percent="10.00", start_h=-1, name="Small, newer")
         assert variant.active_flash_sale == newer
-        assert variant.effective_price == Decimal("90.00")
+        assert variant.effective_price == 900_000
 
     def test_overlapping_sales_starting_together_the_latest_created_wins(self):
-        variant = ProductVariantFactory(price=Decimal("100.00"))
+        variant = ProductVariantFactory(price=1_000_000)
         now = timezone.now()
         common = dict(
             starts_at=now - timedelta(hours=1), ends_at=now + timedelta(hours=1)
@@ -1231,10 +1242,10 @@ class TestProductVariantFlashSalePricing:
         second.products.add(variant.product)
         for _ in range(3):  # deterministic, not "arbitrary"
             assert variant.active_flash_sale == second
-        assert variant.effective_price == Decimal("70.00")
+        assert variant.effective_price == 700_000
 
     def test_an_expired_newer_sale_does_not_shadow_a_current_older_one(self):
-        variant = ProductVariantFactory(price=Decimal("100.00"))
+        variant = ProductVariantFactory(price=1_000_000)
         current = _sale(variant.product, percent="20.00", start_h=-5, end_h=5)
         _sale(
             variant.product, percent="90.00", start_h=-2, end_h=-1
@@ -1254,38 +1265,38 @@ class TestProductVariantFlashSalePrefetchPath:
         return prefetched.variants.all()[0]
 
     def test_resolves_without_any_query(self, django_assert_num_queries):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         _sale(variant.product, percent="25.00")
         variant = self._variant_with_prefetch(variant.product)
         with django_assert_num_queries(0):
-            assert variant.effective_price == Decimal("60.00")
+            assert variant.effective_price == 600_000
             assert variant.active_flash_sale is not None
 
     def test_without_prefetch_it_is_one_query_per_resolution(
         self, django_assert_num_queries
     ):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         _sale(variant.product)
         variant = type(variant).objects.select_related("product").get(pk=variant.pk)
         with django_assert_num_queries(1):
             variant.active_flash_sale
 
     def test_prefetched_but_not_current_sales_are_excluded(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         _sale(variant.product, start_h=1, end_h=2, name="upcoming")
         _sale(variant.product, start_h=-2, end_h=-1, name="ended")
         _sale(variant.product, active=False, name="deactivated")
         variant = self._variant_with_prefetch(variant.product)
         assert variant.active_flash_sale is None
-        assert variant.effective_price == Decimal("80.00")
+        assert variant.effective_price == 800_000
 
     def test_overlap_tie_break_matches_the_query_path(self):
-        variant = ProductVariantFactory(price=Decimal("100.00"))
+        variant = ProductVariantFactory(price=1_000_000)
         _sale(variant.product, percent="50.00", start_h=-5, name="older")
         newer = _sale(variant.product, percent="10.00", start_h=-1, name="newer")
         variant = self._variant_with_prefetch(variant.product)
         assert variant.active_flash_sale == newer
-        assert variant.effective_price == Decimal("90.00")
+        assert variant.effective_price == 900_000
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1294,54 +1305,52 @@ class TestProductVariantFlashSalePrefetchPath:
 @pytest.mark.django_db
 class TestProductFlashSaleCardPricing:
     def test_none_when_not_on_sale(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         assert variant.product.active_flash_sale is None
         assert variant.product.flash_sale_card_pricing() is None
 
     def test_starting_at_price_is_the_cheapest_variant_with_the_sale_applied(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
-        ProductVariantFactory(product=variant.product, price=Decimal("120.00"))
-        ProductVariantFactory(product=variant.product, price=Decimal("100.00"))
+        variant = ProductVariantFactory(price=800_000)
+        ProductVariantFactory(product=variant.product, price=1_200_000)
+        ProductVariantFactory(product=variant.product, price=1_000_000)
         _sale(variant.product, percent="25.00")
 
         pricing = variant.product.flash_sale_card_pricing()
 
-        assert pricing.original_price == Decimal("80.00")
-        assert pricing.price == Decimal("60.00")
+        assert pricing.original_price == 800_000
+        assert pricing.price == 600_000
         assert pricing.price_varies is True
 
     def test_price_does_not_vary_when_all_variants_cost_the_same(self):
-        variant = ProductVariantFactory(price=Decimal("50.00"))
-        ProductVariantFactory(product=variant.product, price=Decimal("50.00"))
+        variant = ProductVariantFactory(price=500_000)
+        ProductVariantFactory(product=variant.product, price=500_000)
         _sale(variant.product, percent="10.00")
         pricing = variant.product.flash_sale_card_pricing()
-        assert pricing.price == Decimal("45.00")
+        assert pricing.price == 450_000
         assert pricing.price_varies is False
 
     def test_inactive_variants_are_ignored(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
-        ProductVariantFactory(
-            product=variant.product, price=Decimal("10.00"), is_active=False
-        )
+        variant = ProductVariantFactory(price=800_000)
+        ProductVariantFactory(product=variant.product, price=100_000, is_active=False)
         _sale(variant.product, percent="25.00")
         pricing = variant.product.flash_sale_card_pricing()
-        assert pricing.original_price == Decimal("80.00")
+        assert pricing.original_price == 800_000
 
     def test_falls_back_to_the_product_price_without_active_variants(self):
-        product = ProductFactory(price=Decimal("40.00"))
+        product = ProductFactory(price=400_000)
         _sale(product, percent="50.00")
         pricing = product.flash_sale_card_pricing()
-        assert pricing.original_price == Decimal("40.00")
-        assert pricing.price == Decimal("20.00")
+        assert pricing.original_price == 400_000
+        assert pricing.price == 200_000
         assert pricing.price_varies is False
 
     def test_sale_that_is_not_current_gives_no_pricing(self):
-        variant = ProductVariantFactory(price=Decimal("80.00"))
+        variant = ProductVariantFactory(price=800_000)
         _sale(variant.product, start_h=1, end_h=2)
         assert variant.product.flash_sale_card_pricing() is None
 
     def test_agrees_with_the_variants_own_effective_price(self):
-        variant = ProductVariantFactory(price=Decimal("19.99"))
+        variant = ProductVariantFactory(price=199_900)
         _sale(variant.product, percent="15.00")
         assert (
             variant.product.flash_sale_card_pricing().price == variant.effective_price

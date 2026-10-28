@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import RecommendedForYou from '../components/RecommendedForYou';
 import * as api from '../services/api';
 import { getRecentlyViewed } from '../utils/recentlyViewed';
+import { formatToman } from '../utils/money';
 
 vi.mock('../services/api', () => ({
   getHomeRecommendations: vi.fn(),
@@ -22,7 +23,7 @@ const MOCK_RECS = [
     id: 31,
     slug: 'rec-one',
     name: 'Rec One',
-    price: '24.50',
+    price: 245_000,
     rating: '4.9',
     reviews_count: 12,
     thumbnail_url: '/assets/img/product/product-2.webp',
@@ -34,7 +35,7 @@ const MOCK_RECS = [
     id: 32,
     slug: 'rec-two',
     name: 'Rec Two',
-    price: '18.00',
+    price: 180_000,
     rating: '4.1',
     reviews_count: 3,
     thumbnail_url: '/assets/img/product/product-3.webp',
@@ -70,7 +71,7 @@ describe('RecommendedForYou', () => {
     expect(await screen.findByRole('heading', { name: HEADING })).toBeInTheDocument();
     expect(screen.getByText('Rec One')).toBeInTheDocument();
     expect(screen.getByText('Rec Two')).toBeInTheDocument();
-    expect(screen.getByText('$24.50')).toBeInTheDocument();
+    expect(screen.getByText(formatToman(245_000))).toBeInTheDocument();
   });
 
   it('uses the shared product card (links to the product page)', async () => {

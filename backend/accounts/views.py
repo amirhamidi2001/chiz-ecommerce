@@ -5,6 +5,7 @@ from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
+from django.utils.translation import gettext as _
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -42,7 +43,7 @@ User = get_user_model()
 
 def _send_welcome_email(user):
     """Send a welcome email to a newly registered user."""
-    subject = "Welcome! Your account is ready."
+    subject = _("Welcome! Your account is ready.")
     message = render_to_string(
         "accounts/emails/welcome.html",
         {
@@ -52,7 +53,8 @@ def _send_welcome_email(user):
     )
     send_mail(
         subject=subject,
-        message=f"Hi {user.profile.first_name}, welcome! Your account is ready.",
+        message=_("Hi %(first_name)s, welcome! Your account is ready.")
+        % {"first_name": user.profile.first_name},
         from_email=None,
         recipient_list=[user.email],
         html_message=message,
@@ -72,14 +74,14 @@ def _send_password_reset_email(user, request):
     )
     reset_url = f"{frontend_base}/reset-password/{uid}/{token}/"
 
-    subject = "Reset your password"
+    subject = _("Reset your password")
     message = render_to_string(
         "accounts/emails/password_reset.html",
         {"reset_url": reset_url, "first_name": user.profile.first_name},
     )
     send_mail(
         subject=subject,
-        message=f"Reset your password here: {reset_url}",
+        message=_("Reset your password here: %(url)s") % {"url": reset_url},
         from_email=None,
         recipient_list=[user.email],
         html_message=message,
@@ -230,7 +232,7 @@ class ChangePasswordView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(
-            {"detail": "Password updated successfully."},
+            {"detail": _("Password updated successfully.")},
             status=status.HTTP_200_OK,
         )
 
@@ -259,7 +261,9 @@ class PasswordResetRequestView(APIView):
 
         return Response(
             {
-                "detail": "If an account with that email exists, a reset link has been sent."
+                "detail": _(
+                    "If an account with that email exists, a reset link has been sent."
+                )
             },
             status=status.HTTP_200_OK,
         )
@@ -284,7 +288,7 @@ class PasswordResetConfirmView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(
-            {"detail": "Password has been reset successfully."},
+            {"detail": _("Password has been reset successfully.")},
             status=status.HTTP_200_OK,
         )
 
@@ -328,14 +332,14 @@ class OTPRequestView(APIView):
             generate_otp(phone_number, purpose="login")
         except OTPCooldownError:
             return Response(
-                {"detail": "Please wait before requesting another code."},
+                {"detail": _("Please wait before requesting another code.")},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
         except SMSDeliveryError:
             pass
 
         return Response(
-            {"detail": "Verification code sent."},
+            {"detail": _("Verification code sent.")},
             status=status.HTTP_200_OK,
         )
 
@@ -363,24 +367,26 @@ class OTPVerifyView(APIView):
         except OTPNotFoundError:
             return Response(
                 {
-                    "code": "No pending verification code found for this number. "
-                    "Please request a new one."
+                    "code": _(
+                        "No pending verification code found for this number. "
+                        "Please request a new one."
+                    )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except OTPExpiredError:
             return Response(
-                {"code": "This code has expired. Please request a new one."},
+                {"code": _("This code has expired. Please request a new one.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except OTPMaxAttemptsExceededError:
             return Response(
-                {"code": "Too many incorrect attempts. Please request a new code."},
+                {"code": _("Too many incorrect attempts. Please request a new code.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except OTPIncorrectCodeError:
             return Response(
-                {"code": "Incorrect code."},
+                {"code": _("Incorrect code.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

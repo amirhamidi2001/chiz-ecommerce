@@ -1,10 +1,12 @@
 from accounts.models import Profile
 from blog.models import Comment, Post
 from contact.models import ContactMessage
+from core.serializers import RialSerializerField
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Sum
+from django.utils.translation import gettext as _
 from order.models import Order, OrderItem
 from order.services.state_machine import is_valid_transition
 from promotions.models import Coupon
@@ -67,12 +69,12 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
 
     def validate_first_name(self, value):
         if not value.strip():
-            raise serializers.ValidationError("First name cannot be blank.")
+            raise serializers.ValidationError(_("First name cannot be blank."))
         return value.strip()
 
     def validate_last_name(self, value):
         if not value.strip():
-            raise serializers.ValidationError("Last name cannot be blank.")
+            raise serializers.ValidationError(_("Last name cannot be blank."))
         return value.strip()
 
 
@@ -84,10 +86,12 @@ class AvatarUploadSerializer(serializers.ModelSerializer):
     def validate_image(self, value):
         max_mb = 5
         if value.size > max_mb * 1024 * 1024:
-            raise serializers.ValidationError(f"Image must be under {max_mb} MB.")
+            raise serializers.ValidationError(
+                _("Image must be under %(max_mb)s MB.") % {"max_mb": max_mb}
+            )
         allowed = ["image/jpeg", "image/png", "image/webp"]
         if hasattr(value, "content_type") and value.content_type not in allowed:
-            raise serializers.ValidationError("Only JPEG, PNG and WebP are allowed.")
+            raise serializers.ValidationError(_("Only JPEG, PNG and WebP are allowed."))
         return value
 
 
@@ -99,13 +103,13 @@ class ChangePasswordSerializer(serializers.Serializer):
     def validate_old_password(self, value):
         user = self.context["request"].user
         if not user.check_password(value):
-            raise serializers.ValidationError("Current password is incorrect.")
+            raise serializers.ValidationError(_("Current password is incorrect."))
         return value
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["confirm_password"]:
             raise serializers.ValidationError(
-                {"confirm_password": "Passwords do not match."}
+                {"confirm_password": _("Passwords do not match.")}
             )
         validate_password(attrs["new_password"], self.context["request"].user)
         return attrs
@@ -205,7 +209,7 @@ class WishlistSerializer(serializers.ModelSerializer):
         owner = get_wishlist_owner_kwargs(self.context["request"])
         if Wishlist.objects.filter(product=attrs["product"], **owner).exists():
             raise serializers.ValidationError(
-                {"product_id": "Product is already in your wishlist."}
+                {"product_id": _("Product is already in your wishlist.")}
             )
         return attrs
 
@@ -219,7 +223,7 @@ class WishlistSerializer(serializers.ModelSerializer):
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    subtotal = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    subtotal = RialSerializerField(read_only=True)
 
     class Meta:
         model = OrderItem
@@ -411,7 +415,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
         result = obj.orders.filter(
             status__in=["processing", "shipped", "delivered"]
         ).aggregate(t=Sum("total"))["t"]
-        return float(result or 0)
+        return int(result or 0)
 
 
 class AdminUserUpdateSerializer(serializers.ModelSerializer):
@@ -814,7 +818,7 @@ class AdminCouponSerializer(serializers.ModelSerializer):
     Admin CRUD for coupons.
 
     ModelSerializer does NOT call Model.clean(), so the rules from
-    Coupon.clean() (percent value in (0, 100], fixed value > 0, valid_until
+    Coupon.clean() (percent_off in (0, 100], fixed_amount > 0, valid_until
     after valid_from) are re-applied in validate() — otherwise the API would
     accept data the Django admin rejects. The case-insensitive uniqueness of
     `code` is enforced here too: Coupon.save() uppercases codes, so a plain
@@ -837,7 +841,8 @@ class AdminCouponSerializer(serializers.ModelSerializer):
             "id",
             "code",
             "discount_type",
-            "value",
+            "percent_off",
+            "fixed_amount",
             "min_order_amount",
             "max_uses",
             "uses_per_user",
@@ -880,7 +885,13 @@ class AdminCouponSerializer(serializers.ModelSerializer):
         # only valid_until) is checked against the fields it didn't send.
         merged = {
             field: attrs.get(field, getattr(self.instance, field, None))
-            for field in ("discount_type", "value", "valid_from", "valid_until")
+            for field in (
+                "discount_type",
+                "percent_off",
+                "fixed_amount",
+                "valid_from",
+                "valid_until",
+            )
         }
         try:
             Coupon(**merged).clean()

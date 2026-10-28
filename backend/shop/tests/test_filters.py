@@ -117,33 +117,33 @@ class TestProductFilterColor:
 class TestProductFilterPrice:
 
     def test_min_price(self):
-        ProductFactory(name="Cheap", price=10)
-        ProductFactory(name="Mid", price=50)
-        ProductFactory(name="Expensive", price=200)
+        ProductFactory(name="Cheap", price=100_000)
+        ProductFactory(name="Mid", price=500_000)
+        ProductFactory(name="Expensive", price=2_000_000)
 
-        qs = apply_filter({"min_price": 49})
+        qs = apply_filter({"min_price": 490_000})
         names = list(qs.values_list("name", flat=True))
         assert "Cheap" not in names
         assert "Mid" in names
         assert "Expensive" in names
 
     def test_max_price(self):
-        ProductFactory(name="Cheap", price=10)
-        ProductFactory(name="Mid", price=50)
-        ProductFactory(name="Expensive", price=200)
+        ProductFactory(name="Cheap", price=100_000)
+        ProductFactory(name="Mid", price=500_000)
+        ProductFactory(name="Expensive", price=2_000_000)
 
-        qs = apply_filter({"max_price": 51})
+        qs = apply_filter({"max_price": 510_000})
         names = list(qs.values_list("name", flat=True))
         assert "Cheap" in names
         assert "Mid" in names
         assert "Expensive" not in names
 
     def test_price_range(self):
-        ProductFactory(name="Low", price=5)
-        ProductFactory(name="Mid", price=50)
-        ProductFactory(name="High", price=500)
+        ProductFactory(name="Low", price=50_000)
+        ProductFactory(name="Mid", price=500_000)
+        ProductFactory(name="High", price=5_000_000)
 
-        qs = apply_filter({"min_price": 10, "max_price": 100})
+        qs = apply_filter({"min_price": 100_000, "max_price": 1_000_000})
         names = list(qs.values_list("name", flat=True))
         assert names == ["Mid"]
 

@@ -10,7 +10,7 @@ from payments.gateways.zarinpal import ZarinPalGateway
 class ZarinPalRequestPaymentTests(SimpleTestCase):
     def setUp(self):
         self.gateway = ZarinPalGateway()
-        self.amount = Decimal("150000")
+        self.amount = 1_500_000_000
         self.callback_url = "https://example.test/payments/callback/"
 
     @responses.activate
@@ -130,7 +130,7 @@ class ZarinPalRequestPaymentTests(SimpleTestCase):
 class ZarinPalVerifyPaymentTests(SimpleTestCase):
     def setUp(self):
         self.gateway = ZarinPalGateway()
-        self.amount = Decimal("150000")
+        self.amount = 1_500_000_000
         self.authority = "A00000000000000000000000000000000wOGYpd"
 
     @responses.activate

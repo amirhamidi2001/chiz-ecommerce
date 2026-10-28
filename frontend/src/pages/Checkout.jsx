@@ -7,8 +7,10 @@ import AddressPicker from '../components/AddressPicker';
 import ShippingOptionPicker from '../components/ShippingOptionPicker';
 import { NEW_ADDRESS } from '../utils/address';
 import { IRAN_PROVINCES, isValidPostalCode } from '../constants/provinces';
+import { formatToman, percentOfRial } from '../utils/money';
+import { TAX_BASIS_POINTS } from '../constants/pricing';
 
-const TAX_RATE = 0.10;
+// Tax rate (basis points) and integer rounding: constants/pricing.js + utils/money.js.
 
 // ─── Field component ──────────────────────────────────────────────────────────
 const Field = ({ label, required, error, children }) => (
@@ -212,7 +214,7 @@ const Checkout = () => {
   // order's own final discount.
   const subtotal = Number(cart?.subtotal ?? 0);
   const shippingCost = selectedShipping ? Number(selectedShipping.price) : 0;
-  const tax = subtotal * TAX_RATE;
+  const tax = percentOfRial(subtotal, TAX_BASIS_POINTS);
   const couponCode = cart?.coupon_code ?? null;
   const couponError = cart?.coupon_error ?? null;
   const liveDiscount = couponCode && !couponError ? Number(cart?.coupon_discount) || 0 : 0;
@@ -677,7 +679,7 @@ const Checkout = () => {
                         )}
                       </span>
                       <span className="bg-white/20 px-3 py-1 rounded-lg text-sm font-bold">
-                        ${total.toFixed(2)}
+                        {formatToman(total)}
                       </span>
                     </button>
                   </div>
@@ -730,10 +732,10 @@ const Checkout = () => {
                           <h4 className="font-medium text-sm line-clamp-2">{item.product.name}</h4>
                           <div className="flex justify-between mt-1">
                             <span className="text-xs text-gray-500">
-                              {item.quantity} × ${Number(item.unit_price).toFixed(2)}
+                              {item.quantity} × {formatToman(item.unit_price)}
                             </span>
                             <span className="text-sm font-semibold">
-                              ${Number(item.subtotal).toFixed(2)}
+                              {formatToman(item.subtotal)}
                             </span>
                           </div>
                         </div>
@@ -782,17 +784,17 @@ const Checkout = () => {
                 <div className="space-y-2 text-sm border-t pt-4">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Subtotal</span>
-                    <span>${subtotal.toFixed(2)}</span>
+                    <span>{formatToman(subtotal)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Shipping</span>
                     <span>
-                      {selectedShipping ? `$${shippingCost.toFixed(2)}` : 'Select an option'}
+                      {selectedShipping ? `${formatToman(shippingCost)}` : 'Select an option'}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Tax (10%)</span>
-                    <span>${tax.toFixed(2)}</span>
+                    <span>{formatToman(tax)}</span>
                   </div>
                   {discount > 0 && (
                     <div className="flex justify-between text-teal-600">
@@ -800,12 +802,12 @@ const Checkout = () => {
                         <i className="bi bi-tag-fill"></i>
                         {couponCode ? `Coupon (${couponCode})` : 'Coupon discount'}
                       </span>
-                      <span className="font-semibold">-${discount.toFixed(2)}</span>
+                      <span className="font-semibold">-{formatToman(discount)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-base font-bold pt-3 border-t mt-2">
                     <span>Total</span>
-                    <span className="text-teal-700">${total.toFixed(2)}</span>
+                    <span className="text-teal-700">{formatToman(total)}</span>
                   </div>
                 </div>
 

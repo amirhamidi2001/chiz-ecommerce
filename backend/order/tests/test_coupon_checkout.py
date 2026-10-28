@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from cart.models import Cart
+from core.money import percent_of
 from django.utils import timezone
 from order.models import Order
 from payments.models import PaymentTransaction
@@ -31,7 +32,7 @@ from shop.models import ProductVariant, StockMovement
 
 from .factories import (
     SHIPPING_COST,
-    TAX_RATE,
+    TAX_PERCENT,
     make_cart_with_items,
     make_product,
     make_user,
@@ -47,12 +48,12 @@ class CouponCheckoutTestBase(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(price="25.00")
+        self.product = make_product(price=250_000)
         self.variant = make_variant(product=self.product, stock=10)
         self.cart = make_cart_with_items(
             self.user, [{"variant": self.variant, "quantity": 2}]
         )
-        self.subtotal = Decimal("50.00")
+        self.subtotal = 500_000
         self.client.force_authenticate(user=self.user)
 
     def apply_coupon(self, coupon):
@@ -64,14 +65,14 @@ class CouponCheckoutTestBase(APITestCase):
         return self.client.post(URL, valid_payload(**payload_overrides), format="json")
 
     def expected_total(self, discount):
-        tax = (self.subtotal * TAX_RATE).quantize(Decimal("0.01"))
+        tax = percent_of(self.subtotal, TAX_PERCENT)
         return self.subtotal + SHIPPING_COST + tax - discount
 
 
 class CheckoutWithCouponTests(CouponCheckoutTestBase):
     def test_valid_coupon_sets_order_discount_and_creates_redemption(self):
         coupon = make_saved_coupon(
-            discount_type=Coupon.DiscountType.PERCENT, value=Decimal("20.00")
+            discount_type=Coupon.DiscountType.PERCENT, percent_off=Decimal("20.00")
         )
         self.apply_coupon(coupon)
 
@@ -80,18 +81,18 @@ class CheckoutWithCouponTests(CouponCheckoutTestBase):
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
         order = Order.objects.get(pk=res.data["id"])
         # 20% of 50.00
-        self.assertEqual(order.discount, Decimal("10.00"))
-        self.assertEqual(order.total, self.expected_total(Decimal("10.00")))
+        self.assertEqual(order.discount, 100_000)
+        self.assertEqual(order.total, self.expected_total(100_000))
 
         redemption = CouponRedemption.objects.get()
         self.assertEqual(redemption.coupon, coupon)
         self.assertEqual(redemption.user, self.user)
         self.assertEqual(redemption.order, order)
-        self.assertEqual(redemption.discount_amount, Decimal("10.00"))
+        self.assertEqual(redemption.discount_amount, 100_000)
 
     def test_fixed_coupon_larger_than_subtotal_is_capped_at_subtotal(self):
         coupon = make_saved_coupon(
-            discount_type=Coupon.DiscountType.FIXED, value=Decimal("500.00")
+            discount_type=Coupon.DiscountType.FIXED, fixed_amount=5_000_000
         )
         self.apply_coupon(coupon)
 
@@ -120,16 +121,16 @@ class CheckoutWithoutCouponRegressionTests(CouponCheckoutTestBase):
 
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
         order = Order.objects.get(pk=res.data["id"])
-        self.assertEqual(order.discount, Decimal("0.00"))
-        self.assertEqual(order.total, self.expected_total(Decimal("0.00")))
+        self.assertEqual(order.discount, 0)
+        self.assertEqual(order.total, self.expected_total(0))
         self.assertFalse(CouponRedemption.objects.exists())
 
     def test_client_supplied_discount_is_still_ignored(self):
-        res = self.checkout(discount="40.00")
+        res = self.checkout(discount=400_000)
 
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
         order = Order.objects.get(pk=res.data["id"])
-        self.assertEqual(order.discount, Decimal("0.00"))
+        self.assertEqual(order.discount, 0)
 
 
 class CheckoutRevalidationTests(CouponCheckoutTestBase):
@@ -254,7 +255,7 @@ class CancellationFreesCouponTests(CouponCheckoutTestBase):
         res2 = self.checkout()
         self.assertEqual(res2.status_code, status.HTTP_201_CREATED, res2.data)
         second = Order.objects.get(pk=res2.data["id"])
-        self.assertEqual(second.discount, Decimal("10.00"))
+        self.assertEqual(second.discount, 100_000)
         self.assertEqual(second.coupon_redemption.coupon, coupon)
 
         # The limit is enforced again for the second, live order.
@@ -348,16 +349,16 @@ class RestrictedCouponCheckoutTests(CouponCheckoutTestBase):
         self.apparel = self.product.category
         # Add a 40.00 item from a DIFFERENT category -> cart subtotal 90.00.
         self.gadgets = make_category("Gadgets")
-        self.gadget = make_catalog_variant("40.00", self.gadgets, name="Gadget")
+        self.gadget = make_catalog_variant(400_000, self.gadgets, name="Gadget")
         from cart.models import CartItem
 
         CartItem.objects.create(cart=self.cart, variant=self.gadget, quantity=1)
-        self.cart_subtotal = Decimal("90.00")
+        self.cart_subtotal = 900_000
 
     def restricted_coupon(self, **overrides):
         coupon = make_saved_coupon(
             discount_type=Coupon.DiscountType.PERCENT,
-            value=Decimal("20.00"),
+            percent_off=Decimal("20.00"),
             **overrides,
         )
         coupon.categories.add(self.apparel)
@@ -372,25 +373,25 @@ class RestrictedCouponCheckoutTests(CouponCheckoutTestBase):
         order = Order.objects.get(pk=res.data["id"])
         self.assertEqual(order.subtotal, self.cart_subtotal)
         # 20% of the 50.00 Apparel items, not of the 90.00 cart.
-        self.assertEqual(order.discount, Decimal("10.00"))
-        self.assertEqual(order.coupon_redemption.discount_amount, Decimal("10.00"))
-        tax = (self.cart_subtotal * TAX_RATE).quantize(Decimal("0.01"))
+        self.assertEqual(order.discount, 100_000)
+        self.assertEqual(order.coupon_redemption.discount_amount, 100_000)
+        tax = percent_of(self.cart_subtotal, TAX_PERCENT)
         self.assertEqual(
-            order.total, self.cart_subtotal + SHIPPING_COST + tax - Decimal("10.00")
+            order.total, self.cart_subtotal + SHIPPING_COST + tax - 100_000
         )
 
     def test_discount_follows_the_locked_price_not_the_stale_cart_price(self):
         self.apply_coupon(self.restricted_coupon())
         # Price rises after the coupon was applied; checkout must price (and
         # discount) from the locked variant row.
-        ProductVariant.objects.filter(pk=self.variant.pk).update(price=Decimal("40.00"))
+        ProductVariant.objects.filter(pk=self.variant.pk).update(price=400_000)
 
         res = self.checkout()
 
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
         order = Order.objects.get(pk=res.data["id"])
-        self.assertEqual(order.subtotal, Decimal("120.00"))  # 2 x 40.00 + 40.00
-        self.assertEqual(order.discount, Decimal("16.00"))  # 20% of 2 x 40.00
+        self.assertEqual(order.subtotal, 1_200_000)  # 2 x 40.00 + 40.00
+        self.assertEqual(order.discount, 160_000)  # 20% of 2 x 40.00
 
     def test_checkout_rejected_when_eligible_items_were_removed_after_applying(self):
         self.apply_coupon(self.restricted_coupon())

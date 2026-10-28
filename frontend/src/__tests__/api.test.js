@@ -710,7 +710,7 @@ describe('cartAPI', () => {
   });
 
   it('applyCoupon() — POSTs { code } to /cart/apply-coupon/', async () => {
-    mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith({ code: 'SUMMER20', discount_amount: '10.00' }));
+    mockAxiosInstance.post.mockResolvedValueOnce(resolvedWith({ code: 'SUMMER20', discount_amount: 100_000 }));
     await cartAPI.applyCoupon('SUMMER20');
     expect(mockAxiosInstance.post).toHaveBeenCalledWith('/cart/apply-coupon/', { code: 'SUMMER20' });
   });

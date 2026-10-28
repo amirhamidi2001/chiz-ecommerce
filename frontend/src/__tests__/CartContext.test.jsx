@@ -36,10 +36,10 @@ import {
 const makeCart = (overrides = {}) => ({
   id: 1,
   total_items: 2,
-  total_price: '49.98',
+  total_price: 499_800,
   items: [
-    { id: 10, variant_id: 501, quantity: 1, price: '24.99' },
-    { id: 11, variant_id: 502, quantity: 1, price: '24.99' },
+    { id: 10, variant_id: 501, quantity: 1, price: 249_900 },
+    { id: 11, variant_id: 502, quantity: 1, price: 249_900 },
   ],
   ...overrides,
 });
@@ -704,8 +704,8 @@ const cartWithCoupon = (code, discount) =>
 describe('applyCoupon', () => {
   it('posts the code, re-fetches the cart, and exposes the recomputed coupon fields', async () => {
     const probe = await setupProbe();
-    applyCoupon.mockResolvedValueOnce({ data: { code: 'SUMMER20', discount_amount: '10.00' } });
-    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', '10.00') });
+    applyCoupon.mockResolvedValueOnce({ data: { code: 'SUMMER20', discount_amount: 100_000 } });
+    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', 100_000) });
 
     let result;
     await act(async () => { result = await probe.ctx.applyCoupon('SUMMER20'); });
@@ -714,7 +714,7 @@ describe('applyCoupon', () => {
     expect(result).toEqual({ success: true });
     expect(getCart).toHaveBeenCalledTimes(2); // mount + refresh
     expect(screen.getByTestId('coupon').textContent).toBe('SUMMER20');
-    expect(screen.getByTestId('discount').textContent).toBe('10.00');
+    expect(screen.getByTestId('discount').textContent).toBe('100000');
   });
 
   it('refreshes silently — never flips loading, so pages keep their content', async () => {
@@ -722,7 +722,7 @@ describe('applyCoupon', () => {
     applyCoupon.mockResolvedValueOnce({ data: {} });
     let resolveRefresh;
     getCart.mockReturnValueOnce(
-      new Promise((res) => { resolveRefresh = () => res({ data: cartWithCoupon('SUMMER20', '10.00') }); }),
+      new Promise((res) => { resolveRefresh = () => res({ data: cartWithCoupon('SUMMER20', 100_000) }); }),
     );
 
     let pending;
@@ -792,7 +792,7 @@ describe('applyCoupon', () => {
 
 describe('removeCoupon', () => {
   it('deletes the coupon, re-fetches the cart, and clears the coupon fields', async () => {
-    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', '10.00') });
+    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', 100_000) });
     const probe = await setupProbe();
     expect(screen.getByTestId('coupon').textContent).toBe('SUMMER20');
     removeCoupon.mockResolvedValueOnce({ status: 204 });
@@ -810,7 +810,7 @@ describe('removeCoupon', () => {
   });
 
   it('returns the backend message on failure and leaves the cart alone', async () => {
-    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', '10.00') });
+    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', 100_000) });
     const probe = await setupProbe();
     removeCoupon.mockRejectedValueOnce({ response: { data: { detail: 'Not allowed.' } } });
 
@@ -839,7 +839,7 @@ describe('removeCoupon', () => {
 describe('refreshCart', () => {
   it('updates the cart and returns true without touching loading', async () => {
     const probe = await setupProbe();
-    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', '5.00') });
+    getCart.mockResolvedValueOnce({ data: cartWithCoupon('SUMMER20', 50_000) });
 
     let ok;
     await act(async () => { ok = await probe.ctx.refreshCart(); });

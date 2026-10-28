@@ -183,6 +183,7 @@ vi.mock('../../services/api', () => ({
   },
 }));
 import { adminAPI } from '../../services/api';
+import { formatToman } from '../../utils/money';
 
 // ─── Fixture factories ────────────────────────────────────────────────────────
 const makeProduct = (overrides = {}) => ({
@@ -192,7 +193,7 @@ const makeProduct = (overrides = {}) => ({
   category_name: 'Electronics',
   brand: 20,
   brand_name: 'Logitech',
-  price: 29.99,
+  price: 299_900,
   original_price: null,
   stock: 50,
   rating: 4.3,
@@ -213,7 +214,7 @@ const makeProducts = (n = 3) =>
     category_name: 'Electronics',
     brand: 20,
     brand_name: 'Logitech',
-    price: (i + 1) * 10,
+    price: (i + 1) * 100_000, // Rial: 10,000 / 20,000 / 30,000 Toman
     original_price: null,
     stock: 50,
     rating: 4.0,
@@ -473,37 +474,37 @@ describe('AdminProducts', () => {
     describe('price column', () => {
       it('renders the formatted price', async () => {
         adminAPI.getProducts.mockResolvedValue(
-          paged([makeProduct({ price: 49.5 })], 1)
+          paged([makeProduct({ price: 495_000 })], 1)
         );
         render(<AdminProducts />);
         await waitFor(() => {
           const cell = screen.getByTestId('cell-price');
-          expect(within(cell).getByText('$49.50')).toBeInTheDocument();
+          expect(within(cell).getByText(formatToman(495_000))).toBeInTheDocument();
         });
       });
 
       it('shows the strikethrough original_price when present', async () => {
         adminAPI.getProducts.mockResolvedValue(
-          paged([makeProduct({ price: 39.99, original_price: 59.99 })], 1)
+          paged([makeProduct({ price: 399_900, original_price: 599_900 })], 1)
         );
         render(<AdminProducts />);
         await waitFor(() => {
           const cell = screen.getByTestId('cell-price');
-          const original = within(cell).getByText('$59.99');
+          const original = within(cell).getByText(formatToman(599_900));
           expect(original.className).toMatch(/line-through/);
         });
       });
 
       it('does NOT show original_price when it is null', async () => {
         adminAPI.getProducts.mockResolvedValue(
-          paged([makeProduct({ price: 39.99, original_price: null })], 1)
+          paged([makeProduct({ price: 399_900, original_price: null })], 1)
         );
         render(<AdminProducts />);
         await waitFor(() => {
           const cell = screen.getByTestId('cell-price');
           expect(within(cell).queryByText(/line-through/)).not.toBeInTheDocument();
           // only one price element rendered
-          expect(within(cell).getAllByText(/^\$/)).toHaveLength(1);
+          expect(within(cell).getAllByText(/تومان$/)).toHaveLength(1);
         });
       });
     });
@@ -996,7 +997,7 @@ describe('AdminProducts', () => {
     });
 
     // ── Validation ──────────────────────────────────────────────────────────
-    it('shows "Required" for name, price, and category when submitted empty', async () => {
+    it('shows "Required" for name and category and a whole-Toman error for price when submitted empty', async () => {
       const user = setup();
       await openNew(user);
       await user.click(
@@ -1004,7 +1005,8 @@ describe('AdminProducts', () => {
       );
       await waitFor(() => {
         const errors = screen.getAllByText('Required');
-        expect(errors).toHaveLength(3); // name, price, category
+        expect(errors).toHaveLength(2); // name, category
+        expect(screen.getByText('Enter a whole number of Toman')).toBeInTheDocument(); // price
       });
     });
 
@@ -1013,7 +1015,7 @@ describe('AdminProducts', () => {
       const user = setup();
       await openNew(user);
       await user.type(getField('name'), 'New Widget');
-      await user.type(getField('price'), '19.99');
+      await user.type(getField('price'), '19990'); // Toman
       await user.selectOptions(getField('category'), '10');
       // leave brand, original_price, descriptions empty
       await user.click(
@@ -1037,12 +1039,13 @@ describe('AdminProducts', () => {
       await user.click(
         within(getModalCard()).getByRole('button', { name: /^add product$/i })
       );
-      await waitFor(() => expect(screen.getAllByText('Required')).toHaveLength(3));
+      await waitFor(() => expect(screen.getAllByText('Required')).toHaveLength(2));
 
       await user.type(getField('name'), 'X');
 
-      // name error cleared, but price/category errors remain
-      await waitFor(() => expect(screen.getAllByText('Required')).toHaveLength(2));
+      // name error cleared, but the category and price errors remain
+      await waitFor(() => expect(screen.getAllByText('Required')).toHaveLength(1));
+      expect(screen.getByText('Enter a whole number of Toman')).toBeInTheDocument();
     });
 
     // ── Successful create ──────────────────────────────────────────────────
@@ -1052,7 +1055,7 @@ describe('AdminProducts', () => {
       await openNew(user);
 
       await user.type(getField('name'), 'Test Widget');
-      await user.type(getField('price'), '15.5');
+      await user.type(getField('price'), '15500'); // Toman
       await user.selectOptions(getField('category'), '10');
 
       await user.click(
@@ -1063,7 +1066,7 @@ describe('AdminProducts', () => {
         expect(adminAPI.createProduct).toHaveBeenCalledWith(expect.any(FormData));
         const fd = adminAPI.createProduct.mock.calls[0][0];
         expect(fd.get('name')).toBe('Test Widget');
-        expect(fd.get('price')).toBe('15.5');
+        expect(fd.get('price')).toBe('155000'); // submitted as Rial (Toman x10)
         expect(fd.get('category')).toBe('10');
         // booleans appended too
         expect(fd.get('is_new')).toBe('false');
@@ -1095,7 +1098,7 @@ describe('AdminProducts', () => {
       await openNew(user);
 
       await user.type(getField('name'), 'Test Widget');
-      await user.type(getField('price'), '15.5');
+      await user.type(getField('price'), '15500'); // Toman
       await user.selectOptions(getField('category'), '10');
 
       await user.click(
@@ -1114,7 +1117,7 @@ describe('AdminProducts', () => {
       await openNew(user);
 
       await user.type(getField('name'), 'Test Widget');
-      await user.type(getField('price'), '15.5');
+      await user.type(getField('price'), '15500'); // Toman
       await user.selectOptions(getField('category'), '10');
 
       vi.clearAllMocks();
@@ -1136,7 +1139,7 @@ describe('AdminProducts', () => {
       await openNew(user);
 
       await user.type(getField('name'), 'Duplicate');
-      await user.type(getField('price'), '15.5');
+      await user.type(getField('price'), '15500'); // Toman
       await user.selectOptions(getField('category'), '10');
       await user.click(
         within(getModalCard()).getByRole('button', { name: /^add product$/i })
@@ -1253,8 +1256,8 @@ describe('AdminProducts', () => {
 
     it('pre-fills the price field', async () => {
       const user = setup();
-      await openEdit(user, { price: 29.99 });
-      expect(getField('price')).toHaveValue(29.99);
+      await openEdit(user, { price: 299_900 });
+      expect(getField('price')).toHaveValue(29_990); // 299,900 Rial shown as Toman
     });
 
     it('pre-fills the category select', async () => {

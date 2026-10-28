@@ -93,7 +93,7 @@ class IDPayCheckoutIntegrationTests(APITestCase):
         self.user = User.objects.create_user(
             email="buyer@example.com", password="TestPass123!"
         )
-        self.product = make_product(name="Face Cream", slug="face-cream", price="50.00")
+        self.product = make_product(name="Face Cream", slug="face-cream", price=500_000)
         self.variant = make_variant(product=self.product, stock=10)
         self.starting_stock = self.variant.stock
         make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])

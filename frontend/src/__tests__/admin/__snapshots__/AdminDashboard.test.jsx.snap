@@ -59,7 +59,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
         <span
           data-testid="stat-value"
         >
-          $125,000
+          125,000,000 تومان
         </span>
         <span
           data-testid="stat-change"
@@ -220,7 +220,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
             <div
               class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-10 pointer-events-none"
             >
-              $4,000
+              4,000,000 تومان
               <br />
               <span
                 class="text-gray-300"
@@ -239,7 +239,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
             <div
               class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-10 pointer-events-none"
             >
-              $7,000
+              7,000,000 تومان
               <br />
               <span
                 class="text-gray-300"
@@ -258,7 +258,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
             <div
               class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-10 pointer-events-none"
             >
-              $5,000
+              5,000,000 تومان
               <br />
               <span
                 class="text-gray-300"
@@ -459,7 +459,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
               <span
                 class="font-bold text-sm text-gray-800"
               >
-                $90
+                89,500 تومان
               </span>
             </div>
           </div>
@@ -491,7 +491,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
               <span
                 class="font-bold text-sm text-gray-800"
               >
-                $240
+                240,000 تومان
               </span>
             </div>
           </div>
@@ -542,7 +542,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
             <span
               class="text-sm font-bold text-teal-700"
             >
-              $5,400
+              5,400,000 تومان
             </span>
           </div>
           <div
@@ -570,7 +570,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
             <span
               class="text-sm font-bold text-teal-700"
             >
-              $3,200
+              3,200,000 تومان
             </span>
           </div>
         </div>

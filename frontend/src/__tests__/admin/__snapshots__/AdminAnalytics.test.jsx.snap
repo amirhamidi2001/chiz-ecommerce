@@ -82,7 +82,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
         <span
           data-testid="stat-value"
         >
-          $120,000
+          120,000,000 تومان
         </span>
         <span
           data-testid="stat-change"
@@ -139,7 +139,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
         <span
           data-testid="stat-value"
         >
-          $353
+          352,941 تومان
         </span>
       </div>
     </div>
@@ -176,7 +176,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
               <div
                 class="font-semibold"
               >
-                $8,000
+                8,000,000 تومان
               </div>
               <div
                 class="text-gray-300"
@@ -198,7 +198,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
               <div
                 class="font-semibold"
               >
-                $9,500
+                9,500,000 تومان
               </div>
               <div
                 class="text-gray-300"
@@ -220,7 +220,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
               <div
                 class="font-semibold"
               >
-                $11,000
+                11,000,000 تومان
               </div>
               <div
                 class="text-gray-300"
@@ -727,7 +727,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
               <span
                 class="text-gray-500 font-semibold"
               >
-                $5,000
+                5,000,000 تومان
               </span>
             </div>
             <div
@@ -751,7 +751,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
               <span
                 class="text-gray-500 font-semibold"
               >
-                $3,000
+                3,000,000 تومان
               </span>
             </div>
             <div

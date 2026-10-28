@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
+from django.utils.translation import gettext_lazy as _
 
 
 class Category(models.Model):
@@ -8,7 +9,7 @@ class Category(models.Model):
     slug = models.SlugField(max_length=120, unique=True, blank=True)
 
     class Meta:
-        verbose_name_plural = "categories"
+        verbose_name_plural = _("categories")
         ordering = ["name"]
 
     def save(self, *args, **kwargs):
@@ -22,8 +23,8 @@ class Category(models.Model):
 
 class Post(models.Model):
     class Status(models.TextChoices):
-        DRAFT = "draft", "Draft"
-        PUBLISHED = "published", "Published"
+        DRAFT = "draft", _("Draft")
+        PUBLISHED = "published", _("Published")
 
     title = models.CharField(max_length=255)
     slug = models.SlugField(max_length=280, unique=True, blank=True)
@@ -54,7 +55,7 @@ class Post(models.Model):
     views_count = models.PositiveIntegerField(default=0)
     # Auto-calculated on save, ~200 words/min
     read_time = models.PositiveSmallIntegerField(
-        default=1, help_text="Estimated reading time in minutes"
+        default=1, help_text=_("Estimated reading time in minutes")
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

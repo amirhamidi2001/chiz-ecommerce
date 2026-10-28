@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { adminAPI } from "../../services/api";
 import StatCard from "../../components/admin/StatCard";
+import { formatToman } from '../../utils/money';
+import { roundToWholeToman } from '../../utils/money';
 
-const fmt = (n) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+const fmt = (n) => formatToman(n);
 
 // ── SVG bar chart ─────────────────────────────────────────────────────────────
 const BarChart = ({ data = [], valueKey, labelKey, color = "#0d9488", height = 180 }) => {
@@ -175,7 +176,7 @@ const AdminAnalytics = () => {
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Revenue" icon="bi-currency-dollar" color="teal" loading={loading}
+          title="Revenue" icon="bi-cash-stack" color="teal" loading={loading}
           value={overview ? fmt(overview.revenue.current) : "—"}
           change={overview?.revenue.change}
         />
@@ -193,7 +194,7 @@ const AdminAnalytics = () => {
           title="Avg Order Value" icon="bi-receipt" color="amber" loading={loading}
           value={
             overview?.revenue.current && overview?.orders.current
-              ? fmt(overview.revenue.current / (overview.orders.current || 1))
+              ? fmt(roundToWholeToman(overview.revenue.current, overview.orders.current || 1))
               : "—"
           }
         />

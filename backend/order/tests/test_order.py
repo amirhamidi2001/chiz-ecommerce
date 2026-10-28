@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from cart.models import Cart, CartItem
+from core.money import percent_of
 from dashboard.models import Address
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -14,7 +15,7 @@ from shop.models import Category, Product, StockMovement
 
 from .factories import (
     SHIPPING_COST,
-    TAX_RATE,
+    TAX_PERCENT,
     VALID_PAYLOAD,
     make_cart_with_items,
     make_category,
@@ -55,11 +56,11 @@ class OrderModelTests(TestCase):
             shipping_zip="97201",
             shipping_country="US",
             payment_method=Order.PaymentMethod.CREDIT_CARD,
-            subtotal=Decimal("50.00"),
+            subtotal=500_000,
             shipping_cost=SHIPPING_COST,
-            tax=Decimal("5.00"),
-            discount=Decimal("0.00"),
-            total=Decimal("64.99"),
+            tax=50_000,
+            discount=0,
+            total=649_900,
             status=Order.Status.PROCESSING,
         )
         defaults.update(kwargs)
@@ -125,11 +126,11 @@ class OrderModelTests(TestCase):
             shipping_zip="0",
             shipping_country="US",
             payment_method=Order.PaymentMethod.CREDIT_CARD,
-            subtotal=Decimal("0"),
-            shipping_cost=Decimal("0"),
-            tax=Decimal("0"),
-            discount=Decimal("0"),
-            total=Decimal("0"),
+            subtotal=0,
+            shipping_cost=0,
+            tax=0,
+            discount=0,
+            total=0,
         )
         self.assertEqual(order.status, Order.Status.PENDING)
 
@@ -162,10 +163,10 @@ class OrderModelTests(TestCase):
             product=self.product,
             product_name=self.product.name,
             product_slug=self.product.slug,
-            unit_price=Decimal("25.00"),
+            unit_price=250_000,
             quantity=4,
         )
-        self.assertEqual(item.subtotal, Decimal("100.00"))
+        self.assertEqual(item.subtotal, 1_000_000)
 
     def test_order_item_str_contains_product_name(self):
         order = self._make_order()
@@ -174,7 +175,7 @@ class OrderModelTests(TestCase):
             product=self.product,
             product_name=self.product.name,
             product_slug=self.product.slug,
-            unit_price=Decimal("10.00"),
+            unit_price=100_000,
             quantity=1,
         )
         self.assertIn(self.product.name, str(item))
@@ -182,7 +183,7 @@ class OrderModelTests(TestCase):
     def test_order_item_preserves_price_snapshot(self):
         """Changing the product price later must not affect order item price."""
         order = self._make_order()
-        snapshot_price = Decimal("25.00")
+        snapshot_price = 250_000
         item = OrderItem.objects.create(
             order=order,
             product=self.product,
@@ -191,7 +192,7 @@ class OrderModelTests(TestCase):
             unit_price=snapshot_price,
             quantity=1,
         )
-        self.product.price = Decimal("999.00")
+        self.product.price = 9_990_000
         self.product.save()
         item.refresh_from_db()
         self.assertEqual(item.unit_price, snapshot_price)
@@ -301,12 +302,12 @@ class OrderCreateSerializerTests(TestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(price="100.00", stock=5)
+        self.product = make_product(price=1_000_000, stock=5)
         # ProductVariant.stock is the real, authoritative inventory count
         # (Tasks 3.1.1.1–3.1.1.4) — deliberately different from
         # self.product.stock so any test that accidentally asserts
         # against the wrong (superseded) field would fail loudly.
-        self.variant = make_variant(product=self.product, price="100.00", stock=5)
+        self.variant = make_variant(product=self.product, price=1_000_000, stock=5)
         make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])
         self.request = type(
             "Request", (), {"user": self.user, "build_absolute_uri": lambda s, u: u}
@@ -404,7 +405,7 @@ class OrderCreateSerializerTests(TestCase):
         s = self._serialize({"discount": "-10.00"})
         self.assertTrue(s.is_valid(), s.errors)
 
-        s2 = self._serialize({"discount": "999999.00"})
+        s2 = self._serialize({"discount": 9_999_990_000})
         self.assertTrue(s2.is_valid(), s2.errors)
 
     def test_missing_address_fails(self):
@@ -451,12 +452,12 @@ class OrderCreateSerializerTests(TestCase):
 
     def test_multiple_problem_items_all_surfaced_in_one_response(self):
         out_of_stock_variant = make_variant(
-            name="OOS Item", slug="oos-item", price="50.00", stock=0
+            name="OOS Item", slug="oos-item", price=500_000, stock=0
         )
         inactive_variant = make_variant(
             name="Inactive Item",
             slug="inactive-item",
-            price="30.00",
+            price=300_000,
             stock=10,
             is_active=False,
         )
@@ -790,7 +791,7 @@ class OrderCreateSerializerTests(TestCase):
         derived from the same single, freshly-read value — see this
         task's create() restructuring).
         """
-        self.variant.price = Decimal("150.00")
+        self.variant.price = 1_500_000
         self.variant.save(update_fields=["price"])
 
         s = self._serialize()
@@ -798,13 +799,13 @@ class OrderCreateSerializerTests(TestCase):
         order = s.save()
 
         # setUp's cart has quantity=2 of self.variant.
-        expected_subtotal = Decimal("150.00") * 2
+        expected_subtotal = 1_500_000 * 2
         self.assertEqual(order.subtotal, expected_subtotal)
 
         order_item = order.items.get(variant=self.variant)
-        self.assertEqual(order_item.unit_price, Decimal("150.00"))
+        self.assertEqual(order_item.unit_price, 1_500_000)
 
-        expected_tax = (expected_subtotal * TAX_RATE).quantize(Decimal("0.01"))
+        expected_tax = percent_of(expected_subtotal, TAX_PERCENT)
         self.assertEqual(order.tax, expected_tax)
 
     def test_order_subtotal_and_orderitem_unit_prices_are_internally_consistent(self):
@@ -815,7 +816,7 @@ class OrderCreateSerializerTests(TestCase):
         row lock is acquired) exists to guarantee.
         """
         second_variant = make_variant(
-            name="Second Item", slug="second-item", price="75.00", stock=10
+            name="Second Item", slug="second-item", price=750_000, stock=10
         )
         cart = Cart.objects.get(user=self.user)
         CartItem.objects.create(cart=cart, variant=second_variant, quantity=3)
@@ -861,9 +862,7 @@ class OrderCreateSerializerTests(TestCase):
             # Fires exactly once cart_items has already been fetched
             # (with the OLD price still attached to that queryset's
             # objects) but before the locked variants query runs.
-            ProductVariant.objects.filter(pk=self.variant.pk).update(
-                price=Decimal("999.00")
-            )
+            ProductVariant.objects.filter(pk=self.variant.pk).update(price=9_990_000)
             return original_select_for_update(*args, **kwargs)
 
         with patch.object(
@@ -874,8 +873,8 @@ class OrderCreateSerializerTests(TestCase):
             order = s.save()
 
         order_item = order.items.get(variant=self.variant)
-        self.assertEqual(order_item.unit_price, Decimal("999.00"))
-        self.assertEqual(order.subtotal, Decimal("999.00") * 2)  # setUp's quantity=2
+        self.assertEqual(order_item.unit_price, 9_990_000)
+        self.assertEqual(order.subtotal, 9_990_000 * 2)  # setUp's quantity=2
 
     # ── Financial calculations ────────────────────────────────────────────────
 
@@ -887,13 +886,13 @@ class OrderCreateSerializerTests(TestCase):
         # time, independent of the cart's own state afterward (Task
         # 6.4.1.2: the cart is deliberately preserved, not cleared, at
         # order-creation time any more).
-        self.assertEqual(order.subtotal, Decimal("200.00"))
+        self.assertEqual(order.subtotal, 2_000_000)
 
     def test_order_tax_is_ten_percent_of_subtotal(self):
         s = self._serialize()
         s.is_valid()
         order = s.save()
-        expected_tax = (order.subtotal * TAX_RATE).quantize(Decimal("0.01"))
+        expected_tax = percent_of(order.subtotal, TAX_PERCENT)
         self.assertEqual(order.tax, expected_tax)
 
     def test_order_shipping_cost_is_fixed(self):
@@ -906,28 +905,24 @@ class OrderCreateSerializerTests(TestCase):
         # discount is no longer a real input (see this task's security
         # fix) — sending one is simply ignored, and the formula always
         # uses discount=0.
-        s = self._serialize({"discount": "10.00"})
+        s = self._serialize({"discount": 100_000})
         s.is_valid()
         order = s.save()
-        expected = (order.subtotal + SHIPPING_COST + order.tax).quantize(
-            Decimal("0.01")
-        )
+        expected = order.subtotal + SHIPPING_COST + order.tax
         self.assertEqual(order.total, expected)
-        self.assertEqual(order.discount, Decimal("0.00"))
+        self.assertEqual(order.discount, 0)
 
     def test_order_total_with_zero_discount(self):
-        s = self._serialize({"discount": "0.00"})
+        s = self._serialize({"discount": 0})
         s.is_valid()
         order = s.save()
-        expected = (order.subtotal + SHIPPING_COST + order.tax).quantize(
-            Decimal("0.01")
-        )
+        expected = order.subtotal + SHIPPING_COST + order.tax
         self.assertEqual(order.total, expected)
 
     # ── Cart-to-order flow ────────────────────────────────────────────────────
 
     def test_order_items_match_cart_items(self):
-        product2 = make_product(name="Trousers", slug="trousers", price="60.00")
+        product2 = make_product(name="Trousers", slug="trousers", price=600_000)
         Cart.objects.filter(user=self.user).delete()
         make_cart_with_items(
             self.user,
@@ -974,7 +969,7 @@ class OrderCreateSerializerTests(TestCase):
         Cart.objects.filter(user=self.user).delete()
         color = make_color(name="Shade 320 - Warm Beige")
         variant = make_variant(
-            product=self.product, sku="FOUND-320", color=color, price="100.00"
+            product=self.product, sku="FOUND-320", color=color, price=1_000_000
         )
         make_cart_with_items(self.user, [{"variant": variant, "quantity": 2}])
 
@@ -989,7 +984,7 @@ class OrderCreateSerializerTests(TestCase):
     def test_order_item_snapshots_variant_attributes_json_with_color(self):
         Cart.objects.filter(user=self.user).delete()
         color = make_color(name="Shade 320 - Warm Beige")
-        variant = make_variant(product=self.product, color=color, price="100.00")
+        variant = make_variant(product=self.product, color=color, price=1_000_000)
         make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
 
         s = self._serialize()
@@ -1004,7 +999,7 @@ class OrderCreateSerializerTests(TestCase):
     def test_order_item_snapshots_variant_attributes_json_without_color(self):
         """A colorless variant must snapshot color=None, not omit the key."""
         Cart.objects.filter(user=self.user).delete()
-        variant = make_variant(product=self.product, color=None, price="100.00")
+        variant = make_variant(product=self.product, color=None, price=1_000_000)
         make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
 
         s = self._serialize()
@@ -1021,7 +1016,7 @@ class OrderCreateSerializerTests(TestCase):
         cart_item.variant.product instead of cart_item.product now.
         """
         Cart.objects.filter(user=self.user).delete()
-        variant = make_variant(product=self.product, price="100.00")
+        variant = make_variant(product=self.product, price=1_000_000)
         make_cart_with_items(self.user, [{"variant": variant, "quantity": 1}])
 
         s = self._serialize()
@@ -1045,10 +1040,10 @@ class OrderCreateSerializerTests(TestCase):
         shade_a_color = make_color(name="Shade 110 - Porcelain")
         shade_b_color = make_color(name="Shade 320 - Warm Beige")
         shade_a = make_variant(
-            product=self.product, sku="FOUND-110", color=shade_a_color, price="100.00"
+            product=self.product, sku="FOUND-110", color=shade_a_color, price=1_000_000
         )
         shade_b = make_variant(
-            product=self.product, sku="FOUND-320", color=shade_b_color, price="100.00"
+            product=self.product, sku="FOUND-320", color=shade_b_color, price=1_000_000
         )
         make_cart_with_items(
             self.user,
@@ -1122,7 +1117,7 @@ class OrderCreateSerializerTests(TestCase):
 
         # Cart needs 2+ items so the failure happens mid-loop, not on the
         # first iteration.
-        product2 = make_product(name="Trousers", slug="trousers", price="60.00")
+        product2 = make_product(name="Trousers", slug="trousers", price=600_000)
         Cart.objects.filter(user=self.user).delete()
         make_cart_with_items(
             self.user,
@@ -1177,7 +1172,7 @@ class OrderCreateSerializerTests(TestCase):
         from shop.models import ProductVariant
 
         other_variant = make_variant(
-            name="Untouched", slug="untouched", price="15.00"
+            name="Untouched", slug="untouched", price=150_000
         )  # not in the cart — must not be locked
 
         s = self._serialize()
@@ -1267,7 +1262,7 @@ class OrderCreateSerializerTests(TestCase):
         rollback covers the new stock-decrement logic too.
         """
         low_stock_variant = make_variant(
-            name="Scarce Item", slug="scarce-item", price="40.00", stock=1
+            name="Scarce Item", slug="scarce-item", price=400_000, stock=1
         )
         Cart.objects.filter(user=self.user).delete()
         cart = make_cart_with_items(
@@ -1337,10 +1332,10 @@ class OrderCreateSerializerTests(TestCase):
         success across items is not allowed.
         """
         healthy_variant = make_variant(
-            name="Plenty", slug="plenty", price="10.00", stock=10
+            name="Plenty", slug="plenty", price=100_000, stock=10
         )
         scarce_variant = make_variant(
-            name="Scarce Two", slug="scarce-two", price="20.00", stock=1
+            name="Scarce Two", slug="scarce-two", price=200_000, stock=1
         )
         Cart.objects.filter(user=self.user).delete()
         cart = make_cart_with_items(
@@ -1448,7 +1443,7 @@ class OrderCreateSerializerTests(TestCase):
         a decrement that never actually happened would be a lie.
         """
         low_stock_variant = make_variant(
-            name="Scarce Item", slug="scarce-item", price="40.00", stock=1
+            name="Scarce Item", slug="scarce-item", price=400_000, stock=1
         )
         Cart.objects.filter(user=self.user).delete()
         cart = make_cart_with_items(
@@ -1575,10 +1570,10 @@ class OrderCreateSerializerTests(TestCase):
         weaker guarantee.
         """
         healthy_variant = make_variant(
-            name="Still Good", slug="still-good", price="15.00", stock=10
+            name="Still Good", slug="still-good", price=150_000, stock=10
         )
         soon_to_expire_variant = make_variant(
-            name="Will Expire", slug="will-expire", price="20.00", stock=8
+            name="Will Expire", slug="will-expire", price=200_000, stock=8
         )
         Cart.objects.filter(user=self.user).delete()
         make_cart_with_items(
@@ -1674,8 +1669,8 @@ class OrderCreateShippingRateTests(TestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(price="100.00", stock=5)
-        self.variant = make_variant(product=self.product, price="100.00", stock=5)
+        self.product = make_product(price=1_000_000, stock=5)
+        self.variant = make_variant(product=self.product, price=1_000_000, stock=5)
         make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])
         self.request = type(
             "Request", (), {"user": self.user, "build_absolute_uri": lambda s, u: u}
@@ -1693,7 +1688,7 @@ class OrderCreateShippingRateTests(TestCase):
         in Order.shipping_cost exactly matching that rate's price, and
         Order.shipping_carrier correctly set.
         """
-        rate = make_shipping_rate(province="tehran", price="34.50")
+        rate = make_shipping_rate(province="tehran", price=345_000)
 
         s = self._serialize(
             {
@@ -1704,7 +1699,7 @@ class OrderCreateShippingRateTests(TestCase):
         self.assertTrue(s.is_valid(), s.errors)
         order = s.save()
 
-        self.assertEqual(order.shipping_cost, Decimal("34.50"))
+        self.assertEqual(order.shipping_cost, 345_000)
         self.assertEqual(order.shipping_carrier_id, rate.carrier_id)
 
     def test_rate_belonging_to_different_province_is_rejected(self):
@@ -1775,13 +1770,13 @@ class OrderCreateShippingRateAPITests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(price="40.00", stock=5)
-        self.variant = make_variant(product=self.product, price="40.00", stock=5)
+        self.product = make_product(price=400_000, stock=5)
+        self.variant = make_variant(product=self.product, price=400_000, stock=5)
         make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 1}])
         self.client.force_authenticate(user=self.user)
 
     def test_post_with_valid_rate_returns_201_with_matching_cost_and_carrier(self):
-        rate = make_shipping_rate(province="tehran", price="12.34")
+        rate = make_shipping_rate(province="tehran", price=123_400)
         payload = {
             **valid_payload(),
             "shipping_carrier_id": rate.carrier_id,
@@ -1791,7 +1786,7 @@ class OrderCreateShippingRateAPITests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
 
         order = Order.objects.get(pk=res.data["id"])
-        self.assertEqual(order.shipping_cost, Decimal("12.34"))
+        self.assertEqual(order.shipping_cost, 123_400)
         self.assertEqual(order.shipping_carrier_id, rate.carrier_id)
 
     def test_post_with_rate_for_wrong_province_returns_400(self):
@@ -1827,7 +1822,7 @@ class OrderListCreateAPITests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(price="50.00", stock=10)
+        self.product = make_product(price=500_000, stock=10)
         make_cart_with_items(self.user, [{"product": self.product, "quantity": 1}])
         self.client.force_authenticate(user=self.user)
 
@@ -1950,7 +1945,7 @@ class OrderListCreateAPITests(APITestCase):
     def test_post_insufficient_stock_returns_400_and_nothing_committed(self):
         Cart.objects.filter(user=self.user).delete()
         low_stock_variant = make_variant(
-            name="API Scarce", slug="api-scarce", price="12.00", stock=1
+            name="API Scarce", slug="api-scarce", price=120_000, stock=1
         )
         make_cart_with_items(self.user, [{"variant": low_stock_variant, "quantity": 2}])
 
@@ -1987,13 +1982,13 @@ class OrderListCreateAPITests(APITestCase):
         silently ignored (unknown-field passthrough), and the resulting
         order's discount is always $0.
         """
-        payload = {**valid_payload(), "discount": "5.00"}
+        payload = {**valid_payload(), "discount": 50_000}
         res = self.client.post(self.URL, payload, format="json")
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(Decimal(res.data["discount"]), Decimal("0.00"))
+        self.assertEqual(res.data["discount"], 0)
         order = Order.objects.get(user=self.user)
         subtotal = order.subtotal
-        expected = (subtotal + SHIPPING_COST + order.tax).quantize(Decimal("0.01"))
+        expected = subtotal + SHIPPING_COST + order.tax
         self.assertEqual(order.total, expected)
 
     def test_post_paypal_payment_method(self):
@@ -2018,7 +2013,7 @@ class OrderListCreateAPITests(APITestCase):
         self.assertEqual(res.data["notes"], "Leave at front door")
 
     def test_post_multi_item_cart_creates_correct_order_items(self):
-        product2 = make_product(name="Cap", slug="cap", price="15.00")
+        product2 = make_product(name="Cap", slug="cap", price=150_000)
         Cart.objects.filter(user=self.user).delete()
         make_cart_with_items(
             self.user,
@@ -2051,11 +2046,11 @@ class OrderDetailAPITests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(price="30.00", stock=10)
+        self.product = make_product(price=300_000, stock=10)
         # ProductVariant.stock is authoritative now; keep it distinct
         # from Product.stock so any assertion against the wrong field
         # fails loudly rather than passing by coincidence.
-        self.variant = make_variant(product=self.product, price="30.00", stock=10)
+        self.variant = make_variant(product=self.product, price=300_000, stock=10)
         make_cart_with_items(self.user, [{"variant": self.variant, "quantity": 2}])
         self.client.force_authenticate(user=self.user)
         res = self.client.post("/api/orders/", valid_payload(), format="json")
@@ -2144,8 +2139,8 @@ class OrderDetailAPITests(APITestCase):
 
     def test_get_order_detail_subtotal_is_correct(self):
         res = self.client.get(self._detail_url(self.order.pk))
-        expected = (self.product.price * 2).quantize(Decimal("0.01"))
-        self.assertEqual(Decimal(res.data["subtotal"]), expected)
+        expected = self.product.price * 2
+        self.assertEqual(res.data["subtotal"], expected)
 
     def test_get_order_detail_full_name(self):
         res = self.client.get(self._detail_url(self.order.pk))
@@ -2280,7 +2275,7 @@ class OrderDetailAPITests(APITestCase):
         items.
         """
         second_variant = make_variant(
-            name="Backpack", slug="backpack", price="45.00", stock=10
+            name="Backpack", slug="backpack", price=450_000, stock=10
         )
         make_cart_with_items(
             self.user,
@@ -2404,7 +2399,7 @@ class OrderDetailAPITests(APITestCase):
         other valid item still gets its restoration movement.
         """
         second_variant = make_variant(
-            name="Backpack", slug="backpack", price="45.00", stock=10
+            name="Backpack", slug="backpack", price=450_000, stock=10
         )
         make_cart_with_items(
             self.user,
@@ -2519,7 +2514,7 @@ class OrderIsolationTests(APITestCase):
     """Verify strict per-user data separation across all order endpoints."""
 
     def setUp(self):
-        self.product = make_product(price="20.00", stock=20)
+        self.product = make_product(price=200_000, stock=20)
         self.user_a = make_user(email="a@example.com")
         self.user_b = make_user(email="b@example.com")
 

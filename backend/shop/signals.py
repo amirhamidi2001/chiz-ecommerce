@@ -255,7 +255,7 @@ def handle_variant_price_change(sender, instance, created, **kwargs):
     ProductPriceSnapshot.objects.create(product=product, price=current_lowest)
     if current_lowest < last_snapshot.price and not created:
         product_id = product.id
-        old_price, new_price = str(last_snapshot.price), str(current_lowest)
+        old_price, new_price = last_snapshot.price, current_lowest  # int Rial
         transaction.on_commit(
             lambda: notify_price_drop_subscribers.delay(
                 product_id, old_price, new_price

@@ -27,12 +27,13 @@ import { getProducts, getCategories, getBrands } from '../services/api';
 import Cards from '../components/Cards';
 import BestSellers from '../components/BestSellers';
 import SearchResults from '../pages/SearchResults';
+import { formatToman } from '../utils/money';
 
 const product = (overrides = {}) => ({
   id: 1,
   slug: 'plain-product',
   name: 'Plain Product',
-  price: '49.99',
+  price: 499_900,
   original_price: null,
   rating: '4.0',
   reviews_count: 3,
@@ -52,10 +53,10 @@ const saleProduct = (overrides = {}) =>
     id: 2,
     slug: 'vitamin-c-serum',
     name: 'Vitamin C Serum',
-    price: '80.00',
+    price: 800_000,
     is_on_flash_sale: true,
-    flash_sale_price: '60.00',
-    flash_sale_original_price: '80.00',
+    flash_sale_price: 600_000,
+    flash_sale_original_price: 800_000,
     flash_sale_price_varies: false,
     flash_sale_discount_percent: '25.00',
     ...overrides,
@@ -80,8 +81,8 @@ describe('Cards (home mini lists)', () => {
     inRouter(<Cards />);
 
     expect((await screen.findAllByText('Vitamin C Serum')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('$60.00').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('$80.00')[0].tagName).toBe('DEL');
+    expect(screen.getAllByText(formatToman(600_000)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(formatToman(800_000))[0].tagName).toBe('DEL');
     expect(screen.getAllByText('Flash Sale').length).toBeGreaterThan(0);
   });
 
@@ -90,7 +91,7 @@ describe('Cards (home mini lists)', () => {
     inRouter(<Cards />);
 
     expect((await screen.findAllByText('Plain Product')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('$49.99').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(formatToman(499_900)).length).toBeGreaterThan(0);
     expect(screen.queryByText('Flash Sale')).not.toBeInTheDocument();
   });
 });
@@ -102,8 +103,8 @@ describe('BestSellers', () => {
 
     expect(await screen.findByText('Vitamin C Serum')).toBeInTheDocument();
     expect(screen.getByText('Flash Sale')).toBeInTheDocument();
-    expect(screen.getByText('$60.00')).toBeInTheDocument();
-    expect(screen.getByText('$80.00').tagName).toBe('DEL');
+    expect(screen.getByText(formatToman(600_000))).toBeInTheDocument();
+    expect(screen.getByText(formatToman(800_000)).tagName).toBe('DEL');
   });
 
   it('flash sale takes precedence over the "New" badge', async () => {
@@ -121,7 +122,7 @@ describe('BestSellers', () => {
 
     await screen.findByText('Plain Product');
     expect(screen.getByText('New')).toBeInTheDocument();
-    expect(screen.getByText('$49.99')).toBeInTheDocument();
+    expect(screen.getByText(formatToman(499_900))).toBeInTheDocument();
     expect(screen.queryByText('Flash Sale')).not.toBeInTheDocument();
   });
 });
@@ -132,8 +133,8 @@ describe('SearchResults', () => {
     inRouter(<SearchResults />, '/search?q=serum');
 
     await waitFor(() => expect(screen.getByText('Vitamin C Serum')).toBeInTheDocument());
-    expect(screen.getByText('$60.00')).toBeInTheDocument();
-    expect(screen.getByText('$80.00').tagName).toBe('DEL');
+    expect(screen.getByText(formatToman(600_000))).toBeInTheDocument();
+    expect(screen.getByText(formatToman(800_000)).tagName).toBe('DEL');
     expect(screen.getByText('Flash Sale')).toBeInTheDocument();
   });
 
@@ -142,7 +143,7 @@ describe('SearchResults', () => {
     inRouter(<SearchResults />, '/search?q=plain');
 
     await waitFor(() => expect(screen.getByText('Plain Product')).toBeInTheDocument());
-    expect(screen.getByText('$49.99')).toBeInTheDocument();
+    expect(screen.getByText(formatToman(499_900))).toBeInTheDocument();
     expect(screen.queryByText('Flash Sale')).not.toBeInTheDocument();
   });
 });

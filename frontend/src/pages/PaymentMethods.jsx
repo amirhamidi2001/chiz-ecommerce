@@ -20,7 +20,7 @@ const PaymentMethods = () => {
     {
       id: 3,
       question: 'What currencies do you accept?',
-      answer: 'We accept payments in USD, EUR, GBP, and many other major currencies. The available currencies will be shown at checkout.',
+      answer: 'All prices are shown and charged in Iranian Toman. Payment is made through our supported Iranian payment gateways.',
     },
   ];
 

@@ -53,8 +53,6 @@ shapes) at the time this was written:
   Zibal's own `message` field for the error text.
 """
 
-from decimal import Decimal
-
 import requests
 from django.conf import settings
 
@@ -69,7 +67,7 @@ class ZibalGateway(PaymentGateway):
     REQUEST_TIMEOUT_SECONDS = 15
 
     def request_payment(
-        self, amount: Decimal, callback_url: str, description: str = ""
+        self, amount: int, callback_url: str, description: str = ""
     ) -> PaymentRequestResult:
         # Zibal's API expects `amount` as an integer number of Rials
         # (IRR) — see module docstring. Same assumption as
@@ -78,7 +76,7 @@ class ZibalGateway(PaymentGateway):
         # happens in this class.
         payload = {
             "merchant": settings.ZIBAL_MERCHANT_ID,
-            "amount": int(amount),
+            "amount": amount,  # stored int Rial, sent unchanged (ADR 0001 I-7)
             "callbackUrl": callback_url,
             "description": description or "Order payment",
         }
@@ -109,7 +107,7 @@ class ZibalGateway(PaymentGateway):
             ),
         )
 
-    def verify_payment(self, authority: str, amount: Decimal) -> PaymentVerifyResult:
+    def verify_payment(self, authority: str, amount: int) -> PaymentVerifyResult:
         # `authority` here is the trackId returned from request_payment()
         # above, stored as a string on PaymentTransaction — Zibal's API
         # tolerates a string trackId in the verify payload (confirmed via

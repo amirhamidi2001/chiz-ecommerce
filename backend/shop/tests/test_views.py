@@ -244,24 +244,24 @@ class TestProductListView:
 
     # ── Ordering ────────────────────────────────────────────────────────────
     def test_order_by_price_ascending(self, api_client):
-        ProductFactory(name="Expensive", price=200)
-        ProductFactory(name="Cheap", price=10)
-        ProductFactory(name="Mid", price=50)
+        ProductFactory(name="Expensive", price=2_000_000)
+        ProductFactory(name="Cheap", price=100_000)
+        ProductFactory(name="Mid", price=500_000)
         res = api_client.get(url("product-list"), {"ordering": "price"})
         prices = [float(p["price"]) for p in res.data["results"]]
         assert prices == sorted(prices)
 
     def test_order_by_price_descending(self, api_client):
-        ProductFactory(name="Expensive", price=200)
-        ProductFactory(name="Cheap", price=10)
+        ProductFactory(name="Expensive", price=2_000_000)
+        ProductFactory(name="Cheap", price=100_000)
         res = api_client.get(url("product-list"), {"ordering": "-price"})
         prices = [float(p["price"]) for p in res.data["results"]]
         assert prices == sorted(prices, reverse=True)
 
     def test_order_by_rating(self, api_client):
-        ProductFactory(price=10, rating=4.5)
-        ProductFactory(price=20, rating=3.0)
-        ProductFactory(price=30, rating=5.0)
+        ProductFactory(price=100_000, rating=4.5)
+        ProductFactory(price=200_000, rating=3.0)
+        ProductFactory(price=300_000, rating=5.0)
         res = api_client.get(url("product-list"), {"ordering": "-rating"})
         ratings = [float(p["rating"]) for p in res.data["results"]]
         assert ratings == sorted(ratings, reverse=True)
@@ -287,17 +287,17 @@ class TestProductListView:
         assert res.data["count"] == 4
 
     def test_filter_min_price(self, api_client):
-        ProductFactory(price=10)
-        ProductFactory(price=100)
-        ProductFactory(price=500)
-        res = api_client.get(url("product-list"), {"min_price": 99})
+        ProductFactory(price=100_000)
+        ProductFactory(price=1_000_000)
+        ProductFactory(price=5_000_000)
+        res = api_client.get(url("product-list"), {"min_price": 990_000})
         assert res.data["count"] == 2
 
     def test_filter_max_price(self, api_client):
-        ProductFactory(price=10)
-        ProductFactory(price=100)
-        ProductFactory(price=500)
-        res = api_client.get(url("product-list"), {"max_price": 101})
+        ProductFactory(price=100_000)
+        ProductFactory(price=1_000_000)
+        ProductFactory(price=5_000_000)
+        res = api_client.get(url("product-list"), {"max_price": 1_010_000})
         assert res.data["count"] == 2
 
     def test_filter_brand_slug(self, api_client):
@@ -547,11 +547,11 @@ class TestProductFullTextSearch:
     # 5 ── explicit ?ordering= beats the rank default ──────────────────────
     def test_explicit_ordering_overrides_relevance_ranking(self, api_client):
         by_name = ProductFactory(
-            name="Rose Cream", price=500, short_description="", description=""
+            name="Rose Cream", price=5_000_000, short_description="", description=""
         )
         by_description = ProductFactory(
             name="Night Serum",
-            price=10,
+            price=100_000,
             short_description="",
             description="Hint of rose.",
         )
@@ -1037,7 +1037,7 @@ class TestProductListViewCaching:
             brand=BrandFactory(),
             short_description="x",
             description="x",
-            price=10,
+            price=100_000,
             stock=5,
         )
 
@@ -1135,19 +1135,19 @@ class TestProductDetailViewFlashSale:
     def test_variants_show_the_flash_price_and_countdown_target(
         self, api_client, product
     ):
-        variant = ProductVariantFactory(product=product, price=Decimal("80.00"))
+        variant = ProductVariantFactory(product=product, price=800_000)
         sale = self._sale(product, percent="25.00")
 
         res = api_client.get(url("product-detail", slug=product.slug))
 
         item = next(v for v in res.data["variants"] if v["id"] == variant.id)
-        assert Decimal(str(item["effective_price"])) == Decimal("60.00")
-        assert Decimal(str(item["price"])) == Decimal("80.00")
+        assert item["effective_price"] == 600_000
+        assert item["price"] == 800_000
         assert item["is_on_flash_sale"] is True
         assert parse_datetime(item["flash_sale_ends_at"]) == sale.ends_at
 
     def test_variants_are_unchanged_when_no_sale_is_current(self, api_client, product):
-        variant = ProductVariantFactory(product=product, price=Decimal("80.00"))
+        variant = ProductVariantFactory(product=product, price=800_000)
         self._sale(product, start_h=1, end_h=2)  # upcoming
         self._sale(product, start_h=-2, end_h=-1)  # ended
         self._sale(product, active=False)  # switched off
@@ -1155,7 +1155,7 @@ class TestProductDetailViewFlashSale:
         res = api_client.get(url("product-detail", slug=product.slug))
 
         item = next(v for v in res.data["variants"] if v["id"] == variant.id)
-        assert Decimal(str(item["effective_price"])) == Decimal("80.00")
+        assert item["effective_price"] == 800_000
         assert item["is_on_flash_sale"] is False
         assert item["flash_sale_ends_at"] is None
 
@@ -1170,7 +1170,7 @@ class TestProductDetailViewFlashSale:
         # would mask what this test is about — that resolving each variant's
         # flash-sale price adds NO per-variant queries.
         self._sale(product, percent="25.00")
-        ProductVariantFactory(product=product, color=None, price=Decimal("10.00"))
+        ProductVariantFactory(product=product, color=None, price=100_000)
 
         def count_queries():
             with CaptureQueriesContext(connection) as ctx:
@@ -1180,7 +1180,7 @@ class TestProductDetailViewFlashSale:
 
         baseline, _ = count_queries()
         for _ in range(5):
-            ProductVariantFactory(product=product, color=None, price=Decimal("10.00"))
+            ProductVariantFactory(product=product, color=None, price=100_000)
         after, res = count_queries()
 
         assert len(res.data["variants"]) == 6
@@ -1210,15 +1210,15 @@ class TestProductListFlashSale:
         return {p["id"]: p for p in res.data["results"]}
 
     def test_cards_carry_the_sale_fields(self, api_client):
-        on_sale = ProductVariantFactory(price=Decimal("80.00")).product
-        plain = ProductVariantFactory(price=Decimal("80.00")).product
+        on_sale = ProductVariantFactory(price=800_000).product
+        plain = ProductVariantFactory(price=800_000).product
         self._sale(on_sale, percent="25.00")
 
         results = self._results(api_client.get(url("product-list")))
 
         assert results[on_sale.id]["is_on_flash_sale"] is True
-        assert str(results[on_sale.id]["flash_sale_price"]) == "60.00"
-        assert str(results[on_sale.id]["flash_sale_original_price"]) == "80.00"
+        assert results[on_sale.id]["flash_sale_price"] == 600_000
+        assert results[on_sale.id]["flash_sale_original_price"] == 800_000
         assert results[plain.id]["is_on_flash_sale"] is False
         assert results[plain.id]["flash_sale_price"] is None
 
@@ -1229,7 +1229,7 @@ class TestProductListFlashSale:
         def build(n):
             sale = self._sale(name=f"S{n}")
             for _ in range(n):
-                v = ProductVariantFactory(price=Decimal("10.00"), color=None)
+                v = ProductVariantFactory(price=100_000, color=None)
                 sale.products.add(v.product)
 
         def count():
@@ -1289,11 +1289,11 @@ class TestProductListFlashSale:
         assert res.data["count"] == 1
 
     def test_filter_combines_with_other_filters(self, api_client):
-        cheap = ProductFactory(price=Decimal("10.00"))
-        pricey = ProductFactory(price=Decimal("500.00"))
+        cheap = ProductFactory(price=100_000)
+        pricey = ProductFactory(price=5_000_000)
         sale = self._sale(cheap, pricey)
         res = api_client.get(
-            url("product-list"), {"flash_sale": sale.id, "max_price": "100"}
+            url("product-list"), {"flash_sale": sale.id, "max_price": "1000000"}
         )
         assert set(self._results(res)) == {cheap.id}
 
@@ -1301,7 +1301,7 @@ class TestProductListFlashSale:
         category = CategoryFactory()
         main = ProductFactory(category=category)
         sibling = ProductVariantFactory(
-            price=Decimal("80.00"), product__category=category
+            price=800_000, product__category=category
         ).product
         self._sale(sibling, percent="25.00")
 
@@ -1309,7 +1309,7 @@ class TestProductListFlashSale:
 
         item = next(p for p in res.data if p["id"] == sibling.id)
         assert item["is_on_flash_sale"] is True
-        assert str(item["flash_sale_price"]) == "60.00"
+        assert item["flash_sale_price"] == 600_000
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

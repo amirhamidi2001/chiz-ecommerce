@@ -8,7 +8,7 @@
  *   icon      string   Bootstrap icon class (e.g. "bi-cart")
  *   color     "teal" | "blue" | "amber" | "violet" | "red" | "pink"
  *   loading   boolean
- *   prefix    string   (e.g. "$")
+ *   prefix    string   (e.g. "#")
  *   suffix    string   (e.g. "%")
  */
 const PALETTES = {

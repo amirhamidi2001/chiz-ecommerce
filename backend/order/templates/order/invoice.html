@@ -1,4 +1,4 @@
-{% load order_invoice %}<!DOCTYPE html>
+{% load order_invoice money %}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -69,7 +69,7 @@
 
   <table class="items">
     <thead>
-      <tr><th>Item</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Line total</th></tr>
+      <tr><th>Item</th><th class="num">Qty</th><th class="num">Unit price (Rial)</th><th class="num">Line total (Rial)</th></tr>
     </thead>
     <tbody>
       {% for item in items %}
@@ -83,21 +83,22 @@
           {% endwith %}
         </td>
         <td class="num">{{ item.quantity }}</td>
-        <td class="num">{{ item.unit_price|floatformat:2 }}</td>
-        <td class="num">{{ item.subtotal|floatformat:2 }}</td>
+        <td class="num">{{ item.unit_price|rial }}</td>
+        <td class="num">{{ item.subtotal|rial }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 
   <table class="totals">
-    <tr><td>Subtotal</td><td class="num">{{ order.subtotal|floatformat:2 }}</td></tr>
-    <tr><td>Shipping</td><td class="num">{{ order.shipping_cost|floatformat:2 }}</td></tr>
-    <tr><td>Tax</td><td class="num">{{ order.tax|floatformat:2 }}</td></tr>
-    {% if order.discount %}<tr><td>Discount</td><td class="num">-{{ order.discount|floatformat:2 }}</td></tr>{% endif %}
-    <tr class="grand"><td>Total</td><td class="num">{{ order.total|floatformat:2 }}</td></tr>
+    <tr><td>Subtotal (Rial)</td><td class="num">{{ order.subtotal|rial }}</td></tr>
+    <tr><td>Shipping (Rial)</td><td class="num">{{ order.shipping_cost|rial }}</td></tr>
+    <tr><td>Tax (Rial)</td><td class="num">{{ order.tax|rial }}</td></tr>
+    {% if order.discount %}<tr><td>Discount (Rial)</td><td class="num">-{{ order.discount|rial }}</td></tr>{% endif %}
+    <tr class="grand"><td>Total (Rial)</td><td class="num">{{ order.total|rial }}</td></tr>
+    <tr><td colspan="2" class="num">= {{ order.total|toman }} Toman</td></tr>
   </table>
 
-  <p class="notes">All amounts are as charged at the time of the order. Thank you for your purchase.</p>
+  <p class="notes">All amounts are in Iranian Rial (IRR) as charged at the time of the order; 1 Toman = 10 Rial. Thank you for your purchase.</p>
 </body>
 </html>

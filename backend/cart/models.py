@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 
 class Cart(models.Model):
@@ -43,8 +44,8 @@ class Cart(models.Model):
 
     class Meta:
         ordering = ["-updated_at"]
-        verbose_name = "Cart"
-        verbose_name_plural = "Carts"
+        verbose_name = _("Cart")
+        verbose_name_plural = _("Carts")
         constraints = [
             models.CheckConstraint(
                 condition=(
@@ -105,8 +106,8 @@ class CartItem(models.Model):
     class Meta:
         unique_together = ("cart", "variant")
         ordering = ["-added_at"]
-        verbose_name = "Cart Item"
-        verbose_name_plural = "Cart Items"
+        verbose_name = _("Cart Item")
+        verbose_name_plural = _("Cart Items")
 
     def __str__(self):
         variant_detail = (

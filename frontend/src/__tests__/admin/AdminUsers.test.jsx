@@ -147,6 +147,7 @@ vi.mock('../../services/api', () => ({
   },
 }));
 import { adminAPI } from '../../services/api';
+import { formatToman } from '../../utils/money';
 
 // ─── Fixture factories ────────────────────────────────────────────────────────
 const makeUser = (overrides = {}) => ({
@@ -157,7 +158,7 @@ const makeUser = (overrides = {}) => ({
   is_active: true,
   is_verified: true,
   total_orders: 5,
-  total_spent: 250,
+  total_spent: 2_500_000,
   avatar_url: null,
   created_date: '2024-06-01T10:00:00Z',
   ...overrides,
@@ -172,7 +173,7 @@ const makeUsers = (n = 3) =>
     is_active: true,
     is_verified: false,
     total_orders: i,
-    total_spent: i * 50,
+    total_spent: i * 500_000, // Rial: 50,000 Toman per step
     avatar_url: null,
     created_date: '2024-06-01T10:00:00Z',
   }));
@@ -445,21 +446,21 @@ describe('AdminUsers', () => {
     });
 
     describe('total_spent column', () => {
-      it('formats total_spent as currency with no decimals', async () => {
-        adminAPI.getUsers.mockResolvedValue(paged([makeUser({ total_spent: 1234.56 })], 1));
+      it('formats total_spent exactly in Toman (no rounding)', async () => {
+        adminAPI.getUsers.mockResolvedValue(paged([makeUser({ total_spent: 12_345_600 })], 1));
         render(<AdminUsers />);
         await waitFor(() => {
           const cell = screen.getByTestId('cell-total_spent');
-          expect(within(cell).getByText('$1,235')).toBeInTheDocument();
+          expect(within(cell).getByText(formatToman(12_345_600))).toBeInTheDocument();
         });
       });
 
-      it('formats zero spend as $0', async () => {
+      it('formats zero spend as zero Toman', async () => {
         adminAPI.getUsers.mockResolvedValue(paged([makeUser({ total_spent: 0 })], 1));
         render(<AdminUsers />);
         await waitFor(() => {
           const cell = screen.getByTestId('cell-total_spent');
-          expect(within(cell).getByText('$0')).toBeInTheDocument();
+          expect(within(cell).getByText(formatToman(0))).toBeInTheDocument();
         });
       });
     });

@@ -5,6 +5,7 @@ from accounts.models import Profile
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import AnonymousUser
+from django.utils.translation import gettext as _
 
 from .models import ChatMessage, ChatRoom
 
@@ -54,7 +55,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data)
         except json.JSONDecodeError:
-            await self._send_error("Invalid JSON payload.")
+            await self._send_error(_("Invalid JSON payload."))
             return
 
         msg_type = data.get("type")
@@ -63,17 +64,21 @@ class ChatConsumer(AsyncWebsocketConsumer):
         elif msg_type == "typing":
             await self._handle_typing(data)
         else:
-            await self._send_error(f"Unknown message type: {msg_type!r}")
+            await self._send_error(
+                _("Unknown message type: %(type)s") % {"type": repr(msg_type)}
+            )
 
     # ─── Incoming message handlers ────────────────────────────────────────
 
     async def _handle_chat_message(self, data: dict):
         content = (data.get("content") or "").strip()
         if not content:
-            await self._send_error("Message content cannot be empty.")
+            await self._send_error(_("Message content cannot be empty."))
             return
         if len(content) > MAX_MESSAGE_LENGTH:
-            await self._send_error(f"Message exceeds {MAX_MESSAGE_LENGTH} characters.")
+            await self._send_error(
+                _("Message exceeds %(max)s characters.") % {"max": MAX_MESSAGE_LENGTH}
+            )
             return
 
         message = await self._save_message(content)

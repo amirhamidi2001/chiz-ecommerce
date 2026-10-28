@@ -27,7 +27,7 @@ window.scrollTo = vi.fn();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const item = () => ({
-  id: 1, name: 'Test Product', slug: 'test-product', price: '29.99', sale_price: null,
+  id: 1, name: 'Test Product', slug: 'test-product', price: 299_900, sale_price: null,
   rating: 4.2, reviews_count: 17, thumbnail: '/img/p.webp', in_stock: true, is_new: false,
   category: { name: 'Skincare' }, brand: { name: 'Acme' },
 });
@@ -222,7 +222,7 @@ describe('SearchResults — active filters', () => {
 
   it('"Clear all" resets the new and existing filters but keeps the search term', async () => {
     const { user } = renderSearch(
-      '?q=serum&min_price=5&skin_type=oily&hair_type=wavy&gender=female&is_vegan=true&is_cruelty_free=true&min_spf=30',
+      '?q=serum&min_price=50000&skin_type=oily&hair_type=wavy&gender=female&is_vegan=true&is_cruelty_free=true&min_spf=30',
     );
     await settle();
 

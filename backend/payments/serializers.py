@@ -1,3 +1,4 @@
+from core.serializers import RialSerializerField
 from rest_framework import serializers
 
 from .models import RefundRequest
@@ -35,6 +36,4 @@ class RefundRequestCreateSerializer(serializers.Serializer):
     # A partial refund is a legitimate request a customer or admin might
     # want to specify — optional, defaults to the order's full total in
     # the view if omitted here.
-    amount = serializers.DecimalField(
-        max_digits=12, decimal_places=2, required=False, min_value=0
-    )
+    amount = RialSerializerField(required=False)

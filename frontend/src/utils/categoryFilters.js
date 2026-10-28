@@ -17,6 +17,7 @@ import {
   cosmeticFiltersFromSearchParams,
   cosmeticFiltersToParams,
 } from './cosmeticFilters';
+import { PRICE_FILTER_MAX_RIAL } from '../constants/pricing';
 
 export const DEFAULT_SORT = '-created_at';
 export const SORT_VALUES = [
@@ -24,8 +25,9 @@ export const SORT_VALUES = [
 ];
 export const PAGE_SIZES = [12, 24, 48];
 export const DEFAULT_PAGE_SIZE = 12;
+// Price filter values are RIAL (the API's unit); the slider shows Toman.
 export const PRICE_MIN = 0;
-export const PRICE_MAX = 1000;
+export const PRICE_MAX = PRICE_FILTER_MAX_RIAL;
 
 /** Params "Clear all" removes. (flash_sale and page_size are not filters.) */
 export const FILTER_URL_KEYS = [

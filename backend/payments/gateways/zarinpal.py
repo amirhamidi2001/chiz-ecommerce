@@ -44,8 +44,6 @@ was written:
   not a payment failure).
 """
 
-from decimal import Decimal
-
 import requests
 from django.conf import settings
 
@@ -76,16 +74,15 @@ class ZarinPalGateway(PaymentGateway):
     # api.zarinpal.com — confirmed against current ZarinPal docs.
 
     def request_payment(
-        self, amount: Decimal, callback_url: str, description: str = ""
+        self, amount: int, callback_url: str, description: str = ""
     ) -> PaymentRequestResult:
         # ZarinPal's v4 REST API expects `amount` as an integer number of
-        # Rials (IRR) — see module docstring. This platform's internal
-        # currency unit is decided in the project's localization work;
-        # `amount` here is assumed to already be in Rial by the time it
-        # reaches this gateway (no unit conversion is applied here).
+        # Rials (IRR) — see module docstring. The platform stores Rial too
+        # (ADR 0001), so `amount` is the order's stored integer, sent
+        # unchanged: no unit conversion and no int() coercion.
         payload = {
             "merchant_id": settings.ZARINPAL_MERCHANT_ID,
-            "amount": int(amount),
+            "amount": amount,  # stored int Rial, sent unchanged (ADR 0001 I-7)
             "callback_url": callback_url,
             "description": description or "Order payment",
         }
@@ -135,7 +132,7 @@ class ZarinPalGateway(PaymentGateway):
             return str(errors)
         return default
 
-    def verify_payment(self, authority: str, amount: Decimal) -> PaymentVerifyResult:
+    def verify_payment(self, authority: str, amount: int) -> PaymentVerifyResult:
         # IMPORTANT: `amount` must be the exact same value (and unit —
         # Rial, per request_payment()) that was sent when the payment was
         # first requested. A mismatched amount is itself grounds for
@@ -145,7 +142,7 @@ class ZarinPalGateway(PaymentGateway):
         payload = {
             "merchant_id": settings.ZARINPAL_MERCHANT_ID,
             "authority": authority,
-            "amount": int(amount),
+            "amount": amount,  # stored int Rial, sent unchanged (ADR 0001 I-7)
         }
 
         try:

@@ -6,10 +6,11 @@ Verifies every existing filter/search parameter against seeded orders, the
 two new ones (user_id, shipping_province) and that filters AND together.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 from order.models import Order
 
 URL = "/api/dashboard/admin/orders/"
@@ -24,7 +25,10 @@ def seeded(db, make_user):
     """
     Six orders with deliberately distinct values so each filter isolates a
     different subset. created_at is auto_now_add, so it is overridden with
-    .update() after creation.
+    .update() after creation. The `created` strings are naive and are read
+    in the project's TIME_ZONE (Asia/Tehran): the date_from/date_to filters
+    compare calendar days in that zone, so fixtures near midnight must be
+    expressed in it too.
     """
     alice = make_user(email="alice@example.com")
     bob = make_user(email="bob@example.com")
@@ -35,13 +39,13 @@ def seeded(db, make_user):
         *,
         status="pending",
         method="credit_card",
-        total="50.00",
+        total=500_000,
         state="tehran",
         first="Test",
         last="User",
         email=None,
         phone="09120000000",
-        created="2026-01-15T12:00:00"
+        created="2026-01-15T12:00:00",
     ):
         order = Order.objects.create(
             user=user,
@@ -57,13 +61,13 @@ def seeded(db, make_user):
             shipping_zip="12345",
             shipping_country="IR",
             payment_method=method,
-            subtotal=Decimal(total),
-            shipping_cost=Decimal("0.00"),
-            tax=Decimal("0.00"),
-            total=Decimal(total),
+            subtotal=total,
+            shipping_cost=0,
+            tax=0,
+            total=total,
         )
         Order.objects.filter(pk=order.pk).update(
-            created_at=datetime.fromisoformat(created).replace(tzinfo=timezone.utc)
+            created_at=timezone.make_aware(datetime.fromisoformat(created))
         )
         return order
 
@@ -75,7 +79,7 @@ def seeded(db, make_user):
             alice,
             status="pending",
             method="credit_card",
-            total="20.00",
+            total=200_000,
             state="tehran",
             first="Alice",
             last="Rahimi",
@@ -87,7 +91,7 @@ def seeded(db, make_user):
             alice,
             status="processing",
             method="paypal",
-            total="50.00",
+            total=500_000,
             state="isfahan",
             first="Alice",
             last="Rahimi",
@@ -99,7 +103,7 @@ def seeded(db, make_user):
             alice,
             status="delivered",
             method="credit_card",
-            total="100.00",
+            total=1_000_000,
             state="tehran",
             first="Alice",
             last="Rahimi",
@@ -111,7 +115,7 @@ def seeded(db, make_user):
             bob,
             status="processing",
             method="apple_pay",
-            total="75.00",
+            total=750_000,
             state="fars",
             first="Bob",
             last="Karimi",
@@ -123,7 +127,7 @@ def seeded(db, make_user):
             bob,
             status="cancelled",
             method="paypal",
-            total="50.00",
+            total=500_000,
             state="tehran",
             first="Bob",
             last="Karimi",
@@ -136,7 +140,7 @@ def seeded(db, make_user):
             None,
             status="pending",
             method="credit_card",
-            total="10.00",
+            total=100_000,
             state="tehran",
             first="Guest",
             last="Buyer",
@@ -205,13 +209,13 @@ class TestExistingFilters:
         assert admin_client.get(URL, {"date_from": "not-a-date"}).status_code == 400
 
     def test_min_total_is_inclusive(self, admin_client, seeded):
-        assert _ids(get(admin_client, min_total="75")) == {"ORD-B1", "ORD-A3"}
+        assert _ids(get(admin_client, min_total="750000")) == {"ORD-B1", "ORD-A3"}
 
     def test_max_total_is_inclusive(self, admin_client, seeded):
-        assert _ids(get(admin_client, max_total="20")) == {"ORD-A1", "ORD-G1"}
+        assert _ids(get(admin_client, max_total="200000")) == {"ORD-A1", "ORD-G1"}
 
     def test_total_range(self, admin_client, seeded):
-        res = get(admin_client, min_total="50", max_total="75")
+        res = get(admin_client, min_total="500000", max_total="750000")
         assert _ids(res) == {"ORD-A2", "ORD-B2", "ORD-B1"}
 
 
@@ -326,7 +330,7 @@ class TestCombinedFilters:
         res = get(
             admin_client,
             shipping_province="tehran",
-            min_total="50",
+            min_total="500000",
             payment_method="paypal",
         )
         assert _ids(res) == {"ORD-B2"}
@@ -342,8 +346,8 @@ class TestCombinedFilters:
             payment_method="paypal",
             date_from="2026-01-10",
             date_to="2026-01-10",
-            min_total="50",
-            max_total="50",
+            min_total="500000",
+            max_total="500000",
             user_id=seeded["alice"].pk,
             shipping_province="isfahan",
             search="ORD-A2",

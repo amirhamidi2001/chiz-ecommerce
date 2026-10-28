@@ -334,13 +334,13 @@ const CouponModal = ({ coupon, onClose, onSaved }) => {
 
             <Field
               id="coupon-value"
-              label={isPercent ? "Value (%)" : "Value ($)"}
+              label={isPercent ? "Value (%)" : "Value (Toman)"}
               required
-              error={errors.value}
+              error={errors.percent_off || errors.fixed_amount || errors.value}
             >
               <input
                 type="number"
-                step="0.01"
+                step={isPercent ? "0.01" : "1"}
                 min="0"
                 {...bind("value")}
                 className={inputCls(errors.value)}
@@ -349,13 +349,13 @@ const CouponModal = ({ coupon, onClose, onSaved }) => {
 
             <Field
               id="coupon-min_order_amount"
-              label="Minimum order ($)"
+              label="Minimum order (Toman)"
               error={errors.min_order_amount}
               hint="Applies to the eligible items if the coupon is restricted."
             >
               <input
                 type="number"
-                step="0.01"
+                step="1"
                 min="0"
                 {...bind("min_order_amount")}
                 className={inputCls(errors.min_order_amount)}

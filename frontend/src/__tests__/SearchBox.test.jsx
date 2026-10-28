@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import SearchBox from '../components/SearchBox';
 import { getProductSuggestions } from '../services/api';
+import { formatToman } from '../utils/money';
 
 vi.mock('../services/api', () => ({ getProductSuggestions: vi.fn() }));
 
@@ -12,7 +13,7 @@ const makeProduct = (n, overrides = {}) => ({
   id: n,
   name: `Product ${n}`,
   slug: `product-${n}`,
-  price: '12.5',
+  price: 125_000,
   thumbnail_url: `http://api.test/media/p${n}.jpg`,
   ...overrides,
 });
@@ -142,8 +143,8 @@ describe('SearchBox — debounce', () => {
 describe('SearchBox — suggestions', () => {
   it('renders name, price and thumbnail for each suggestion', async () => {
     respondWith([
-      makeProduct(1, { name: 'Matte Lipstick', price: '12.5' }),
-      makeProduct(2, { name: 'Lip Gloss', price: '8' }),
+      makeProduct(1, { name: 'Matte Lipstick', price: 125_000 }),
+      makeProduct(2, { name: 'Lip Gloss', price: 80_000 }),
     ]);
     const { user } = renderBox();
     await user.type(box(), 'lip');
@@ -152,8 +153,8 @@ describe('SearchBox — suggestions', () => {
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(2);
     expect(screen.getByText('Matte Lipstick')).toBeInTheDocument();
-    expect(screen.getByText('$12.50')).toBeInTheDocument();
-    expect(screen.getByText('$8.00')).toBeInTheDocument();
+    expect(screen.getByText(formatToman(125_000))).toBeInTheDocument();
+    expect(screen.getByText(formatToman(80_000))).toBeInTheDocument();
     const img = options[0].querySelector('img');
     expect(img).toHaveAttribute('src', 'http://api.test/media/p1.jpg');
   });

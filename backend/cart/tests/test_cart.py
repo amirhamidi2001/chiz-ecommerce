@@ -35,7 +35,7 @@ def make_product(
     *,
     name="Widget",
     slug="widget",
-    price="49.99",
+    price=499_900,
     stock=10,
     original_price=None,
     category=None,
@@ -46,8 +46,8 @@ def make_product(
     return Product.objects.create(
         name=name,
         slug=slug,
-        price=Decimal(price),
-        original_price=Decimal(original_price) if original_price else None,
+        price=price,
+        original_price=original_price or None,
         stock=stock,
         category=category,
     )
@@ -62,7 +62,7 @@ def make_variant(
     product=None,
     sku=None,
     color=None,
-    price="49.99",
+    price=499_900,
     stock=10,
     original_price=None,
     is_active=True,
@@ -84,8 +84,8 @@ def make_variant(
         product=product,
         sku=sku,
         color=color,
-        price=Decimal(price),
-        original_price=Decimal(original_price) if original_price else None,
+        price=price,
+        original_price=original_price or None,
         stock=stock,
         is_active=is_active,
         expiration_date=expiration_date,
@@ -117,7 +117,7 @@ class CartModelTests(TestCase):
 
     def test_empty_cart_subtotal_is_zero(self):
         cart = Cart.objects.create(user=self.user)
-        self.assertEqual(cart.subtotal, Decimal("0"))
+        self.assertEqual(cart.subtotal, 0)
 
     def test_empty_cart_total_items_is_zero(self):
         cart = Cart.objects.create(user=self.user)
@@ -131,7 +131,7 @@ class CartModelTests(TestCase):
 
     def test_subtotal_multiple_items(self):
         cart = Cart.objects.create(user=self.user)
-        variant2 = make_variant(name="Gadget", slug="gadget", price="29.99")
+        variant2 = make_variant(name="Gadget", slug="gadget", price=299_900)
         CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
         CartItem.objects.create(cart=cart, variant=variant2, quantity=5)
         expected = (self.variant.price * 2) + (variant2.price * 5)
@@ -240,7 +240,7 @@ class CartModelTests(TestCase):
         cart = Cart.objects.create(user=self.user)
         item = CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
         item.delete()
-        self.assertEqual(cart.subtotal, Decimal("0"))
+        self.assertEqual(cart.subtotal, 0)
 
     def test_cart_item_ordering_newest_first(self):
         """Items should be returned by -added_at (newest first) by default."""
@@ -327,8 +327,8 @@ class CartAPITests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.product = make_product(price="19.99", stock=10)
-        self.variant = make_variant(product=self.product, price="19.99", stock=10)
+        self.product = make_product(price=199_900, stock=10)
+        self.variant = make_variant(product=self.product, price=199_900, stock=10)
         self.client.force_authenticate(user=self.user)
 
     # ── GET ───────────────────────────────────────────────────────────────────
@@ -344,7 +344,7 @@ class CartAPITests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(res.data["items"], [])
         self.assertEqual(res.data["total_items"], 0)
-        self.assertEqual(Decimal(res.data["subtotal"]), Decimal("0.00"))
+        self.assertEqual(res.data["subtotal"], 0)
 
     def test_get_returns_populated_cart(self):
         cart = Cart.objects.create(user=self.user)
@@ -358,8 +358,8 @@ class CartAPITests(APITestCase):
         cart = Cart.objects.create(user=self.user)
         CartItem.objects.create(cart=cart, variant=self.variant, quantity=2)
         res = self.client.get(self.URL)
-        expected = (self.variant.price * 2).quantize(Decimal("0.01"))
-        self.assertEqual(Decimal(res.data["subtotal"]), expected)
+        expected = self.variant.price * 2
+        self.assertEqual(res.data["subtotal"], expected)
 
     def test_get_does_not_create_duplicate_carts(self):
         self.client.get(self.URL)
@@ -427,8 +427,8 @@ class CartAPITests(APITestCase):
 
     def test_post_updates_subtotal_correctly(self):
         res = self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 2})
-        expected = (self.variant.price * 2).quantize(Decimal("0.01"))
-        self.assertEqual(Decimal(res.data["subtotal"]), expected)
+        expected = self.variant.price * 2
+        self.assertEqual(res.data["subtotal"], expected)
 
     def test_post_missing_variant_id_returns_400(self):
         res = self.client.post(self.URL, {"quantity": 1})
@@ -498,7 +498,7 @@ class CartAPITests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_post_multiple_different_variants(self):
-        variant2 = make_variant(name="Second", slug="second", price="9.99")
+        variant2 = make_variant(name="Second", slug="second", price=99_900)
         self.client.post(self.URL, {"variant_id": self.variant.id, "quantity": 1})
         res = self.client.post(self.URL, {"variant_id": variant2.id, "quantity": 2})
         self.assertEqual(len(res.data["items"]), 2)
@@ -575,8 +575,8 @@ class CartItemAPITests(APITestCase):
 
     def test_update_recalculates_subtotal(self):
         res = self.client.put(self._item_url(self.item.id), {"quantity": 4})
-        expected = (self.variant.price * 4).quantize(Decimal("0.01"))
-        self.assertEqual(Decimal(res.data["subtotal"]), expected)
+        expected = self.variant.price * 4
+        self.assertEqual(res.data["subtotal"], expected)
 
     def test_update_quantity_zero_returns_400(self):
         res = self.client.put(self._item_url(self.item.id), {"quantity": 0})
@@ -631,7 +631,7 @@ class CartItemAPITests(APITestCase):
 
     def test_delete_updates_subtotal_to_zero_when_last_item(self):
         res = self.client.delete(self._item_url(self.item.id))
-        self.assertEqual(Decimal(res.data["subtotal"]), Decimal("0.00"))
+        self.assertEqual(res.data["subtotal"], 0)
 
     def test_delete_nonexistent_item_returns_404(self):
         res = self.client.delete(self._item_url(99999))
@@ -683,7 +683,7 @@ class CartClearAPITests(APITestCase):
         res = self.client.delete(self.URL)
         self.assertEqual(res.data["items"], [])
         self.assertEqual(res.data["total_items"], 0)
-        self.assertEqual(Decimal(res.data["subtotal"]), Decimal("0.00"))
+        self.assertEqual(res.data["subtotal"], 0)
 
     def test_clear_empty_cart_still_returns_200(self):
         res = self.client.delete(self.URL)

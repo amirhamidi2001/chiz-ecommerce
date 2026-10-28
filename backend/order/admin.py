@@ -1,3 +1,4 @@
+from core.money import format_rial
 from django.contrib import admin
 
 from .models import Order, OrderItem
@@ -29,7 +30,7 @@ class OrderItemInline(admin.TabularInline):
     can_delete = False
 
     def item_subtotal(self, obj):
-        return f"${obj.subtotal:.2f}"
+        return format_rial(obj.subtotal)
 
     item_subtotal.short_description = "Subtotal"
 
@@ -119,7 +120,7 @@ class OrderAdmin(admin.ModelAdmin):
         return obj.user.email if obj.user else "—"
 
     def order_total(self, obj):
-        return f"${obj.total:.2f}"
+        return format_rial(obj.total)
 
     def item_count(self, obj):
         return obj.items.count()
@@ -155,7 +156,7 @@ class OrderItemAdmin(admin.ModelAdmin):
         return obj.order.order_number
 
     def item_subtotal(self, obj):
-        return f"${obj.subtotal:.2f}"
+        return format_rial(obj.subtotal)
 
     order_number.short_description = "Order"
     item_subtotal.short_description = "Subtotal"

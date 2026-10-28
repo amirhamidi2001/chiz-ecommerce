@@ -1,4 +1,5 @@
 from django.http import Http404
+from django.utils.translation import gettext as _
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -49,7 +50,7 @@ class MyChatRoomView(APIView):
         )
         if not room:
             return Response(
-                {"detail": "No active chat room."},
+                {"detail": _("No active chat room.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(ChatRoomSerializer(room, context={"request": request}).data)

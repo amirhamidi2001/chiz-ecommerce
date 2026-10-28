@@ -1,3 +1,4 @@
+import { formatToman } from '../utils/money';
 // src/components/ShippingOptionPicker.jsx
 //
 // Task 7.2.1.6: presentational (no data-fetching of its own — the parent
@@ -8,13 +9,13 @@
 //
 // Currency formatting: there is no shared currency-formatting utility
 // anywhere in this project (checked — every file that renders money does
-// its own ad hoc `${Number(x).toFixed(2)}` or a locally-scoped
+// its own ad hoc `{formatToman(x)}` or a locally-scoped
 // `Intl.NumberFormat` `fmt` helper; there is nothing to import). This
-// mirrors Checkout.jsx's OWN existing convention (`$${total.toFixed(2)}`,
+// mirrors Checkout.jsx's OWN existing convention (`${formatToman(total)}`,
 // used throughout that same file for subtotal/tax/total) for consistency
 // within the page this component renders inside, rather than inventing a
 // new formatting utility as an out-of-scope side effect of this task.
-const formatPrice = (value) => `$${Number(value).toFixed(2)}`;
+const formatPrice = (value) => formatToman(value);
 
 const formatEstimate = (min, max) => {
   if (min === max) return `${min} day${min === 1 ? '' : 's'}`;

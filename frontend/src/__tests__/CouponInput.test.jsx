@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import CouponInput from '../components/CouponInput';
+import { formatToman } from '../utils/money';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -181,13 +182,13 @@ describe('CouponInput — apply failure', () => {
 // Applied coupon
 // ═════════════════════════════════════════════════════════════════════════════
 describe('CouponInput — applied coupon', () => {
-  const applied = { couponCode: 'SUMMER20', couponDiscount: '10.00' };
+  const applied = { couponCode: 'SUMMER20', couponDiscount: 100_000 };
 
   it('shows the applied code and the discount instead of the entry form', () => {
     setup(applied);
 
     expect(screen.getByText('SUMMER20')).toBeInTheDocument();
-    expect(screen.getByText(/you save \$10\.00/i)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`you save ${formatToman(100_000)}`, 'i'))).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/coupon code/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /apply coupon/i })).not.toBeInTheDocument();
   });
@@ -266,7 +267,7 @@ describe('CouponInput — attached coupon that is no longer valid', () => {
   });
 
   it('does not present it as applied or show any savings', () => {
-    setup({ ...invalid, couponDiscount: '10.00' });
+    setup({ ...invalid, couponDiscount: 100_000 });
 
     // The applied state's button ("Remove coupon SUMMER20") must not
     // appear — this state's button is the plain "Remove coupon" — nor any

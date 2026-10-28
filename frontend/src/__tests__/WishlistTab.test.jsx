@@ -17,10 +17,11 @@ vi.mock('../services/api', () => ({
 import { useWishlist } from '../context/WishlistContext';
 import { useCart } from '../context/CartContext';
 import { dashboardAPI } from '../services/api';
+import { formatToman } from '../utils/money';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 const product = (id, name) => ({
-  id, name, slug: `p-${id}`, price: '20.00', original_price: null,
+  id, name, slug: `p-${id}`, price: 200_000, original_price: null,
   rating: 4, reviews_count: 3, thumbnail_url: null,
   // Product.stock is the legacy field and is deliberately 0 here: moving must
   // not be gated on it.
@@ -30,9 +31,9 @@ const ITEM_A = { id: 11, product: product(1, 'Lip Balm') };
 const ITEM_B = { id: 22, product: product(2, 'Lipstick') };
 
 const SHADES = [
-  { id: 201, sku: 'LS-ROSE', price: '10.00', effective_price: '10.00',
+  { id: 201, sku: 'LS-ROSE', price: 100_000, effective_price: 100_000,
     color: { id: 1, name: 'Rose', hex_code: '#ff0066' } },
-  { id: 202, sku: 'LS-NUDE', price: '12.00', effective_price: '12.00',
+  { id: 202, sku: 'LS-NUDE', price: 120_000, effective_price: 120_000,
     color: { id: 2, name: 'Nude', hex_code: '#d2b48c' } },
 ];
 
@@ -302,5 +303,18 @@ describe('Move All to Cart', () => {
     const summary = await screen.findByRole('region', { name: /Move to cart summary/ });
     expect(within(summary).getAllByRole('radiogroup')).toHaveLength(1);
     expect(within(cardFor('Lipstick')).queryByRole('radiogroup')).not.toBeInTheDocument();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Numeral styles (Task 14.1.2.4): review counts Persian, prices Western.
+describe('numeral styles', () => {
+  it('shows each product\'s review count in Persian digits and its price in Western', () => {
+    renderTab();
+    const card = cardFor('Lip Balm');
+
+    expect(within(card).getByText('(۳)')).toBeInTheDocument();
+    expect(within(card).queryByText('(3)')).not.toBeInTheDocument();
+    expect(within(card).getByText(formatToman(200_000))).toBeInTheDocument();
   });
 });

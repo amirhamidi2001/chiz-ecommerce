@@ -59,14 +59,14 @@ const ADDRESS_B = {
 };
 
 const MOCK_CART = {
-  subtotal: '89.97',
+  subtotal: 899_700,
   total_items: 3,
   items: [
     {
       id: 1,
       quantity: 2,
-      unit_price: '19.99',
-      subtotal: '39.98',
+      unit_price: 199_900,
+      subtotal: 399_800,
       product: { id: 10, name: 'Test Widget', image: null },
     },
   ],
@@ -81,7 +81,7 @@ const MOCK_SHIPPING_OPTIONS = [
     carrier_id: 1,
     carrier_name: 'Iran Post',
     rate_id: 10,
-    price: '9.99',
+    price: 99_900,
     estimated_days_min: 2,
     estimated_days_max: 4,
   },
