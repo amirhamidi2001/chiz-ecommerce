@@ -24,10 +24,10 @@ const Toast = ({ message, type, onClose }) => {
     : 'bg-red-500 text-white';
 
   return (
-    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg ${colors} transition-all`}>
+    <div className={`fixed bottom-6 end-6 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg ${colors} transition-all`}>
       <i className={`bi ${type === 'success' ? 'bi-check-circle' : 'bi-exclamation-circle'}`}></i>
       <span className="text-sm font-medium">{message}</span>
-      <button onClick={onClose} className="ml-2 opacity-70 hover:opacity-100">
+      <button onClick={onClose} className="ms-2 opacity-70 hover:opacity-100">
         <i className="bi bi-x"></i>
       </button>
     </div>
@@ -108,7 +108,7 @@ const CartItemRow = ({ item, onUpdateQty, onRemove, updatingId }) => {
       {/* Price */}
       <div className="flex items-center justify-between md:justify-center md:col-span-2">
         <span className="md:hidden text-sm text-gray-500 font-medium">Price:</span>
-        <div className="text-right md:text-center">
+        <div className="text-end md:text-center">
           {original && original > price ? (
             <>
               <span className="text-gray-400 line-through text-xs block">{formatToman(original)}</span>
@@ -258,7 +258,7 @@ const Cart = () => {
           <h1 className="text-3xl font-bold text-gray-900 mb-2 md:mb-0">
             Shopping Cart
             {!loading && items.length > 0 && (
-              <span className="ml-3 text-lg text-gray-500 font-normal">
+              <span className="ms-3 text-lg text-gray-500 font-normal">
                 ({cart.total_items} {cart.total_items === 1 ? 'item' : 'items'})
               </span>
             )}
@@ -282,7 +282,7 @@ const Cart = () => {
             <div className="mb-6 flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 px-5 py-4 rounded-xl">
               <i className="bi bi-exclamation-triangle text-lg"></i>
               <span>{error}</span>
-              <button onClick={fetchCart} className="ml-auto text-sm underline hover:no-underline">
+              <button onClick={fetchCart} className="ms-auto text-sm underline hover:no-underline">
                 Retry
               </button>
             </div>
@@ -351,7 +351,7 @@ const Cart = () => {
                         to="/category"
                         className="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50 transition flex items-center gap-1"
                       >
-                        <i className="bi bi-arrow-left"></i> Continue Shopping
+                        <i className="bi bi-arrow-left icon-directional"></i> Continue Shopping
                       </Link>
                       <button
                         onClick={handleClear}
@@ -457,7 +457,7 @@ const Cart = () => {
                     className="mt-6 w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white py-3 rounded-xl font-semibold transition"
                   >
                     Proceed to Checkout
-                    <i className="bi bi-arrow-right"></i>
+                    <i className="bi bi-arrow-right icon-directional"></i>
                   </Link>
 
                   {/* Trust badges */}
@@ -467,7 +467,7 @@ const Cart = () => {
                       Secure
                     </div>
                     <div className="text-xs">
-                      <i className="bi bi-arrow-return-left text-teal-500 block text-lg mb-1"></i>
+                      <i className="bi bi-arrow-return-left icon-directional text-teal-500 block text-lg mb-1"></i>
                       30-day returns
                     </div>
                     <div className="text-xs">

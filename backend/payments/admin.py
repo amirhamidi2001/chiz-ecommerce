@@ -1,11 +1,13 @@
 import logging
 
 from accounts.models import UserType
+from core.jalali import JalaliAdminMixin, jalali_column
 from django.contrib import admin, messages
 from django.contrib.admin import helpers
 from django.db import transaction
 from django.template.response import TemplateResponse
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from .gateways.base import PaymentVerifyResult
 from .models import (
@@ -37,7 +39,7 @@ def _user_may_force_override(request):
 
 
 @admin.register(PaymentTransaction)
-class PaymentTransactionAdmin(admin.ModelAdmin):
+class PaymentTransactionAdmin(JalaliAdminMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "order",
@@ -46,12 +48,19 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         "authority",
         "amount",
         "created_at",
+        "created_at_jalali",
     )
     list_filter = ("gateway", "status")
     search_fields = ("order__order_number", "authority", "ref_id")
-    readonly_fields = [f.name for f in PaymentTransaction._meta.fields]
+    readonly_fields = [f.name for f in PaymentTransaction._meta.fields] + [
+        "created_at_jalali"
+    ]
     ordering = ("-created_at",)
     actions = ["force_mark_success", "force_mark_failed"]
+
+    # Jalali display beside the Gregorian value (storage unchanged).
+    created_at_jalali = jalali_column("created_at", _("Created (Jalali)"))
+    jalali_companions = {"created_at": "created_at_jalali"}
 
     def has_add_permission(self, request):
         return False

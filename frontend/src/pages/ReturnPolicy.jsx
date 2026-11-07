@@ -63,19 +63,19 @@ const ReturnPolicy = () => {
               <i className="bi bi-shield-check text-4xl text-teal-600 mb-3 block"></i>
               <h4 className="text-xl font-bold mb-2">Free Returns</h4>
               <p className="text-gray-500 mb-4">We cover return shipping costs for all eligible items</p>
-              <a href="#" className="text-teal-600 font-medium inline-flex items-center gap-1 group-hover:gap-2 transition">Learn More <i className="bi bi-arrow-right"></i></a>
+              <a href="#" className="text-teal-600 font-medium inline-flex items-center gap-1 group-hover:gap-2 transition">Learn More <i className="bi bi-arrow-right icon-directional"></i></a>
             </div>
             <div className="bg-white border border-gray-100 rounded-2xl p-6 text-center shadow-sm hover:shadow-md transition group">
               <i className="bi bi-clock-history text-4xl text-teal-600 mb-3 block"></i>
               <h4 className="text-xl font-bold mb-2">Quick Refunds</h4>
               <p className="text-gray-500 mb-4">Get your money back within 5-7 business days</p>
-              <a href="#" className="text-teal-600 font-medium inline-flex items-center gap-1 group-hover:gap-2 transition">Learn More <i className="bi bi-arrow-right"></i></a>
+              <a href="#" className="text-teal-600 font-medium inline-flex items-center gap-1 group-hover:gap-2 transition">Learn More <i className="bi bi-arrow-right icon-directional"></i></a>
             </div>
             <div className="bg-white border border-gray-100 rounded-2xl p-6 text-center shadow-sm hover:shadow-md transition group">
               <i className="bi bi-arrow-repeat text-4xl text-teal-600 mb-3 block"></i>
               <h4 className="text-xl font-bold mb-2">Easy Exchange</h4>
               <p className="text-gray-500 mb-4">Simple process to exchange items for different sizes</p>
-              <a href="#" className="text-teal-600 font-medium inline-flex items-center gap-1 group-hover:gap-2 transition">Learn More <i className="bi bi-arrow-right"></i></a>
+              <a href="#" className="text-teal-600 font-medium inline-flex items-center gap-1 group-hover:gap-2 transition">Learn More <i className="bi bi-arrow-right icon-directional"></i></a>
             </div>
           </div>
 
@@ -162,7 +162,7 @@ const ReturnPolicy = () => {
                   <div key={faq.id} className="border border-gray-200 rounded-xl overflow-hidden">
                     <button
                       onClick={() => toggleFaq(faq.id)}
-                      className="w-full flex justify-between items-center p-5 text-left font-semibold text-gray-800 hover:bg-gray-50 transition"
+                      className="w-full flex justify-between items-center p-5 text-start font-semibold text-gray-800 hover:bg-gray-50 transition"
                     >
                       <span>{faq.question}</span>
                       <i className={`bi bi-plus-lg text-teal-600 transition-transform duration-300 ${openFaq === faq.id ? 'rotate-45' : ''}`}></i>

@@ -57,7 +57,7 @@ const Header = () => {
 
           <div className="flex gap-6">
             <div className="overflow-hidden h-6">
-              <div className="animate-marquee whitespace-nowrap text-teal-700 font-medium">
+              <div className="animate-marquee rtl:animate-marquee-rtl whitespace-nowrap text-teal-700 font-medium">
                 🚚 Free shipping on orders over {formatToman(FREE_SHIPPING_THRESHOLD_RIAL)} &nbsp;&nbsp;|&nbsp;&nbsp;
                 💰 30 days money back guarantee &nbsp;&nbsp;|&nbsp;&nbsp;
                 🎁 20% off on your first order
@@ -69,7 +69,7 @@ const Header = () => {
                 <button className="flex items-center gap-1 text-emerald-700 hover:text-teal-700">
                   <i className="bi bi-translate" /> EN <i className="bi bi-chevron-down text-xs" />
                 </button>
-                <div className="absolute right-0 mt-2 w-32 bg-white shadow-lg rounded-md hidden group-hover:block z-10">
+                <div className="absolute end-0 mt-2 w-32 bg-white shadow-lg rounded-md hidden group-hover:block z-10">
                   <a href="#" className="block px-4 py-2 text-sm hover:bg-emerald-100">English</a>
                   <a href="#" className="block px-4 py-2 text-sm hover:bg-emerald-100">Español</a>
                 </div>
@@ -108,7 +108,7 @@ const Header = () => {
               <i className="bi bi-person" />
             </button>
 
-            <div className="absolute right-0 mt-3 w-64 bg-white shadow-xl rounded-lg hidden group-hover:block z-10 border border-emerald-100 before:content-[''] before:absolute before:-top-3 before:left-0 before:w-full before:h-3">
+            <div className="absolute end-0 mt-3 w-64 bg-white shadow-xl rounded-lg hidden group-hover:block z-10 border border-emerald-100 before:content-[''] before:absolute before:-top-3 before:start-0 before:w-full before:h-3">
               {!loading && (
                 <>
                   {isAuthenticated ? (
@@ -124,9 +124,9 @@ const Header = () => {
                         <Link to="/account?tab=settings" className="block px-4 py-2 text-sm hover:bg-emerald-50">Settings</Link>
                         <button
                           onClick={handleLogout}
-                          className="w-full text-left block px-4 py-2 text-sm hover:bg-red-50 text-red-600"
+                          className="w-full text-start block px-4 py-2 text-sm hover:bg-red-50 text-red-600"
                         >
-                          <i className="bi bi-box-arrow-right me-1" /> Logout
+                          <i className="bi bi-box-arrow-right icon-directional me-1" /> Logout
                         </button>
                       </div>
                     </>
@@ -154,7 +154,7 @@ const Header = () => {
           {/* ── Wishlist ─────────────────────────────────────────────────── */}
           <Link to="/account?tab=wishlist" className="relative text-emerald-700 text-xl hover:text-teal-700" aria-label="Wishlist">
             <i className="bi bi-heart" />
-            <span className="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="absolute -top-2 -end-3 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
               {wishlistCount > 99 ? '99+' : wishlistCount}
             </span>
           </Link>
@@ -162,7 +162,7 @@ const Header = () => {
           {/* ── Cart ─────────────────────────────────────────────────────── */}
           <Link to="/cart" className="relative text-emerald-700 text-xl hover:text-teal-700" aria-label="Cart">
             <i className="bi bi-cart3" />
-            <span className="absolute -top-2 -right-3 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="absolute -top-2 -end-3 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
               {cartCount}
             </span>
           </Link>
@@ -180,7 +180,7 @@ const Header = () => {
       {/* ========== Desktop Navigation ========== */}
       <nav className="hidden md:block bg-emerald-800 text-white">
         <div className="container mx-auto px-4">
-          <ul className="flex space-x-6">
+          <ul className="flex space-x-6 rtl:space-x-reverse">
             <li><NavLink to="/" className={({ isActive }) => `block py-3 ${isActive ? 'text-teal-400' : 'hover:text-teal-400'}`}>Home</NavLink></li>
             <li><NavLink to="/about" className="block py-3 hover:text-teal-400">About</NavLink></li>
             <li><NavLink to="/category" className="block py-3 hover:text-teal-400">Category</NavLink></li>

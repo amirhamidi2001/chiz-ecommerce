@@ -795,6 +795,18 @@ describe('Pagination', () => {
     );
   });
 
+  it('mirrors the previous/next page chevrons for RTL', async () => {
+    const { products, count } = buildMultiPageFixture();
+    getProducts.mockReturnValue(resolvedProducts(products, count));
+
+    renderSearchResults('?page=1');
+
+    const prev = await screen.findByRole('button', { name: /previous page/i });
+    const next = screen.getByRole('button', { name: /next page/i });
+    expect(prev.querySelector('i')).toHaveClass('bi-chevron-left', 'icon-directional');
+    expect(next.querySelector('i')).toHaveClass('bi-chevron-right', 'icon-directional');
+  });
+
   it('calls window.scrollTo when a page button is clicked', async () => {
     const { products, count } = buildMultiPageFixture();
     getProducts.mockReturnValue(resolvedProducts(products, count));

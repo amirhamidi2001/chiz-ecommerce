@@ -10,6 +10,7 @@ import SettingsTab from "../components/SettingsTab";
 import PaymentMethodsTab from "../components/PaymentMethodsTab";
 import { dashboardAPI } from "../services/api";
 import { formatToman } from '../utils/money';
+import { formatJalaliDate } from '../utils/jalaliDate';
 
 const fmt = (n) => formatToman(n);
 
@@ -70,7 +71,7 @@ const OverviewTab = ({ onNavigate }) => {
           <div className="mt-3 bg-white/20 rounded-xl px-4 py-2 text-sm inline-flex items-center gap-2">
             <i className="bi bi-clock"></i>
             <span>{summary.pending_orders} order{summary.pending_orders > 1 ? "s" : ""} in progress</span>
-            <button onClick={() => onNavigate("orders")} className="underline ml-1 font-medium">View →</button>
+            <button onClick={() => onNavigate("orders")} className="underline ms-1 font-medium">View <span className="icon-directional" aria-hidden="true">→</span></button>
           </div>
         )}
       </div>
@@ -100,7 +101,7 @@ const OverviewTab = ({ onNavigate }) => {
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-bold text-gray-800">Recent Orders</h3>
           <button onClick={() => onNavigate("orders")} className="text-sm text-teal-600 hover:underline font-medium">
-            View All →
+            View All <span className="icon-directional" aria-hidden="true">→</span>
           </button>
         </div>
         {loading ? (
@@ -114,7 +115,7 @@ const OverviewTab = ({ onNavigate }) => {
             <i className="bi bi-box-seam text-4xl mb-3 block"></i>
             <p>No orders yet.</p>
             <Link to="/product-lists" className="mt-3 inline-block text-sm text-teal-600 hover:underline">
-              Start Shopping →
+              Start Shopping <span className="icon-directional" aria-hidden="true">→</span>
             </Link>
           </div>
         ) : (
@@ -124,7 +125,7 @@ const OverviewTab = ({ onNavigate }) => {
                 <div>
                   <p className="font-semibold text-gray-800 text-sm">{order.order_number}</p>
                   <p className="text-xs text-gray-500">
-                    {new Date(order.created_at).toLocaleDateString()}
+                    {formatJalaliDate(order.created_at)}
                     {" · "}{order.items_count} item{order.items_count !== 1 ? "s" : ""}
                   </p>
                 </div>
@@ -155,7 +156,7 @@ const OverviewTab = ({ onNavigate }) => {
             </Link>
           ) : (
             <button key={l.label} onClick={() => onNavigate(l.tab)}
-              className="bg-white border border-gray-100 rounded-xl p-4 flex items-center gap-3 hover:shadow-md transition text-left">
+              className="bg-white border border-gray-100 rounded-xl p-4 flex items-center gap-3 hover:shadow-md transition text-start">
               <i className={`bi ${l.icon} text-teal-600 text-xl`}></i>
               <span className="text-sm font-semibold text-gray-700">{l.label}</span>
             </button>
@@ -215,7 +216,7 @@ const Account = () => {
         {/* Breadcrumb */}
         <nav className="text-sm text-gray-500 mb-6 flex items-center gap-2">
           <Link to="/" className="hover:text-teal-600">Home</Link>
-          <i className="bi bi-chevron-right text-xs"></i>
+          <i className="bi bi-chevron-right icon-directional text-xs"></i>
           <span className="text-gray-800 capitalize">
             {activeTab === "overview" ? "My Account" : activeTab}
           </span>

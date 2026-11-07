@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: chiz-backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-23 14:09+0330\n"
+"POT-Creation-Date: 2026-10-28 23:38+0330\n"
 "PO-Revision-Date: 2026-10-20 12:00+0330\n"
 "Last-Translator: Chiz team\n"
 "Language-Team: Persian\n"
@@ -524,6 +524,14 @@ msgstr "این مورد دیگر در لیست علاقه‌مندی‌های ش
 msgid "Moved to cart."
 msgstr "به سبد خرید منتقل شد."
 
+#: order/admin.py:130 payments/admin.py:62
+msgid "Created (Jalali)"
+msgstr "تاریخ ایجاد (شمسی)"
+
+#: order/admin.py:131
+msgid "Updated (Jalali)"
+msgstr "تاریخ به‌روزرسانی (شمسی)"
+
 #: order/models.py:20 payments/models.py:14
 msgid "Pending"
 msgstr "در انتظار"
@@ -659,7 +667,6 @@ msgstr ""
 
 #: order/views.py:171
 #, python-format
-#| msgid "Cannot exceed the order total (%(total)s)."
 msgid "Cannot exceed the order total (%(total)s Toman)."
 msgstr "مبلغ نمی‌تواند از مجموع سفارش (%(total)s تومان) بیشتر باشد."
 
@@ -772,6 +779,22 @@ msgstr "این سفارش قبلاً پرداخت شده یا دیگر قابل 
 #: payments/views.py:128 payments/views.py:131
 msgid "Payment initiation failed."
 msgstr "شروع فرایند پرداخت ناموفق بود."
+
+#: promotions/admin.py:29
+msgid "Valid from (Jalali)"
+msgstr "اعتبار از (شمسی)"
+
+#: promotions/admin.py:30
+msgid "Valid until (Jalali)"
+msgstr "اعتبار تا (شمسی)"
+
+#: promotions/admin.py:69
+msgid "Starts (Jalali)"
+msgstr "شروع (شمسی)"
+
+#: promotions/admin.py:70
+msgid "Ends (Jalali)"
+msgstr "پایان (شمسی)"
 
 #: promotions/models.py:14
 msgid "Percentage"
@@ -892,16 +915,18 @@ msgstr "این کد تخفیف برای هیچ‌یک از کالاهای سبد
 
 #: promotions/services.py:157
 #, python-format
-#| msgid "This coupon requires a minimum eligible order of %(amount)s."
 msgid "This coupon requires a minimum eligible order of %(amount)s Toman."
 msgstr ""
 "حداقل مبلغ سفارش برای کالاهای مشمول این کد تخفیف %(amount)s تومان است."
 
 #: promotions/services.py:160
 #, python-format
-#| msgid "This coupon requires a minimum order of %(amount)s."
 msgid "This coupon requires a minimum order of %(amount)s Toman."
 msgstr "حداقل مبلغ سفارش برای استفاده از این کد تخفیف %(amount)s تومان است."
+
+#: shipping/admin.py:88
+msgid "Last tracked (Jalali)"
+msgstr "آخرین پیگیری (شمسی)"
 
 #: shipping/models.py:23
 msgid "Iran Post"

@@ -71,12 +71,12 @@ const ForgotPassword = () => {
               {!isSubmitted ? (
                 <form onSubmit={handleSubmit} noValidate>
                   <div className="relative mb-4">
-                    <i className="bi bi-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <i className="bi bi-envelope absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     <input
                       type="email"
                       value={email}
                       onChange={(e) => { setEmail(e.target.value); setError(''); }}
-                      className={`w-full border rounded-lg pl-10 pr-3 py-3 focus:outline-none focus:border-teal-500 transition ${error ? 'border-red-400' : 'border-gray-300'}`}
+                      className={`w-full border rounded-lg ps-10 pe-3 py-3 focus:outline-none focus:border-teal-500 transition ${error ? 'border-red-400' : 'border-gray-300'}`}
                       placeholder="Email address"
                       autoComplete="email"
                       required
@@ -127,7 +127,7 @@ const ForgotPassword = () => {
               {!isSubmitted && (
                 <div className="text-center mt-6 text-sm">
                   <Link to="/login" className="text-teal-600 hover:underline">
-                    <i className="bi bi-arrow-left me-1" /> Back to Login
+                    <i className="bi bi-arrow-left icon-directional me-1" /> Back to Login
                   </Link>
                 </div>
               )}

@@ -64,7 +64,7 @@ const VariantPicker = ({
           <span className="text-gray-500">
             {formatPrice(price)}
             {discounted && (
-              <span className="ml-1 line-through text-gray-400">
+              <span className="ms-1 line-through text-gray-400">
                 {formatPrice(variant.price)}
               </span>
             )}

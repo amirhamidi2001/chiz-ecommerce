@@ -38,11 +38,13 @@ describe('ShippingOptionPicker', () => {
 
       expect(screen.getByText('Iran Post')).toBeInTheDocument();
       expect(screen.getByText(formatToman(450_000))).toBeInTheDocument();
-      expect(screen.getByText('2–4 days')).toBeInTheDocument();
+      const range = screen.getByText('2–4');
+      expect(range).toHaveAttribute('dir', 'ltr'); // a bare "2–4" is drawn "4–2" in RTL
+      expect(range.parentElement).toHaveTextContent('2–4 days');
 
       expect(screen.getByText('Tipax')).toBeInTheDocument();
       expect(screen.getByText(formatToman(650_000))).toBeInTheDocument();
-      expect(screen.getByText('1–2 days')).toBeInTheDocument();
+      expect(screen.getByText('1–2').parentElement).toHaveTextContent('1–2 days');
     });
 
     it('renders a singular "day" label when min and max are equal', () => {

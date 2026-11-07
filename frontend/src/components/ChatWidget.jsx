@@ -59,8 +59,8 @@ function MessageBubble({ msg, currentUserId }) {
         <div
           className={`px-3 py-2 rounded-2xl text-sm leading-relaxed break-words ${
             isOwn
-              ? 'bg-teal-600 text-white rounded-br-sm'
-              : 'bg-slate-100 text-slate-800 rounded-bl-sm'
+              ? 'bg-teal-600 text-white rounded-ee-sm'
+              : 'bg-slate-100 text-slate-800 rounded-es-sm'
           }`}
         >
           {msg.content}
@@ -180,7 +180,7 @@ export default function ChatWidget() {
     <>
       {/* ── Chat panel ─────────────────────────────────────────────────── */}
       {open && (
-        <div className="fixed bottom-20 right-4 z-50 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200"
+        <div className="fixed bottom-20 end-4 z-50 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200"
           style={{ height: '480px' }}
         >
           {/* Header */}
@@ -303,7 +303,7 @@ export default function ChatWidget() {
       {/* ── Floating button ────────────────────────────────────────────── */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-4 right-4 z-50 w-14 h-14 bg-teal-600 hover:bg-teal-700 text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+        className="fixed bottom-4 end-4 z-50 w-14 h-14 bg-teal-600 hover:bg-teal-700 text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95"
         aria-label="Open support chat"
       >
         {open ? <IconX /> : <IconChat />}

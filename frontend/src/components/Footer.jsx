@@ -88,7 +88,7 @@ const Footer = () => {
       {/* Bottom Bar */}
       <div className="border-t border-emerald-800 py-6">
         <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="text-center md:text-left text-sm">
+          <div className="text-center md:text-start text-sm">
             <p>© <span className="font-semibold">Chiz</span>. All Rights Reserved.</p>
             <p className="text-xs text-emerald-500 mt-1">Developed by Amir Hamidi</p>
           </div>

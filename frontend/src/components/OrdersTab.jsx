@@ -3,6 +3,7 @@ import { dashboardAPI, downloadOrderInvoice } from "../services/api";
 import { saveBlob } from "../utils/download";
 import ShipmentTrackingWidget from "./ShipmentTrackingWidget";
 import { formatToman } from '../utils/money';
+import { formatJalaliDate } from '../utils/jalaliDate';
 
 const STATUS_STYLES = {
   pending: "bg-gray-100 text-gray-700",
@@ -79,14 +80,14 @@ const OrderDetailModal = ({ orderId, onClose }) => {
                 {order.status}
               </span>
               <span className="text-sm text-gray-500">
-                Placed {new Date(order.created_at).toLocaleDateString()}
+                Placed {formatJalaliDate(order.created_at)}
               </span>
               <button
                 type="button"
                 data-testid="download-invoice"
                 onClick={handleDownloadInvoice}
                 disabled={invoiceBusy}
-                className="ml-auto text-sm font-medium text-teal-700 hover:text-teal-900 disabled:opacity-50 flex items-center gap-1"
+                className="ms-auto text-sm font-medium text-teal-700 hover:text-teal-900 disabled:opacity-50 flex items-center gap-1"
               >
                 <i className="bi bi-file-earmark-pdf"></i>
                 {invoiceBusy ? "Preparing…" : "Download Invoice"}
@@ -234,12 +235,12 @@ const OrdersTab = () => {
         <h2 className="text-2xl font-bold text-gray-800">My Orders</h2>
         <div className="flex gap-2 flex-wrap">
           <div className="relative">
-            <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+            <i className="bi bi-search absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
             <input
               type="text"
               placeholder="Search orders…"
               onChange={handleSearch}
-              className="pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-teal-500 w-48"
+              className="ps-9 pe-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-teal-500 w-48"
             />
           </div>
           <select
@@ -281,9 +282,7 @@ const OrdersTab = () => {
                     {order.order_number}
                   </span>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {new Date(order.created_at).toLocaleDateString("en-US", {
-                      year: "numeric", month: "short", day: "numeric",
-                    })}
+                    {formatJalaliDate(order.created_at, "D MMMM YYYY")}
                     {" · "}{order.items_count} item{order.items_count !== 1 ? "s" : ""}
                   </p>
                 </div>
@@ -315,7 +314,7 @@ const OrdersTab = () => {
                 onClick={() => setSelectedOrderId(order.id)}
                 className="mt-3 text-sm text-teal-600 hover:underline font-medium"
               >
-                View Details →
+                View Details <span className="icon-directional" aria-hidden="true">→</span>
               </button>
             </div>
           ))}

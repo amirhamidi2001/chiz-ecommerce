@@ -142,7 +142,7 @@ const ProductModal = ({ product, categories, brands, onClose, onSaved }) => {
                 )}
                 <button type="button" onClick={() => thumbRef.current?.click()}
                   className="px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 transition">
-                  <i className="bi bi-upload mr-1.5"></i> Upload Image
+                  <i className="bi bi-upload me-1.5"></i> Upload Image
                 </button>
                 <input ref={thumbRef} type="file" accept="image/*" className="hidden" onChange={handleThumb} />
               </div>

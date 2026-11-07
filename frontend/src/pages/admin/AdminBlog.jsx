@@ -119,7 +119,7 @@ const PostModal = ({ post, categories, onClose, onSaved }) => {
               <label className="block text-xs font-semibold text-gray-600 mb-1">Featured</label>
               <div className="flex items-center h-10">
                 <input type="checkbox" name="is_featured" checked={form.is_featured} onChange={handleChange}
-                  className="w-4 h-4 accent-teal-600 mr-2" />
+                  className="w-4 h-4 accent-teal-600 me-2" />
                 <span className="text-sm text-gray-700">Mark as featured</span>
               </div>
             </div>
@@ -146,7 +146,7 @@ const PostModal = ({ post, categories, onClose, onSaved }) => {
               )}
               <button type="button" onClick={() => coverRef.current?.click()}
                 className="px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 transition">
-                <i className="bi bi-upload mr-1.5"></i> Upload
+                <i className="bi bi-upload me-1.5"></i> Upload
               </button>
               <input ref={coverRef} type="file" accept="image/*" className="hidden" onChange={handleCover} />
             </div>

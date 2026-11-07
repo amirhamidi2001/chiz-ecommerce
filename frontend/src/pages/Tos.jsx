@@ -38,7 +38,7 @@ const Tos = () => {
               <p className="text-gray-600 mb-4">
                 By accessing our website and services, you agree to be bound by these Terms of Service and all applicable laws and regulations. If you do not agree with any of these terms, you are prohibited from using or accessing our services.
               </p>
-              <div className="bg-teal-50 border-l-4 border-teal-600 p-4 rounded-r-lg flex items-start gap-3">
+              <div className="bg-teal-50 border-s-4 border-teal-600 p-4 rounded-e-lg flex items-start gap-3">
                 <i className="bi bi-info-circle text-teal-600 text-xl flex-shrink-0 mt-0.5"></i>
                 <p className="text-gray-700 text-sm">These terms apply to all users, visitors, and others who access or use our services.</p>
               </div>
@@ -50,7 +50,7 @@ const Tos = () => {
               <p className="text-gray-600 mb-4">
                 Our service and its original content, features, and functionality are owned by us and are protected by international copyright, trademark, patent, trade secret, and other intellectual property laws.
               </p>
-              <ul className="list-disc pl-5 space-y-1 text-gray-600">
+              <ul className="list-disc ps-5 space-y-1 text-gray-600">
                 <li>All content is our exclusive property</li>
                 <li>You may not copy or modify the content</li>
                 <li>Our trademarks may not be used without permission</li>
@@ -64,7 +64,7 @@ const Tos = () => {
               <p className="text-gray-600 mb-4">
                 When you create an account with us, you must provide accurate, complete, and current information. Failure to do so constitutes a breach of the Terms, which may result in immediate termination of your account.
               </p>
-              <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded-r-lg flex items-start gap-3">
+              <div className="bg-yellow-50 border-s-4 border-yellow-500 p-4 rounded-e-lg flex items-start gap-3">
                 <i className="bi bi-exclamation-triangle text-yellow-600 text-xl flex-shrink-0 mt-0.5"></i>
                 <div>
                   <h5 className="font-semibold text-gray-800">Important Notice</h5>
@@ -95,7 +95,7 @@ const Tos = () => {
               </p>
               <div className="bg-gray-50 p-4 rounded-lg">
                 <p className="font-medium text-gray-800 mb-2">We do not guarantee that:</p>
-                <ul className="list-disc pl-5 space-y-1 text-gray-600">
+                <ul className="list-disc ps-5 space-y-1 text-gray-600">
                   <li>The service will meet your requirements</li>
                   <li>The service will be uninterrupted or error-free</li>
                   <li>Results from using the service will be accurate</li>
@@ -142,7 +142,7 @@ const Tos = () => {
               <p className="text-gray-600 mb-4">
                 We reserve the right to modify or replace these Terms at any time. We will provide notice of any changes by posting the new Terms on this page.
               </p>
-              <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg flex items-start gap-3">
+              <div className="bg-blue-50 border-s-4 border-blue-500 p-4 rounded-e-lg flex items-start gap-3">
                 <i className="bi bi-bell text-blue-600 text-xl flex-shrink-0 mt-0.5"></i>
                 <p className="text-gray-700 text-sm">By continuing to access or use our service after those revisions become effective, you agree to be bound by the revised terms.</p>
               </div>
@@ -154,7 +154,7 @@ const Tos = () => {
             <div className="w-14 h-14 bg-teal-600 rounded-xl flex items-center justify-center flex-shrink-0">
               <i className="bi bi-envelope text-white text-2xl"></i>
             </div>
-            <div className="text-center md:text-left">
+            <div className="text-center md:text-start">
               <h4 className="text-xl font-bold text-gray-800 mb-1">Questions About Terms?</h4>
               <p className="text-gray-600 mb-3">If you have any questions about these Terms, please contact us.</p>
               <Link to="/contact" className="inline-block bg-teal-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-teal-700 transition">

@@ -84,7 +84,7 @@ const ReviewsTab = () => {
   return (
     <div>
       {toast && (
-        <div className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white ${toast.type === "error" ? "bg-red-500" : "bg-teal-600"}`}>
+        <div className={`fixed top-6 end-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white ${toast.type === "error" ? "bg-red-500" : "bg-teal-600"}`}>
           {toast.msg}
         </div>
       )}
@@ -195,7 +195,7 @@ const ReviewsTab = () => {
                         onClick={() => openEdit(review)}
                         className="text-xs text-teal-600 hover:bg-teal-50 px-3 py-1.5 rounded-lg transition border border-teal-100"
                       >
-                        <i className="bi bi-pencil mr-1"></i>Edit
+                        <i className="bi bi-pencil me-1"></i>Edit
                       </button>
                       <button
                         onClick={() => handleDelete(review.id)}
@@ -205,7 +205,7 @@ const ReviewsTab = () => {
                         {deleting === review.id ? (
                           <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin inline-block" />
                         ) : (
-                          <><i className="bi bi-trash mr-1"></i>Delete</>
+                          <><i className="bi bi-trash me-1"></i>Delete</>
                         )}
                       </button>
                     </div>

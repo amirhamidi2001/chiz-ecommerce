@@ -19,7 +19,7 @@ const MessagePanel = ({ message, onClose, onDelete }) => {
       >
         {/* Header */}
         <div className="flex justify-between items-center px-6 py-5 border-b flex-shrink-0">
-          <h3 className="text-lg font-bold text-gray-800 truncate pr-4">{message.subject || "(No subject)"}</h3>
+          <h3 className="text-lg font-bold text-gray-800 truncate pe-4">{message.subject || "(No subject)"}</h3>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition flex-shrink-0"
@@ -45,7 +45,7 @@ const MessagePanel = ({ message, onClose, onDelete }) => {
                 {message.email}
               </a>
             </div>
-            <p className="ml-auto text-xs text-gray-400 flex-shrink-0">
+            <p className="ms-auto text-xs text-gray-400 flex-shrink-0">
               {new Date(message.created_at).toLocaleDateString("en-US", {
                 year: "numeric", month: "short", day: "numeric",
               })}
@@ -68,7 +68,7 @@ const MessagePanel = ({ message, onClose, onDelete }) => {
             href={`mailto:${message.email}?subject=Re: ${encodeURIComponent(message.subject || "")}`}
             className="flex-1 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-semibold hover:bg-teal-700 transition text-center"
           >
-            <i className="bi bi-reply mr-2"></i>Reply via Email
+            <i className="bi bi-reply icon-directional me-2"></i>Reply via Email
           </a>
           <button
             onClick={() => onDelete(message)}
@@ -235,7 +235,7 @@ const AdminMessages = () => {
               title="Reply"
               className="px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs hover:bg-gray-50 transition"
             >
-              <i className="bi bi-reply"></i>
+              <i className="bi bi-reply icon-directional"></i>
             </a>
             <button
               onClick={() => setConfirm(row)}

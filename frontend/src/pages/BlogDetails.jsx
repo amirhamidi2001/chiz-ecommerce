@@ -74,7 +74,7 @@ const CommentItem = ({ comment }) => (
           <div>
             <h4 className="font-bold text-gray-800">{comment.name}</h4>
             <span className="text-xs text-gray-400">
-              <i className="bi bi-clock mr-1" />
+              <i className="bi bi-clock me-1" />
               {formatTimeAgo(comment.created_at)}
             </span>
           </div>
@@ -83,7 +83,7 @@ const CommentItem = ({ comment }) => (
 
         {/* Replies */}
         {comment.replies?.length > 0 && (
-          <div className="mt-4 pl-6 border-l-2 border-gray-200 space-y-4">
+          <div className="mt-4 ps-6 border-s-2 border-gray-200 space-y-4">
             {comment.replies.map((reply) => (
               <div key={reply.id} className="flex gap-4">
                 <AvatarPlaceholder name={reply.name} size="sm" />
@@ -383,7 +383,7 @@ const BlogDetails = () => {
               prose-headings:font-bold prose-headings:text-gray-900
               prose-p:text-gray-700 prose-p:leading-relaxed
               prose-a:text-teal-600 prose-a:no-underline hover:prose-a:underline
-              prose-blockquote:border-l-4 prose-blockquote:border-teal-500 prose-blockquote:pl-4
+              prose-blockquote:border-s-4 prose-blockquote:border-teal-500 prose-blockquote:ps-4
               prose-blockquote:italic prose-blockquote:text-gray-600
               prose-img:rounded-lg prose-img:shadow-md
               prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded"
@@ -583,7 +583,7 @@ const BlogDetails = () => {
                     </>
                   ) : (
                     <>
-                      <i className="bi bi-send" />
+                      <i className="bi bi-send icon-directional" />
                       Post Comment
                     </>
                   )}

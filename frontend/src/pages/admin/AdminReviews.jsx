@@ -136,7 +136,7 @@ const ReviewDrawer = ({ review, onClose, onDelete, onSaveReply }) => {
           {/* Comment */}
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Comment</p>
-            <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-700 leading-relaxed border-l-4 border-teal-200">
+            <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-700 leading-relaxed border-s-4 border-teal-200">
               {review.comment}
             </div>
           </div>

@@ -55,7 +55,7 @@ const AddressPicker = ({ addresses = [], selectedId, onSelect, loading = false }
             <span className="text-sm leading-relaxed">
               <span className="font-semibold capitalize">{addr.label}</span>
               {addr.is_default && (
-                <span className="ml-2 bg-teal-100 text-teal-700 text-xs px-2 py-0.5 rounded-full font-medium">
+                <span className="ms-2 bg-teal-100 text-teal-700 text-xs px-2 py-0.5 rounded-full font-medium">
                   Default
                 </span>
               )}

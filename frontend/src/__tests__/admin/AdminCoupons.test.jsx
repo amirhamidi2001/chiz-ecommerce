@@ -15,10 +15,11 @@
  *  6. Pickers         – categories (all pages) and product search
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AdminCoupons from "../../pages/admin/AdminCoupons";
+import { JALALI_MONTH_NAMES, gregorianToJalali } from "../../utils/jalaliCalendar";
 
 // ─── Mock: DataTable (renders every cell + row actions) ───────────────────────
 vi.mock("../../components/admin/DataTable", () => ({
@@ -116,6 +117,28 @@ const dialog = () => screen.getByRole("dialog");
 const field = (label) => within(dialog()).getByLabelText(label);
 const submitButton = (name) => within(dialog()).getByRole("button", { name });
 
+/**
+ * Drive the Jalali picker like a person: open it, choose the Jalali year and month,
+ * click the day, set the time, close it. `gregorianLocal` is "YYYY-MM-DDTHH:mm";
+ * the Jalali day to click is derived from it only to know WHICH button to press —
+ * what the picker then emits is asserted against hard-coded pairs in
+ * JalaliDatePicker.test.jsx and in the "Jalali-picked" tests below.
+ */
+const pickDate = async (user, label, gregorianLocal) => {
+  const [datePart, time] = gregorianLocal.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const j = gregorianToJalali({ year, month, day });
+  await user.click(field(label));
+  const picker = within(dialog()).getByRole("group", { name: /jalali date picker/i });
+  await user.selectOptions(within(picker).getByLabelText("Year"), String(j.year));
+  await user.selectOptions(within(picker).getByLabelText("Month"), String(j.month));
+  await user.click(
+    within(picker).getByRole("button", { name: `${j.day} ${JALALI_MONTH_NAMES[j.month - 1]} ${j.year}` }),
+  );
+  fireEvent.change(within(picker).getByLabelText("Time"), { target: { value: time } });
+  await user.click(within(picker).getByRole("button", { name: "Done" }));
+};
+
 /** Fill the required fields of a valid percentage coupon. */
 const fillValid = async (user, overrides = {}) => {
   const v = {
@@ -127,15 +150,23 @@ const fillValid = async (user, overrides = {}) => {
   };
   await user.type(field(/^code/i), v.code);
   await user.type(field(/^value/i), v.value);
-  fireEvent.change(field(/valid from/i), { target: { value: v.from } });
-  fireEvent.change(field(/valid until/i), { target: { value: v.until } });
+  await pickDate(user, /valid from/i, v.from);
+  await pickDate(user, /valid until/i, v.until);
 };
 
 beforeEach(() => {
+  // Freeze only the clock's DATE so the picker's year list (relative to "today") and
+  // the relative-date fixtures are deterministic; timers stay real for user-event.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 2, 12, 0));
   vi.clearAllMocks();
   capturedToasts = [];
   adminAPI.getCategories.mockResolvedValue(paged([]));
   adminAPI.getProducts.mockResolvedValue(paged([]));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -439,6 +470,26 @@ describe("CouponModal — create", () => {
     });
   });
 
+  it("submits the GREGORIAN equivalent of the dates picked in Jalali", async () => {
+    adminAPI.createCoupon.mockResolvedValue({ data: {} });
+    const user = await openCreate();
+    await user.type(field(/^code/i), "NOWRUZ");
+    await user.type(field(/^value/i), "20");
+    // 1 Farvardin 1405 = 2026-03-21 and 1 Farvardin 1407 = 2028-03-20 (the backend
+    // reference pairs), picked by clicking the Jalali day, with a time of day.
+    await pickDate(user, /valid from/i, "2026-03-21T09:30");
+    await pickDate(user, /valid until/i, "2028-03-20T23:59");
+
+    expect(field(/valid from/i)).toHaveTextContent("1405/01/01 09:30");
+    expect(field(/valid until/i)).toHaveTextContent("1407/01/01 23:59");
+
+    await user.click(submitButton("Add Coupon"));
+    await waitFor(() => expect(adminAPI.createCoupon).toHaveBeenCalledTimes(1));
+    const payload = adminAPI.createCoupon.mock.calls[0][0];
+    expect(payload.valid_from).toBe(new Date("2026-03-21T09:30").toISOString());
+    expect(payload.valid_until).toBe(new Date("2028-03-20T23:59").toISOString());
+  });
+
   it("shows a server-side field error and keeps the form open", async () => {
     adminAPI.createCoupon.mockRejectedValue({
       response: { data: { code: ["A coupon with this code already exists."] } },
@@ -500,6 +551,19 @@ describe("CouponModal — edit", () => {
     expect(within(screen.getByTestId("selected-categories")).getByText("Skincare")).toBeInTheDocument();
     expect(within(screen.getByTestId("selected-products")).getByText("Vitamin C Serum")).toBeInTheDocument();
     expect(submitButton("Save Changes")).toBeInTheDocument();
+  });
+
+  it("shows the stored dates in Jalali, not a blank or reset picker", async () => {
+    // Stored as Gregorian instants; shown as the Jalali day they fall on locally.
+    const stored = makeCoupon({
+      id: 8,
+      valid_from: new Date(2026, 2, 21, 10, 0).toISOString(), // 21 Mar 2026 10:00 local
+      valid_until: new Date(2028, 1, 11, 18, 45).toISOString(), // 11 Feb 2028 18:45 local
+    });
+    const user = await renderPage([stored]);
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(field(/valid from/i)).toHaveTextContent("1405/01/01 10:00");
+    expect(field(/valid until/i)).toHaveTextContent("1406/11/22 18:45"); // 22 Bahman 1406
   });
 
   it("PATCHes only the fields that changed", async () => {

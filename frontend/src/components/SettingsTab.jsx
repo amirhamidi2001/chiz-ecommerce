@@ -41,7 +41,7 @@ const Toggle = ({ checked, onChange, disabled }) => (
       disabled={disabled}
       className="sr-only peer"
     />
-    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-teal-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all" />
+    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:bg-teal-600 after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all" />
   </label>
 );
 
@@ -365,12 +365,12 @@ const SettingsTab = () => {
                   value={pwData[key]}
                   onChange={(e) => setPwData({ ...pwData, [key]: e.target.value })}
                   autoComplete={auto}
-                  className={`w-full border rounded-lg px-3 pr-10 py-2 focus:outline-none focus:border-teal-500 transition ${pwErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
+                  className={`w-full border rounded-lg px-3 pe-10 py-2 focus:outline-none focus:border-teal-500 transition ${pwErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPw({ ...showPw, [showKey]: !showPw[showKey] })}
-                  className="absolute right-3 top-[2.15rem] text-gray-400 hover:text-teal-600 transition"
+                  className="absolute end-3 top-[2.15rem] text-gray-400 hover:text-teal-600 transition"
                   aria-label="Toggle visibility"
                 >
                   <i className={`bi ${showPw[showKey] ? 'bi-eye-slash' : 'bi-eye'}`} />

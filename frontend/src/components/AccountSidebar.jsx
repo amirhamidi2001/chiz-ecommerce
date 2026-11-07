@@ -52,7 +52,7 @@ const AccountSidebar = ({ activeTab, setActiveTab }) => {
             className="w-full h-full rounded-full object-cover border-4 border-white shadow-md"
           />
           {profile?.is_verified && (
-            <span className="absolute bottom-0 right-0 bg-teal-600 text-white rounded-full w-8 h-8 flex items-center justify-center border-4 border-white">
+            <span className="absolute bottom-0 end-0 bg-teal-600 text-white rounded-full w-8 h-8 flex items-center justify-center border-4 border-white">
               <i className="bi bi-shield-check text-xs"></i>
             </span>
           )}
@@ -133,7 +133,7 @@ const AccountSidebar = ({ activeTab, setActiveTab }) => {
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-4 py-2 text-red-600 hover:bg-red-50 rounded-xl transition text-sm"
         >
-          <i className="bi bi-box-arrow-right"></i>
+          <i className="bi bi-box-arrow-right icon-directional"></i>
           <span>Log Out</span>
         </button>
       </div>

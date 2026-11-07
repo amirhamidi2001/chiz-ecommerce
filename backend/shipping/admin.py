@@ -1,4 +1,6 @@
+from core.jalali import JalaliAdminMixin, jalali_column
 from django.contrib import admin
+from django.utils.translation import gettext_lazy as _
 
 from .models import Shipment, ShippingCarrier, ShippingRate
 from .providers import get_carrier_provider
@@ -68,8 +70,22 @@ def book_shipment(modeladmin, request, queryset):
 
 
 @admin.register(Shipment)
-class ShipmentAdmin(admin.ModelAdmin):
-    list_display = ("order", "carrier", "tracking_number", "status", "last_tracked_at")
+class ShipmentAdmin(JalaliAdminMixin, admin.ModelAdmin):
+    list_display = (
+        "order",
+        "carrier",
+        "tracking_number",
+        "status",
+        "last_tracked_at",
+        "last_tracked_at_jalali",
+    )
     list_filter = ("carrier", "status")
     search_fields = ("order__order_number", "tracking_number")
     actions = [book_shipment]
+
+    # Jalali display beside the Gregorian value (storage unchanged). Blank until first polled.
+    last_tracked_at_jalali = jalali_column(
+        "last_tracked_at", _("Last tracked (Jalali)")
+    )
+    readonly_fields = ("last_tracked_at_jalali",)
+    jalali_companions = {"last_tracked_at": "last_tracked_at_jalali"}

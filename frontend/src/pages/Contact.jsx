@@ -19,7 +19,7 @@ const FieldError = ({ message }) =>
 
 const inputClass = (hasError) =>
   [
-    'w-full border rounded-lg pl-10 pr-4 py-3 transition',
+    'w-full border rounded-lg ps-10 pe-4 py-3 transition',
     'focus:outline-none focus:ring-1',
     hasError
       ? 'border-red-400 focus:border-red-500 focus:ring-red-500'
@@ -168,7 +168,7 @@ const Contact = () => {
                 {/* Name */}
                 <div>
                   <div className="relative">
-                    <i className="bi bi-person absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <i className="bi bi-person absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     <input
                       type="text"
                       name="name"
@@ -185,7 +185,7 @@ const Contact = () => {
                 {/* Email */}
                 <div>
                   <div className="relative">
-                    <i className="bi bi-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <i className="bi bi-envelope absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     <input
                       type="email"
                       name="email"
@@ -203,7 +203,7 @@ const Contact = () => {
               {/* Subject */}
               <div>
                 <div className="relative">
-                  <i className="bi bi-text-left absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <i className="bi bi-text-left icon-directional absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   <input
                     type="text"
                     name="subject"
@@ -219,7 +219,7 @@ const Contact = () => {
               {/* Message */}
               <div>
                 <div className="relative">
-                  <i className="bi bi-chat-dots absolute left-3 top-4 text-gray-400 pointer-events-none" />
+                  <i className="bi bi-chat-dots absolute start-3 top-4 text-gray-400 pointer-events-none" />
                   <textarea
                     name="message"
                     value={formData.message}

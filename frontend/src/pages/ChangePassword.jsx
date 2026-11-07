@@ -129,7 +129,7 @@ const ChangePassword = () => {
 
                   {fields.map(({ name, label, showKey, auto, icon }) => (
                     <div key={name} className="relative">
-                      <i className={`bi ${icon} absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none`} />
+                      <i className={`bi ${icon} absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none`} />
                       <input
                         type={showPw[showKey] ? 'text' : 'password'}
                         name={name}
@@ -137,13 +137,13 @@ const ChangePassword = () => {
                         onChange={handleChange}
                         placeholder={label}
                         autoComplete={auto}
-                        className={`w-full border rounded-lg pl-10 pr-10 py-3 focus:outline-none focus:border-teal-500 transition ${errors[name] ? 'border-red-400' : 'border-gray-300'}`}
+                        className={`w-full border rounded-lg ps-10 pe-10 py-3 focus:outline-none focus:border-teal-500 transition ${errors[name] ? 'border-red-400' : 'border-gray-300'}`}
                         required
                       />
                       <button
                         type="button"
                         onClick={() => setShowPw((p) => ({ ...p, [showKey]: !p[showKey] }))}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-teal-600 transition"
+                        className="absolute end-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-teal-600 transition"
                         aria-label="Toggle visibility"
                       >
                         <i className={`bi ${showPw[showKey] ? 'bi-eye-slash' : 'bi-eye'}`} />
@@ -165,7 +165,7 @@ const ChangePassword = () => {
               {!success && (
                 <div className="text-center mt-6 text-sm">
                   <Link to="/account" className="text-teal-600 hover:underline">
-                    <i className="bi bi-arrow-left me-1" /> Back to Account
+                    <i className="bi bi-arrow-left icon-directional me-1" /> Back to Account
                   </Link>
                 </div>
               )}

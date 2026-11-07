@@ -31,7 +31,7 @@ import {
 // ─── Default look (Category sidebar) ──────────────────────────────────────────
 export const DefaultSection = ({ title, children }) => (
   <div className="widget-item mb-6">
-    <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">{title}</h3>
+    <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">{title}</h3>
     <div className="space-y-2">{children}</div>
   </div>
 );

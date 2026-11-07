@@ -220,7 +220,7 @@ const AddressesTab = () => {
   return (
     <div>
       {toast && (
-        <div className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white ${toast.type === "error" ? "bg-red-500" : "bg-teal-600"}`}>
+        <div className={`fixed top-6 end-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white ${toast.type === "error" ? "bg-red-500" : "bg-teal-600"}`}>
           {toast.msg}
         </div>
       )}
@@ -278,7 +278,7 @@ const AddressesTab = () => {
                 <p>{addr.city}, {provinceLabel(addr.province)} {addr.postal_code}</p>
                 <p>{addr.country}</p>
                 <p className="mt-1 text-gray-500">
-                  <i className="bi bi-telephone mr-1"></i>{addr.phone}
+                  <i className="bi bi-telephone me-1"></i>{addr.phone}
                 </p>
               </div>
               <div className="flex gap-2 mt-4 flex-wrap">

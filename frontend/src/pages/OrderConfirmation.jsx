@@ -4,6 +4,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { getOrderDetail, isAuthenticated } from '../services/api';
 import { useCart } from '../context/CartContext';
 import { formatToman } from '../utils/money';
+import { formatJalaliDate } from '../utils/jalaliDate';
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 const STATUS_STEPS = ['pending', 'processing', 'shipped', 'delivered'];
@@ -117,16 +118,14 @@ const OrderConfirmation = () => {
   const isCancelled = order.status === 'cancelled';
   const statusMeta = STATUS_META[order.status] || STATUS_META.processing;
 
-  const orderDate = new Date(order.created_at).toLocaleDateString('en-US', {
-    year: 'numeric', month: 'long', day: 'numeric',
-  });
+  const orderDate = formatJalaliDate(order.created_at, 'D MMMM YYYY');
 
-  // Estimated delivery: 5-7 business days from order date
-  const deliveryBase = new Date(order.created_at);
-  deliveryBase.setDate(deliveryBase.getDate() + 5);
-  const deliveryEnd = new Date(order.created_at);
-  deliveryEnd.setDate(deliveryEnd.getDate() + 7);
-  const estimatedDelivery = `${deliveryBase.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} – ${deliveryEnd.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+  // Estimated delivery: 5-7 days from the order date. Added as whole 24h spans on
+  // the instant (not Date#setDate, which works on the browser's local day) and
+  // formatted in Tehran time, so every visitor sees the same Jalali window.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const placedMs = new Date(order.created_at).getTime();
+  const estimatedDelivery = `${formatJalaliDate(placedMs + 5 * DAY_MS, 'D MMMM')} – ${formatJalaliDate(placedMs + 7 * DAY_MS, 'D MMMM YYYY')}`;
 
   return (
     <>
@@ -396,13 +395,13 @@ const OrderConfirmation = () => {
                   to="/category"
                   className="flex items-center justify-center gap-2 border border-gray-300 text-gray-700 py-3 rounded-xl hover:bg-gray-50 transition"
                 >
-                  <i className="bi bi-arrow-left"></i> Return to Shop
+                  <i className="bi bi-arrow-left icon-directional"></i> Return to Shop
                 </Link>
                 <Link
                   to="/account?tab=orders"
                   className="flex items-center justify-center gap-2 bg-teal-600 text-white py-3 rounded-xl hover:bg-teal-700 transition"
                 >
-                  View All Orders <i className="bi bi-arrow-right"></i>
+                  View All Orders <i className="bi bi-arrow-right icon-directional"></i>
                 </Link>
               </div>
 

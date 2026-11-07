@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { adminAPI } from "../../services/api";
+import JalaliDatePicker from "../JalaliDatePicker";
 import {
   EMPTY_COUPON_FORM,
   buildCouponPayload,
@@ -198,7 +199,7 @@ const ProductPicker = ({ selected, onChange }) => {
               type="button"
               onClick={() => add(p)}
               disabled={isSelected(p.id)}
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               {p.name}
               {isSelected(p.id) && <span className="text-xs text-gray-400"> · added</span>}
@@ -393,18 +394,20 @@ const CouponModal = ({ coupon, onClose, onSaved }) => {
             </Field>
 
             <Field id="coupon-valid_from" label="Valid from" required error={errors.valid_from}>
-              <input
-                type="datetime-local"
-                {...bind("valid_from")}
-                className={inputCls(errors.valid_from)}
+              <JalaliDatePicker
+                id="coupon-valid_from"
+                value={form.valid_from}
+                onChange={(v) => set("valid_from", v)}
+                hasError={Boolean(errors.valid_from)}
               />
             </Field>
 
             <Field id="coupon-valid_until" label="Valid until" required error={errors.valid_until}>
-              <input
-                type="datetime-local"
-                {...bind("valid_until")}
-                className={inputCls(errors.valid_until)}
+              <JalaliDatePicker
+                id="coupon-valid_until"
+                value={form.valid_until}
+                onChange={(v) => set("valid_until", v)}
+                hasError={Boolean(errors.valid_until)}
               />
             </Field>
           </div>

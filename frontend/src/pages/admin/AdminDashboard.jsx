@@ -76,7 +76,7 @@ const DonutChart = ({ data = [] }) => {
           <div key={i} className="flex items-center gap-2 text-xs">
             <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
             <span className="text-gray-600 capitalize">{d.status}</span>
-            <span className="font-semibold text-gray-800 ml-auto pl-2">{d.count}</span>
+            <span className="font-semibold text-gray-800 ms-auto ps-2">{d.count}</span>
           </div>
         ))}
       </div>

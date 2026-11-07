@@ -66,7 +66,7 @@ const AdminLayout = () => {
       <div className={`border-t border-slate-700 p-4 ${collapsed ? "flex justify-center" : ""}`}>
         {collapsed ? (
           <button onClick={handleLogout} className="text-slate-400 hover:text-red-400 transition p-2 rounded-lg hover:bg-slate-700">
-            <i className="bi bi-box-arrow-right text-lg"></i>
+            <i className="bi bi-box-arrow-right icon-directional text-lg"></i>
           </button>
         ) : (
           <div className="flex items-center gap-3">
@@ -81,7 +81,7 @@ const AdminLayout = () => {
             </div>
             <button onClick={handleLogout} title="Log out"
               className="text-slate-400 hover:text-red-400 transition p-1.5 rounded-lg hover:bg-slate-700">
-              <i className="bi bi-box-arrow-right"></i>
+              <i className="bi bi-box-arrow-right icon-directional"></i>
             </button>
           </div>
         )}
@@ -124,7 +124,7 @@ const AdminLayout = () => {
               <i className="bi bi-list text-xl text-gray-600"></i>
             </button>
             <Link to="/" className="text-sm text-teal-600 hover:underline hidden sm:inline">
-              ← Back to Store
+              <span className="icon-directional" aria-hidden="true">←</span> Back to Store
             </Link>
           </div>
           <div className="flex items-center gap-3">

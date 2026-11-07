@@ -327,7 +327,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
                 pending
               </span>
               <span
-                class="font-semibold text-gray-800 ml-auto pl-2"
+                class="font-semibold text-gray-800 ms-auto ps-2"
               >
                 12
               </span>
@@ -345,7 +345,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
                 processing
               </span>
               <span
-                class="font-semibold text-gray-800 ml-auto pl-2"
+                class="font-semibold text-gray-800 ms-auto ps-2"
               >
                 20
               </span>
@@ -363,7 +363,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
                 shipped
               </span>
               <span
-                class="font-semibold text-gray-800 ml-auto pl-2"
+                class="font-semibold text-gray-800 ms-auto ps-2"
               >
                 45
               </span>
@@ -381,7 +381,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
                 delivered
               </span>
               <span
-                class="font-semibold text-gray-800 ml-auto pl-2"
+                class="font-semibold text-gray-800 ms-auto ps-2"
               >
                 200
               </span>
@@ -399,7 +399,7 @@ exports[`AdminDashboard > Snapshot > matches stable snapshot after data loads 1`
                 cancelled
               </span>
               <span
-                class="font-semibold text-gray-800 ml-auto pl-2"
+                class="font-semibold text-gray-800 ms-auto ps-2"
               >
                 8
               </span>

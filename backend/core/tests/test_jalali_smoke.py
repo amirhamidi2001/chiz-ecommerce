@@ -47,6 +47,21 @@ KNOWN_PAIRS = [
     (D(2026, 3, 21), (1405, 1, 1), "Nowruz 1405"),
     (D(2027, 3, 21), (1406, 1, 1), "Nowruz 1406"),
     (D(2028, 3, 20), (1407, 1, 1), "Nowruz 1407"),
+    # 1 Jan-29 Feb of a Gregorian LEAP year: added in Task 14.2.1.4 after the frontend's
+    # first Jalali library (jalaliday) turned out to be a day off for exactly this
+    # window. Both stacks now pin it. (Checked against jdatetime 6.1.1 and ICU.)
+    (D(2024, 1, 1), (1402, 10, 11), "11 Dey 1402 — 1 Jan of a Gregorian leap year"),
+    (
+        D(2024, 2, 11),
+        (1402, 11, 22),
+        "22 Bahman 1402 — Revolution day, leap Gregorian year",
+    ),
+    (D(2024, 2, 29), (1402, 12, 10), "10 Esfand 1402 — 29 Feb"),
+    (
+        D(2028, 2, 11),
+        (1406, 11, 22),
+        "22 Bahman 1406 — Revolution day, leap Gregorian year",
+    ),
 ]
 
 

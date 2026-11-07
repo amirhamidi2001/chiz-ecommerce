@@ -168,7 +168,7 @@ const WishlistTab = () => {
       {/* ── Toast notification ────────────────────────────────────────── */}
       {toast && (
         <div
-          className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white transition-all ${toast.type === 'error' ? 'bg-red-500' : 'bg-teal-600'
+          className={`fixed top-6 end-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white transition-all ${toast.type === 'error' ? 'bg-red-500' : 'bg-teal-600'
             }`}
         >
           {toast.msg}
@@ -180,7 +180,7 @@ const WishlistTab = () => {
         <h2 className="text-2xl font-bold text-gray-800">
           My Wishlist
           {wishlist.length > 0 && (
-            <span className="ml-2 text-sm font-normal text-gray-400">({wishlist.length} items)</span>
+            <span className="ms-2 text-sm font-normal text-gray-400">({wishlist.length} items)</span>
           )}
         </h2>
 
@@ -322,7 +322,7 @@ const WishlistTab = () => {
                     onClick={() => handleRemove(item.id)}
                     disabled={isRemoving}
                     title="Remove from wishlist"
-                    className="absolute top-2 right-2 bg-white p-1.5 rounded-full shadow hover:bg-red-50 transition disabled:opacity-60"
+                    className="absolute top-2 end-2 bg-white p-1.5 rounded-full shadow hover:bg-red-50 transition disabled:opacity-60"
                   >
                     {isRemoving ? (
                       <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
@@ -333,7 +333,7 @@ const WishlistTab = () => {
 
                   {/* Sale badge */}
                   {p.is_sale && p.discount_percent > 0 && (
-                    <span className="absolute top-2 left-2 bg-red-500 text-white text-xs px-2 py-0.5 rounded font-semibold">
+                    <span dir="ltr" className="absolute top-2 start-2 bg-red-500 text-white text-xs px-2 py-0.5 rounded font-semibold">
                       -{p.discount_percent}%
                     </span>
                   )}
@@ -360,12 +360,12 @@ const WishlistTab = () => {
                         className={`bi ${i < Math.floor(p.rating ?? 0)
                             ? 'bi-star-fill'
                             : i < (p.rating ?? 0)
-                              ? 'bi-star-half'
+                              ? 'bi-star-half icon-directional'
                               : 'bi-star'
                           }`}
                       />
                     ))}
-                    <span className="text-gray-400 ml-1">({formatReviewCount(p.reviews_count ?? 0)})</span>
+                    <span className="text-gray-400 ms-1">({formatReviewCount(p.reviews_count ?? 0)})</span>
                   </div>
 
                   {/* Price */}
@@ -418,7 +418,7 @@ const WishlistTab = () => {
             onClick={fetchWishlist}
             className="text-xs text-gray-400 hover:text-teal-600 transition"
           >
-            <i className="bi bi-arrow-clockwise mr-1" />
+            <i className="bi bi-arrow-clockwise me-1" />
             Refresh wishlist
           </button>
         </div>

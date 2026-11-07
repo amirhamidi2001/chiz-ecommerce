@@ -130,7 +130,7 @@ exports[`AdminMessages > Snapshot > matches stable snapshot after data loads 1`]
             title="Reply"
           >
             <i
-              class="bi bi-reply"
+              class="bi bi-reply icon-directional"
             />
           </a>
           <button
@@ -221,7 +221,7 @@ exports[`AdminMessages > Snapshot > matches stable snapshot after data loads 1`]
             title="Reply"
           >
             <i
-              class="bi bi-reply"
+              class="bi bi-reply icon-directional"
             />
           </a>
           <button
@@ -312,7 +312,7 @@ exports[`AdminMessages > Snapshot > matches stable snapshot after data loads 1`]
             title="Reply"
           >
             <i
-              class="bi bi-reply"
+              class="bi bi-reply icon-directional"
             />
           </a>
           <button

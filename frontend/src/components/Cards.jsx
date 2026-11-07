@@ -20,7 +20,7 @@ const Stars = ({ rating }) => {
             i < full
               ? 'bi-star-fill text-yellow-400'
               : i === full && half
-              ? 'bi-star-half text-yellow-400'
+              ? 'bi-star-half icon-directional text-yellow-400'
               : 'bi-star text-gray-300'
           }`}
         />
@@ -101,7 +101,7 @@ const CardColumn = ({ title, icon, products, loading, error, linkParams }) => (
         to={`/category?${new URLSearchParams(linkParams).toString()}`}
         className="text-xs text-teal-600 hover:underline font-medium"
       >
-        View all →
+        View all <span className="icon-directional" aria-hidden="true">→</span>
       </Link>
     </div>
 

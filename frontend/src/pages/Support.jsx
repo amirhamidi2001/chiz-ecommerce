@@ -93,7 +93,7 @@ const Support = () => {
                     <li>Returns &amp; exchanges</li>
                   </ul>
                 </div>
-                <i className="bi bi-arrow-right text-teal-600 opacity-0 group-hover:opacity-100 transition"></i>
+                <i className="bi bi-arrow-right icon-directional text-teal-600 opacity-0 group-hover:opacity-100 transition"></i>
               </Link>
               {/* Billing & Payments */}
               <Link to="#" className="bg-white border border-gray-100 rounded-2xl p-5 flex items-start gap-3 shadow-sm hover:shadow-md transition group">
@@ -106,7 +106,7 @@ const Support = () => {
                     <li>Refund status</li>
                   </ul>
                 </div>
-                <i className="bi bi-arrow-right text-teal-600 opacity-0 group-hover:opacity-100 transition"></i>
+                <i className="bi bi-arrow-right icon-directional text-teal-600 opacity-0 group-hover:opacity-100 transition"></i>
               </Link>
               {/* Account Settings */}
               <Link to="#" className="bg-white border border-gray-100 rounded-2xl p-5 flex items-start gap-3 shadow-sm hover:shadow-md transition group">
@@ -119,7 +119,7 @@ const Support = () => {
                     <li>Privacy settings</li>
                   </ul>
                 </div>
-                <i className="bi bi-arrow-right text-teal-600 opacity-0 group-hover:opacity-100 transition"></i>
+                <i className="bi bi-arrow-right icon-directional text-teal-600 opacity-0 group-hover:opacity-100 transition"></i>
               </Link>
               {/* Security */}
               <Link to="#" className="bg-white border border-gray-100 rounded-2xl p-5 flex items-start gap-3 shadow-sm hover:shadow-md transition group">
@@ -132,7 +132,7 @@ const Support = () => {
                     <li>Privacy policy</li>
                   </ul>
                 </div>
-                <i className="bi bi-arrow-right text-teal-600 opacity-0 group-hover:opacity-100 transition"></i>
+                <i className="bi bi-arrow-right icon-directional text-teal-600 opacity-0 group-hover:opacity-100 transition"></i>
               </Link>
             </div>
           </div>
@@ -171,7 +171,7 @@ const Support = () => {
                   <div key={faq.id} className="border border-gray-200 rounded-xl overflow-hidden">
                     <button
                       onClick={() => toggleFaq(faq.id)}
-                      className="w-full flex justify-between items-center p-5 text-left font-semibold text-gray-800 hover:bg-gray-50 transition"
+                      className="w-full flex justify-between items-center p-5 text-start font-semibold text-gray-800 hover:bg-gray-50 transition"
                     >
                       <span>{faq.question}</span>
                       <i className={`bi bi-plus text-teal-600 transition-transform duration-300 ${openFaq === faq.id ? 'rotate-45' : ''}`}></i>

@@ -1,5 +1,6 @@
 // src/context/CartContext.jsx
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { normalizeCart } from '../utils/cartShape';
 import {
     getCart,
     addToCart,
@@ -25,7 +26,10 @@ const CartContext = createContext(null);
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 export const CartProvider = ({ children }) => {
-    const [cart, setCart] = useState(null);    // full cart object from API
+    const [cart, setCartRaw] = useState(null);    // full cart object from API
+    // Every payload goes through normalizeCart (see utils/cartShape.js): the API nests the
+    // product inside `variant`, the pages read `item.product`.
+    const setCart = useCallback((data) => setCartRaw(normalizeCart(data)), []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 

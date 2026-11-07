@@ -148,13 +148,13 @@ const ResetPassword = () => {
                   {/* New password */}
                   <div className="relative">
                     <label className="block text-sm font-medium mb-1">New Password</label>
-                    <i className="bi bi-lock absolute left-3 top-[2.15rem] text-gray-400 pointer-events-none" />
+                    <i className="bi bi-lock absolute start-3 top-[2.15rem] text-gray-400 pointer-events-none" />
                     <input
                       type={showPw.password ? 'text' : 'password'}
                       name="password"
                       value={formData.password}
                       onChange={handleChange}
-                      className={`w-full border rounded-lg pl-10 pr-10 py-3 focus:outline-none focus:border-teal-500 transition ${errors.password || errors.new_password ? 'border-red-400' : 'border-gray-300'}`}
+                      className={`w-full border rounded-lg ps-10 pe-10 py-3 focus:outline-none focus:border-teal-500 transition ${errors.password || errors.new_password ? 'border-red-400' : 'border-gray-300'}`}
                       placeholder="New password (min. 8 characters)"
                       autoComplete="new-password"
                       required
@@ -162,7 +162,7 @@ const ResetPassword = () => {
                     <button
                       type="button"
                       onClick={() => setShowPw((p) => ({ ...p, password: !p.password }))}
-                      className="absolute right-3 top-[2.15rem] text-gray-400 hover:text-teal-600 transition"
+                      className="absolute end-3 top-[2.15rem] text-gray-400 hover:text-teal-600 transition"
                       aria-label="Toggle"
                     >
                       <i className={`bi ${showPw.password ? 'bi-eye-slash' : 'bi-eye'}`} />
@@ -173,13 +173,13 @@ const ResetPassword = () => {
                   {/* Confirm password */}
                   <div className="relative">
                     <label className="block text-sm font-medium mb-1">Confirm Password</label>
-                    <i className="bi bi-lock-fill absolute left-3 top-[2.15rem] text-gray-400 pointer-events-none" />
+                    <i className="bi bi-lock-fill absolute start-3 top-[2.15rem] text-gray-400 pointer-events-none" />
                     <input
                       type={showPw.confirm ? 'text' : 'password'}
                       name="confirmPassword"
                       value={formData.confirmPassword}
                       onChange={handleChange}
-                      className={`w-full border rounded-lg pl-10 pr-10 py-3 focus:outline-none focus:border-teal-500 transition ${errors.confirmPassword || errors.confirm_password ? 'border-red-400' : 'border-gray-300'}`}
+                      className={`w-full border rounded-lg ps-10 pe-10 py-3 focus:outline-none focus:border-teal-500 transition ${errors.confirmPassword || errors.confirm_password ? 'border-red-400' : 'border-gray-300'}`}
                       placeholder="Confirm new password"
                       autoComplete="new-password"
                       required
@@ -187,7 +187,7 @@ const ResetPassword = () => {
                     <button
                       type="button"
                       onClick={() => setShowPw((p) => ({ ...p, confirm: !p.confirm }))}
-                      className="absolute right-3 top-[2.15rem] text-gray-400 hover:text-teal-600 transition"
+                      className="absolute end-3 top-[2.15rem] text-gray-400 hover:text-teal-600 transition"
                       aria-label="Toggle"
                     >
                       <i className={`bi ${showPw.confirm ? 'bi-eye-slash' : 'bi-eye'}`} />
@@ -208,7 +208,7 @@ const ResetPassword = () => {
               {!isSuccess && (
                 <div className="text-center mt-6 text-sm">
                   <Link to="/login" className="text-teal-600 hover:underline">
-                    <i className="bi bi-arrow-left me-1" /> Back to Login
+                    <i className="bi bi-arrow-left icon-directional me-1" /> Back to Login
                   </Link>
                 </div>
               )}

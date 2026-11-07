@@ -89,7 +89,7 @@ const StarRating = memo(({ rating, count, compact = false }) => {
           <i
             key={i}
             className={
-              i < full ? 'bi bi-star-fill' : i === full && half ? 'bi bi-star-half' : 'bi bi-star'
+              i < full ? 'bi bi-star-fill' : i === full && half ? 'bi bi-star-half icon-directional' : 'bi bi-star'
             }
           />
         ))}
@@ -152,13 +152,13 @@ const ProductCard = memo(({ product }) => {
         </Link>
 
         {/* Badges */}
-        <div className="absolute top-3 left-3 flex flex-col gap-1">
+        <div className="absolute top-3 start-3 flex flex-col gap-1">
           {product.is_new && (
             <span className="bg-teal-500 text-white text-xs font-semibold px-2 py-0.5 rounded">New</span>
           )}
           <FlashSaleBadge product={product} showPercent={false} className="!px-2 !py-0.5 !font-semibold" />
           {discount && (
-            <span className="bg-red-500 text-white text-xs font-semibold px-2 py-0.5 rounded">-{discount}%</span>
+            <span dir="ltr" className="bg-red-500 text-white text-xs font-semibold px-2 py-0.5 rounded">-{discount}%</span>
           )}
           {product.in_stock === false && (
             <span className="bg-gray-500 text-white text-xs font-semibold px-2 py-0.5 rounded">Out of stock</span>
@@ -168,7 +168,7 @@ const ProductCard = memo(({ product }) => {
         {/* Wishlist button */}
         <button
           onClick={handleWishlist}
-          className={`absolute top-3 right-3 p-1.5 rounded-full transition-all duration-200 ${inWishlist
+          className={`absolute top-3 end-3 p-1.5 rounded-full transition-all duration-200 ${inWishlist
               ? 'bg-red-500 text-white shadow-md'
               : 'bg-white/80 text-gray-600 hover:bg-red-50 hover:text-red-500 opacity-0 group-hover:opacity-100'
             }`}
@@ -345,7 +345,7 @@ const FilterSidebar = memo(({ categories, brands, searchParams, onFilterChange, 
             </div>
             <span>& Up</span>
             {searchParams.get('min_rating') === String(r) && (
-              <i className="bi bi-check-circle-fill text-teal-600 ml-auto" />
+              <i className="bi bi-check-circle-fill text-teal-600 ms-auto" />
             )}
           </button>
         ))}
@@ -395,7 +395,7 @@ const FilterRadio = ({ name: _name, value, label, checked, onChange, count, disa
     </div>
     {label}
     {/* the space keeps the accessible name "Oily (12)", not "Oily(12)" */}
-    {count !== undefined && <>{' '}<span className="ml-auto text-xs text-gray-400">({count})</span></>}
+    {count !== undefined && <>{' '}<span className="ms-auto text-xs text-gray-400">({count})</span></>}
   </button>
 );
 
@@ -438,7 +438,7 @@ const Pagination = memo(({ currentPage, total, count, onPageChange }) => {
           disabled={currentPage === 1}
           aria-label="Previous page"
         >
-          <i className="bi bi-chevron-left" />
+          <i className="bi bi-chevron-left icon-directional" />
         </PageBtn>
 
         {pages.map((p, i) =>
@@ -462,7 +462,7 @@ const Pagination = memo(({ currentPage, total, count, onPageChange }) => {
           disabled={currentPage === total}
           aria-label="Next page"
         >
-          <i className="bi bi-chevron-right" />
+          <i className="bi bi-chevron-right icon-directional" />
         </PageBtn>
       </div>
     </nav>
@@ -535,7 +535,7 @@ const ActiveChips = memo(({ searchParams, categories, brands, onRemove, onUpdate
           {chip.label}
           <button
             onClick={() => (chip.update ? onUpdate(chip.update) : onRemove(chip.removes ?? [chip.key]))}
-            className="ml-0.5 hover:text-red-500 transition-colors"
+            className="ms-0.5 hover:text-red-500 transition-colors"
             aria-label={`Remove ${chip.label} filter`}
           >
             <i className="bi bi-x" />
@@ -565,7 +565,7 @@ const EmptyState = ({ query, hasFilters, onClearFilters }) => (
       </button>
     )}
     <div className="mt-6">
-      <Link to="/" className="text-teal-600 hover:underline text-sm">← Back to home</Link>
+      <Link to="/" className="text-teal-600 hover:underline text-sm"><span className="icon-directional" aria-hidden="true">←</span> Back to home</Link>
     </div>
   </div>
 );
@@ -808,7 +808,7 @@ const SearchResults = () => {
             >
               <i className="bi bi-funnel" /> Filters
               {activeFilterCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-teal-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                <span className="absolute -top-1.5 -end-1.5 bg-teal-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
                   {activeFilterCount}
                 </span>
               )}
@@ -857,7 +857,7 @@ const SearchResults = () => {
                 <p className="text-sm">{error}</p>
                 <button
                   onClick={() => setSearchParams(new URLSearchParams(searchParams), { replace: true })}
-                  className="ml-auto text-sm underline hover:no-underline flex-shrink-0"
+                  className="ms-auto text-sm underline hover:no-underline flex-shrink-0"
                 >
                   Retry
                 </button>

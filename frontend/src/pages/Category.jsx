@@ -70,12 +70,12 @@ const Toast = ({ message, type, onClose }) => {
 
   return (
     <div
-      className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg text-white transition-all ${type === 'success' ? 'bg-teal-600' : 'bg-red-500'
+      className={`fixed bottom-6 end-6 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg text-white transition-all ${type === 'success' ? 'bg-teal-600' : 'bg-red-500'
         }`}
     >
       <i className={`bi ${type === 'success' ? 'bi-check-circle' : 'bi-exclamation-circle'}`}></i>
       <span className="text-sm font-medium">{message}</span>
-      <button onClick={onClose} className="ml-2 opacity-70 hover:opacity-100">
+      <button onClick={onClose} className="ms-2 opacity-70 hover:opacity-100">
         <i className="bi bi-x"></i>
       </button>
     </div>
@@ -135,23 +135,23 @@ const ProductCard = ({ product, onAddToCart }) => {
         </div>
         {/* Badges */}
         {product.is_new && (
-          <span className="absolute top-3 left-3 bg-teal-500 text-white text-xs font-semibold px-2 py-1 rounded">
+          <span className="absolute top-3 start-3 bg-teal-500 text-white text-xs font-semibold px-2 py-1 rounded">
             New
           </span>
         )}
         {product.is_sale && !product.is_new && (
-          <span className="absolute top-3 left-3 bg-red-500 text-white text-xs font-semibold px-2 py-1 rounded">
+          <span className="absolute top-3 start-3 bg-red-500 text-white text-xs font-semibold px-2 py-1 rounded">
             Sale
           </span>
         )}
         {product.discount_percent > 0 && (
-          <span className="absolute top-3 right-3 bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded">
+          <span dir="ltr" className="absolute top-3 end-3 bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded">
             -{product.discount_percent}%
           </span>
         )}
-        <FlashSaleBadge product={product} className="absolute top-11 left-3" />
+        <FlashSaleBadge product={product} className="absolute top-11 start-3" />
         {product.stock === 0 && (
-          <span className="absolute top-3 left-3 bg-gray-600 text-white text-xs font-semibold px-2 py-1 rounded">
+          <span className="absolute top-3 start-3 bg-gray-600 text-white text-xs font-semibold px-2 py-1 rounded">
             Out of Stock
           </span>
         )}
@@ -172,7 +172,7 @@ const ProductCard = ({ product, onAddToCart }) => {
             ) : product.original_price ? (
               <>
                 <span className="text-lg font-bold text-teal-700">{formatToman(product.price)}</span>
-                <span className="text-sm text-gray-400 line-through ml-2">{formatToman(product.original_price)}</span>
+                <span className="text-sm text-gray-400 line-through ms-2">{formatToman(product.original_price)}</span>
               </>
             ) : (
               <span className="text-lg font-bold text-gray-800">{formatToman(product.price)}</span>
@@ -213,7 +213,7 @@ const CategoryTree = ({ categories, selectedCategory, onSelectCategory, loading 
 
   if (loading) return (
     <div className="widget-item mb-6">
-      <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Categories</h3>
+      <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">Categories</h3>
       <div className="space-y-2">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="h-5 bg-gray-100 rounded animate-pulse" />
@@ -224,7 +224,7 @@ const CategoryTree = ({ categories, selectedCategory, onSelectCategory, loading 
 
   return (
     <div className="widget-item mb-6">
-      <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Categories</h3>
+      <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">Categories</h3>
       <ul className="space-y-2">
         <li>
           <button
@@ -250,7 +250,7 @@ const CategoryTree = ({ categories, selectedCategory, onSelectCategory, loading 
               )}
             </div>
             {open[cat.id] && cat.children?.length > 0 && (
-              <ul className="pl-4 mt-2 space-y-1">
+              <ul className="ps-4 mt-2 space-y-1">
                 {cat.children.map((sub) => (
                   <li key={sub.id}>
                     <button
@@ -296,7 +296,7 @@ const PriceRangeSlider = ({ minPrice, maxPrice, onPriceChange }) => {
 
   return (
     <div className="widget-item mb-6">
-      <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Price Range</h3>
+      <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">Price Range</h3>
       <div className="mb-3 flex justify-between text-sm font-medium">
         <span>{formatToman(tomanToRial(minVal))}</span>
         <span>{formatToman(tomanToRial(maxVal))}</span>
@@ -304,17 +304,17 @@ const PriceRangeSlider = ({ minPrice, maxPrice, onPriceChange }) => {
       <div className="relative h-1 bg-gray-200 rounded">
         <div
           className="absolute h-1 bg-teal-600 rounded"
-          style={{ left: `${(minVal / GLOBAL_MAX) * 100}%`, right: `${100 - (maxVal / GLOBAL_MAX) * 100}%` }}
+          style={{ insetInlineStart: `${(minVal / GLOBAL_MAX) * 100}%`, insetInlineEnd: `${100 - (maxVal / GLOBAL_MAX) * 100}%` }}
         />
         <input
           type="range" min={GLOBAL_MIN} max={GLOBAL_MAX} step={STEP} value={minVal}
           onChange={handleMin}
-          className="absolute w-full top-0 left-0 appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-600 [&::-webkit-slider-thumb]:cursor-pointer"
+          className="absolute w-full top-0 start-0 appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-600 [&::-webkit-slider-thumb]:cursor-pointer"
         />
         <input
           type="range" min={GLOBAL_MIN} max={GLOBAL_MAX} step={STEP} value={maxVal}
           onChange={handleMax}
-          className="absolute w-full top-0 left-0 appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-600 [&::-webkit-slider-thumb]:cursor-pointer"
+          className="absolute w-full top-0 start-0 appearance-none bg-transparent pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-600 [&::-webkit-slider-thumb]:cursor-pointer"
         />
       </div>
       <div className="flex gap-2 mt-4">
@@ -329,7 +329,7 @@ const PriceRangeSlider = ({ minPrice, maxPrice, onPriceChange }) => {
 const ColorFilter = ({ colors, selectedColors, onToggle, loading }) => {
   if (loading) return (
     <div className="widget-item mb-6">
-      <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Filter by Color</h3>
+      <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">Filter by Color</h3>
       <div className="flex flex-wrap gap-2">
         {[...Array(8)].map((_, i) => <div key={i} className="w-8 h-8 rounded-full bg-gray-200 animate-pulse" />)}
       </div>
@@ -338,7 +338,7 @@ const ColorFilter = ({ colors, selectedColors, onToggle, loading }) => {
 
   return (
     <div className="widget-item mb-6">
-      <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Filter by Color</h3>
+      <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">Filter by Color</h3>
       <div className="flex flex-wrap gap-2">
         {colors.map((color) => (
           <label key={color.id} className="relative cursor-pointer" title={color.name}>
@@ -370,7 +370,7 @@ const BrandFilter = ({ brands, selectedBrands, onToggle, onClear, loading }) => 
 
   if (loading) return (
     <div className="widget-item mb-6">
-      <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Filter by Brand</h3>
+      <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">Filter by Brand</h3>
       <div className="space-y-2">
         {[...Array(6)].map((_, i) => <div key={i} className="h-5 bg-gray-100 rounded animate-pulse" />)}
       </div>
@@ -379,16 +379,16 @@ const BrandFilter = ({ brands, selectedBrands, onToggle, onClear, loading }) => 
 
   return (
     <div className="widget-item mb-6">
-      <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Filter by Brand</h3>
+      <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">Filter by Brand</h3>
       <div className="relative mb-3">
         <input
           type="text"
           placeholder="Search brands..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-teal-500"
+          className="w-full border rounded-lg ps-9 pe-3 py-2 text-sm focus:outline-none focus:border-teal-500"
         />
-        <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+        <i className="bi bi-search absolute start-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
       </div>
       <div className="max-h-56 overflow-y-auto space-y-2">
         {filtered.map((brand) => (
@@ -417,7 +417,7 @@ const BrandFilter = ({ brands, selectedBrands, onToggle, onClear, loading }) => 
 // Same markup as the other sidebar widgets (always expanded, teal-bordered h3).
 const CosmeticFilterSection = ({ title, children }) => (
   <div className="widget-item mb-6">
-    <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">{title}</h3>
+    <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">{title}</h3>
     <div className="space-y-2">{children}</div>
   </div>
 );
@@ -715,16 +715,16 @@ const Category = () => {
             <aside className="lg:w-1/4 xl:w-1/5">
               {/* Search */}
               <div className="widget-item mb-6">
-                <h3 className="text-lg font-semibold border-l-4 border-teal-600 pl-3 mb-4">Search</h3>
+                <h3 className="text-lg font-semibold border-s-4 border-teal-600 ps-3 mb-4">Search</h3>
                 <div className="relative">
                   <input
                     type="text"
                     placeholder="Search products..."
                     value={searchDraft.text}
                     onChange={handleSearchChange}
-                    className="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-teal-500"
+                    className="w-full border border-gray-300 rounded-lg ps-10 pe-4 py-2 text-sm focus:outline-none focus:border-teal-500"
                   />
-                  <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                  <i className="bi bi-search absolute start-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
                 </div>
               </div>
 
@@ -863,12 +863,12 @@ const Category = () => {
                       className="inline-flex items-center gap-1 bg-teal-100 text-teal-700 text-xs px-2 py-1 rounded-full"
                     >
                       {f.type}: {f.value}
-                      <button onClick={f.clear} className="ml-1 hover:text-teal-900">
+                      <button onClick={f.clear} className="ms-1 hover:text-teal-900">
                         <i className="bi bi-x"></i>
                       </button>
                     </span>
                   ))}
-                  <button onClick={clearAllFilters} className="text-xs text-red-500 hover:underline ml-auto">
+                  <button onClick={clearAllFilters} className="text-xs text-red-500 hover:underline ms-auto">
                     Clear All
                   </button>
                 </div>
@@ -914,7 +914,7 @@ const Category = () => {
                             ) : product.original_price ? (
                               <>
                                 <span className="text-xl font-bold text-teal-700">{formatToman(product.price)}</span>
-                                <span className="text-gray-400 line-through ml-2">{formatToman(product.original_price)}</span>
+                                <span className="text-gray-400 line-through ms-2">{formatToman(product.original_price)}</span>
                               </>
                             ) : (
                               <span className="text-xl font-bold">{formatToman(product.price)}</span>
@@ -952,7 +952,7 @@ const Category = () => {
                       disabled={currentPage === 1}
                       className="px-3 py-1 border rounded-md disabled:opacity-50 hover:bg-gray-100"
                     >
-                      <i className="bi bi-chevron-left"></i> Prev
+                      <i className="bi bi-chevron-left icon-directional"></i> Prev
                     </button>
 
                     {currentPage > 3 && (
@@ -986,7 +986,7 @@ const Category = () => {
                       disabled={currentPage === totalPages}
                       className="px-3 py-1 border rounded-md disabled:opacity-50 hover:bg-gray-100"
                     >
-                      Next <i className="bi bi-chevron-right"></i>
+                      Next <i className="bi bi-chevron-right icon-directional"></i>
                     </button>
                   </nav>
                 </div>

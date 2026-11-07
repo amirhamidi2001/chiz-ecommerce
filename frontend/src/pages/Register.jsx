@@ -88,8 +88,8 @@ const Register = () => {
         {/* Decorative elements */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-teal-100 rounded-full opacity-30 -translate-y-1/2 translate-x-1/2"></div>
         <div className="absolute bottom-0 left-0 w-80 h-80 bg-teal-50 rounded-full opacity-40 translate-y-1/2 -translate-x-1/2"></div>
-        <div className="absolute top-1/3 left-10 w-16 h-16 bg-teal-200 rounded-full opacity-20"></div>
-        <div className="absolute bottom-20 right-20 w-24 h-24 bg-teal-300 rounded-lg rotate-12 opacity-20"></div>
+        <div className="absolute top-1/3 start-10 w-16 h-16 bg-teal-200 rounded-full opacity-20"></div>
+        <div className="absolute bottom-20 end-20 w-24 h-24 bg-teal-300 rounded-lg rotate-12 opacity-20"></div>
 
         <div className="container mx-auto px-4 relative z-10">
           <div className="max-w-2xl mx-auto">
@@ -112,7 +112,7 @@ const Register = () => {
                       errors.fullName ? 'border-red-500' : 'border-gray-300'
                     }`}
                   />
-                  <label className="absolute left-3 top-1 text-xs text-gray-500 peer-focus:text-teal-600">Full Name</label>
+                  <label className="absolute start-3 top-1 text-xs text-gray-500 peer-focus:text-teal-600">Full Name</label>
                   {errors.fullName && <p className="text-red-500 text-xs mt-1">{errors.fullName}</p>}
                 </div>
 
@@ -128,7 +128,7 @@ const Register = () => {
                       errors.email ? 'border-red-500' : 'border-gray-300'
                     }`}
                   />
-                  <label className="absolute left-3 top-1 text-xs text-gray-500 peer-focus:text-teal-600">Email Address</label>
+                  <label className="absolute start-3 top-1 text-xs text-gray-500 peer-focus:text-teal-600">Email Address</label>
                   {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
                 </div>
 
@@ -145,7 +145,7 @@ const Register = () => {
                         errors.password ? 'border-red-500' : 'border-gray-300'
                       }`}
                     />
-                    <label className="absolute left-3 top-1 text-xs text-gray-500 peer-focus:text-teal-600">Password</label>
+                    <label className="absolute start-3 top-1 text-xs text-gray-500 peer-focus:text-teal-600">Password</label>
                     {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
                   </div>
                   <div className="relative">
@@ -159,7 +159,7 @@ const Register = () => {
                         errors.confirmPassword ? 'border-red-500' : 'border-gray-300'
                       }`}
                     />
-                    <label className="absolute left-3 top-1 text-xs text-gray-500 peer-focus:text-teal-600">Confirm Password</label>
+                    <label className="absolute start-3 top-1 text-xs text-gray-500 peer-focus:text-teal-600">Confirm Password</label>
                     {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword}</p>}
                   </div>
                 </div>
@@ -184,8 +184,8 @@ const Register = () => {
                     <option value="jp">Japan</option>
                     <option value="other">Other</option>
                   </select>
-                  <label className="absolute left-3 top-1 text-xs text-gray-500">Country</label>
-                  <i className="bi bi-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"></i>
+                  <label className="absolute start-3 top-1 text-xs text-gray-500">Country</label>
+                  <i className="bi bi-chevron-down absolute end-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"></i>
                   {errors.country && <p className="text-red-500 text-xs mt-1">{errors.country}</p>}
                 </div>
 

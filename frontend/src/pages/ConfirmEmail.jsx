@@ -117,7 +117,7 @@ const ConfirmEmail = () => {
                     to="/login"
                     className="inline-block mt-4 px-6 py-2.5 bg-teal-600 text-white rounded-lg font-semibold hover:bg-teal-700 transition text-sm"
                   >
-                    Sign In <i className="bi bi-arrow-right ms-1" />
+                    Sign In <i className="bi bi-arrow-right icon-directional ms-1" />
                   </Link>
                 </div>
               )}
@@ -132,7 +132,7 @@ const ConfirmEmail = () => {
                   </div>
 
                   {resendAlert && (
-                    <div className={`px-4 py-3 border rounded-lg text-sm flex items-start gap-2 text-left ${resendAlert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-600'}`}>
+                    <div className={`px-4 py-3 border rounded-lg text-sm flex items-start gap-2 text-start ${resendAlert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-600'}`}>
                       <i className={`bi ${resendAlert.type === 'success' ? 'bi-check-circle' : 'bi-exclamation-circle'} mt-0.5 shrink-0`} />
                       <span>{resendAlert.msg}</span>
                     </div>
@@ -160,13 +160,13 @@ const ConfirmEmail = () => {
                     </p>
                   </div>
 
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-left text-sm text-gray-600 space-y-1.5">
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-start text-sm text-gray-600 space-y-1.5">
                     <p className="flex items-center gap-2"><i className="bi bi-clock text-gray-400" /> The link expires in <strong>24 hours</strong>.</p>
                     <p className="flex items-center gap-2"><i className="bi bi-folder2 text-gray-400" /> Check your spam or junk folder if you don't see it.</p>
                   </div>
 
                   {resendAlert && (
-                    <div className={`px-4 py-3 border rounded-lg text-sm flex items-start gap-2 text-left ${resendAlert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-600'}`}>
+                    <div className={`px-4 py-3 border rounded-lg text-sm flex items-start gap-2 text-start ${resendAlert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-600'}`}>
                       <i className={`bi ${resendAlert.type === 'success' ? 'bi-check-circle' : 'bi-exclamation-circle'} mt-0.5 shrink-0`} />
                       <span>{resendAlert.msg}</span>
                     </div>
@@ -182,7 +182,7 @@ const ConfirmEmail = () => {
 
                   <div className="pt-2 border-t border-gray-100">
                     <Link to="/login" className="text-sm text-teal-600 hover:underline">
-                      <i className="bi bi-arrow-left me-1" /> Back to Login
+                      <i className="bi bi-arrow-left icon-directional me-1" /> Back to Login
                     </Link>
                   </div>
                 </div>

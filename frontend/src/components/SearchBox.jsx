@@ -171,7 +171,7 @@ const SearchBox = ({ className = '', inputClass = '', buttonClass = '', onSubmit
         <ul
           role="listbox"
           aria-label="Search suggestions"
-          className="absolute left-0 right-0 top-full mt-2 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden"
+          className="absolute start-0 end-0 top-full mt-2 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden"
         >
           {hasResults ? (
             <>

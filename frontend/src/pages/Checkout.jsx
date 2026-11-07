@@ -712,7 +712,7 @@ const Checkout = () => {
                     ))}
                   </div>
                 ) : (
-                  <div className="space-y-4 mb-6 max-h-64 overflow-y-auto pr-1">
+                  <div className="space-y-4 mb-6 max-h-64 overflow-y-auto pe-1">
                     {items.map((item) => (
                       <div key={item.id} className="flex gap-3">
                         <div className="w-16 h-16 rounded-lg border bg-gray-100 flex-shrink-0 overflow-hidden">

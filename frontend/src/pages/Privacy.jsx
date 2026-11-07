@@ -236,7 +236,7 @@ const Privacy = () => {
             <div className="w-16 h-16 bg-teal-600 rounded-xl flex items-center justify-center flex-shrink-0">
               <i className="bi bi-envelope-open text-white text-2xl"></i>
             </div>
-            <div className="text-center md:text-left">
+            <div className="text-center md:text-start">
               <h4 className="text-xl font-bold text-gray-800 mb-2">Privacy Questions?</h4>
               <p className="text-gray-600 mb-3">If you have any questions about this Privacy Policy, please contact our Data Protection Officer</p>
               <Link to="/contact" className="inline-block bg-teal-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-teal-700 transition">

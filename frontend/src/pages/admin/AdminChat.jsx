@@ -48,8 +48,8 @@ function RoomItem({ room, active, onSelect }) {
   return (
     <button
       onClick={() => onSelect(room)}
-      className={`w-full text-left px-4 py-3 border-b border-slate-100 transition-colors hover:bg-slate-50 ${
-        active ? 'bg-teal-50 border-l-2 border-l-teal-600' : ''
+      className={`w-full text-start px-4 py-3 border-b border-slate-100 transition-colors hover:bg-slate-50 ${
+        active ? 'bg-teal-50 border-s-2 border-s-teal-600' : ''
       }`}
     >
       <div className="flex items-center justify-between gap-2">
@@ -99,15 +99,15 @@ function AgentMessageBubble({ msg, currentUserId }) {
           <span className="text-xs text-slate-400 mb-0.5 px-1">
             {msg.sender_name}
             {msg.is_agent && (
-              <span className="ml-1 text-teal-600 font-medium">(agent)</span>
+              <span className="ms-1 text-teal-600 font-medium">(agent)</span>
             )}
           </span>
         )}
         <div
           className={`px-3.5 py-2 rounded-2xl text-sm leading-relaxed break-words ${
             isOwn
-              ? 'bg-teal-600 text-white rounded-br-sm'
-              : 'bg-slate-100 text-slate-800 rounded-bl-sm'
+              ? 'bg-teal-600 text-white rounded-ee-sm'
+              : 'bg-slate-100 text-slate-800 rounded-es-sm'
           }`}
         >
           {msg.content}
@@ -237,7 +237,7 @@ export default function AdminChat() {
     <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-white rounded-xl border border-slate-200 shadow-sm">
 
       {/* ── LEFT: Room list ─────────────────────────────────────────────── */}
-      <aside className="w-72 flex-shrink-0 border-r border-slate-200 flex flex-col">
+      <aside className="w-72 flex-shrink-0 border-e border-slate-200 flex flex-col">
         {/* Filter tabs */}
         <div className="px-4 pt-4 pb-2 border-b border-slate-100">
           <div className="flex items-center justify-between mb-3">

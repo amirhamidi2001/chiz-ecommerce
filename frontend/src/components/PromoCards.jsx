@@ -26,7 +26,7 @@ const FALLBACK_IMAGES = [
 // ─── Skeleton for small category card ────────────────────────────────────────
 const SmallCardSkeleton = () => (
   <div className="relative bg-gray-100 rounded-2xl overflow-hidden h-56 animate-pulse">
-    <div className="absolute right-0 top-0 w-1/2 h-full bg-gray-200" />
+    <div className="absolute end-0 top-0 w-1/2 h-full bg-gray-200" />
     <div className="relative p-6 w-1/2 h-full flex flex-col justify-center gap-3">
       <div className="h-5 bg-gray-200 rounded w-3/4" />
       <div className="h-3 bg-gray-200 rounded w-1/2" />
@@ -38,7 +38,7 @@ const SmallCardSkeleton = () => (
 // ─── Small category card ──────────────────────────────────────────────────────
 const SmallCategoryCard = ({ category, productCount, imgSrc, theme }) => (
   <div className={`relative ${theme.bg} rounded-2xl overflow-hidden group h-56`}>
-    <div className="absolute right-0 top-0 w-1/2 h-full">
+    <div className="absolute end-0 top-0 w-1/2 h-full">
       <img
         src={imgSrc}
         alt={category.name}
@@ -61,7 +61,7 @@ const SmallCategoryCard = ({ category, productCount, imgSrc, theme }) => (
         to={`/category?category=${category.slug}`}
         className={`mt-3 font-medium text-sm inline-flex items-center gap-1 transition-all duration-200 ${theme.accent} ${theme.hover} group-hover:gap-2`}
       >
-        Shop Now <span>→</span>
+        Shop Now <span className="icon-directional" aria-hidden="true">→</span>
       </Link>
     </div>
   </div>
@@ -142,7 +142,7 @@ const PromoCards = () => {
           {/* ── Left: hero category card ──────────────────────────────────── */}
           {loading ? (
             <div className="relative bg-teal-100 rounded-2xl overflow-hidden h-96 md:h-auto animate-pulse">
-              <div className="absolute right-0 top-0 w-1/2 h-full bg-teal-200" />
+              <div className="absolute end-0 top-0 w-1/2 h-full bg-teal-200" />
               <div className="relative p-8 space-y-4 max-w-xs">
                 <div className="h-5 bg-teal-200 rounded w-1/3" />
                 <div className="h-8 bg-teal-200 rounded w-4/5" />
@@ -154,7 +154,7 @@ const PromoCards = () => {
           ) : heroCategory ? (
             <div className="relative bg-teal-50 rounded-2xl overflow-hidden group">
               {/* Right-side image */}
-              <div className="absolute right-0 top-0 w-1/2 h-full">
+              <div className="absolute end-0 top-0 w-1/2 h-full">
                 <img
                   src={heroCategory.image || FALLBACK_IMAGES[0]}
                   alt={heroCategory.name}
@@ -184,14 +184,14 @@ const PromoCards = () => {
                   to={`/category?category=${heroCategory.slug}`}
                   className="inline-flex items-center gap-2 bg-teal-700 text-white px-5 py-2.5 rounded-full hover:bg-teal-800 transition font-medium"
                 >
-                  Explore Collection <span>→</span>
+                  Explore Collection <span className="icon-directional" aria-hidden="true">→</span>
                 </Link>
               </div>
             </div>
           ) : (
             /* Static fallback if API returns no categories */
             <div className="relative bg-teal-50 rounded-2xl overflow-hidden group">
-              <div className="absolute right-0 top-0 w-1/2 h-full">
+              <div className="absolute end-0 top-0 w-1/2 h-full">
                 <img
                   src="/assets/img/product/product-3.webp"
                   alt="Collection"
@@ -212,7 +212,7 @@ const PromoCards = () => {
                   to="/category"
                   className="inline-flex items-center gap-2 bg-teal-700 text-white px-5 py-2 rounded-full hover:bg-teal-800 transition"
                 >
-                  Explore Collection <span>→</span>
+                  Explore Collection <span className="icon-directional" aria-hidden="true">→</span>
                 </Link>
               </div>
             </div>
@@ -240,7 +240,7 @@ const PromoCards = () => {
                   { name: 'Accessories', img: '/assets/img/product/product-1.webp', slug: 'accessories', theme: CARD_THEMES[3] },
                 ].map((item) => (
                   <div key={item.slug} className={`relative ${item.theme.bg} rounded-2xl overflow-hidden group h-56`}>
-                    <div className="absolute right-0 top-0 w-1/2 h-full">
+                    <div className="absolute end-0 top-0 w-1/2 h-full">
                       <img
                         src={item.img}
                         alt={item.name}
@@ -250,7 +250,7 @@ const PromoCards = () => {
                     <div className="relative p-6 w-1/2 h-full flex flex-col justify-center z-10">
                       <h4 className="text-xl font-bold">{item.name}</h4>
                       <Link to={`/category?category=${item.slug}`} className={`mt-2 font-medium inline-flex items-center gap-1 text-sm ${item.theme.accent} group-hover:gap-2 transition-all`}>
-                        Shop Now <span>→</span>
+                        Shop Now <span className="icon-directional" aria-hidden="true">→</span>
                       </Link>
                     </div>
                   </div>

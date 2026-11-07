@@ -17,9 +17,17 @@ import { formatToman } from '../utils/money';
 // new formatting utility as an out-of-scope side effect of this task.
 const formatPrice = (value) => formatToman(value);
 
+// The en dash is a neutral bidi character: in an RTL paragraph "1–3" is drawn "3–1", which
+// reads as a different estimate. So the numeric range is isolated left-to-right (found by
+// the 14.3.3.1 QA pass); the unit stays outside it so it can be translated and ordered
+// naturally.
 const formatEstimate = (min, max) => {
   if (min === max) return `${min} day${min === 1 ? '' : 's'}`;
-  return `${min}–${max} days`;
+  return (
+    <>
+      <bdi dir="ltr">{min}–{max}</bdi> days
+    </>
+  );
 };
 
 /**
@@ -73,7 +81,7 @@ const ShippingOptionPicker = ({
         data-testid="shipping-options-empty"
       >
         <span>
-          <i className="bi bi-exclamation-triangle mr-2"></i>
+          <i className="bi bi-exclamation-triangle me-2"></i>
           Shipping is not currently available for this address; please contact support.
         </span>
         {onChangeAddress && (

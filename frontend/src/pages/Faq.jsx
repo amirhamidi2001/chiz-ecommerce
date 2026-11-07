@@ -75,7 +75,7 @@ const Faq = () => {
                     >
                       <button
                         onClick={() => toggleFaq(faq.id)}
-                        className="w-full flex justify-between items-center p-5 text-left font-semibold text-gray-800 hover:bg-gray-50 transition"
+                        className="w-full flex justify-between items-center p-5 text-start font-semibold text-gray-800 hover:bg-gray-50 transition"
                       >
                         <span className="text-lg">{faq.question}</span>
                         <i

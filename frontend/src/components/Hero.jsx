@@ -29,7 +29,7 @@ const Stars = ({ rating }) => {
             i < full
               ? 'bi-star-fill text-yellow-400'
               : i === full && half
-              ? 'bi-star-half text-yellow-400'
+              ? 'bi-star-half icon-directional text-yellow-400'
               : 'bi-star text-gray-300'
           }`}
         />
@@ -63,7 +63,7 @@ const Hero = () => {
       <div className="container mx-auto flex flex-col md:flex-row items-center gap-10 px-4">
 
         {/* ── Left: copy ─────────────────────────────────────────────────── */}
-        <div className="flex-1 text-center md:text-left">
+        <div className="flex-1 text-center md:text-start">
           <span className="inline-block bg-teal-100 text-teal-700 text-xs font-semibold px-3 py-1 rounded-full mb-4 uppercase tracking-wider">
             Now Live
           </span>
@@ -124,7 +124,7 @@ const Hero = () => {
           ) : featuredProduct ? (
             <div className="bg-white rounded-2xl shadow-xl p-5 relative z-10 group">
               {/* Badge */}
-              <div className="absolute top-4 right-4 bg-teal-600 text-white text-xs font-bold px-2 py-1 rounded-full z-20">
+              <div className="absolute top-4 end-4 bg-teal-600 text-white text-xs font-bold px-2 py-1 rounded-full z-20">
                 ★ Top Rated
               </div>
 
@@ -186,8 +186,8 @@ const Hero = () => {
           )}
 
           {/* Floating decorative elements */}
-          <div className="absolute -bottom-4 -left-4 w-24 h-24 bg-teal-100 rounded-full opacity-60 blur-xl pointer-events-none" />
-          <div className="absolute -top-6 -right-6 w-32 h-32 bg-pink-100 rounded-full opacity-60 blur-xl pointer-events-none" />
+          <div className="absolute -bottom-4 -start-4 w-24 h-24 bg-teal-100 rounded-full opacity-60 blur-xl pointer-events-none" />
+          <div className="absolute -top-6 -end-6 w-32 h-32 bg-pink-100 rounded-full opacity-60 blur-xl pointer-events-none" />
         </div>
       </div>
     </section>

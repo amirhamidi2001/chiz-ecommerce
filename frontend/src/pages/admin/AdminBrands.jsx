@@ -97,14 +97,14 @@ const BrandModal = ({ brand, onClose, onSaved }) => {
                   onClick={() => logoRef.current?.click()}
                   className="px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 transition"
                 >
-                  <i className="bi bi-upload mr-1.5 text-gray-500"></i>
+                  <i className="bi bi-upload me-1.5 text-gray-500"></i>
                   {logoPreview ? "Change" : "Upload Logo"}
                 </button>
                 {logoPreview && (
                   <button
                     type="button"
                     onClick={() => { setLogoFile(null); setLogoPreview(null); }}
-                    className="ml-2 text-xs text-red-500 hover:underline"
+                    className="ms-2 text-xs text-red-500 hover:underline"
                   >
                     Remove
                   </button>

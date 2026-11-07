@@ -703,6 +703,56 @@ describe('ProductDetails', () => {
     });
   });
 
+  describe('image gallery (RTL)', () => {
+    const IMAGES = ['/img/a.webp', '/img/b.webp', '/img/c.webp'].map((image) => ({ image }));
+
+    const openGallery = async () => {
+      // the gallery opens on thumbnail_url, which the API sets to the first image
+      api.getProductDetails.mockReturnValue(
+        resolveWith({ ...MOCK_PRODUCT, thumbnail_url: IMAGES[0].image, images: IMAGES }),
+      );
+      renderProductDetails();
+      const prev = await screen.findByRole('button', { name: /previous image/i });
+      const next = screen.getByRole('button', { name: /next image/i });
+      return { prev, next, user: userEvent.setup() };
+    };
+    const shown = () => screen.getByAltText(MOCK_PRODUCT.name).getAttribute('src');
+
+    it('marks both arrow icons as direction-sensitive so they mirror in RTL', async () => {
+      const { prev, next } = await openGallery();
+      expect(prev.querySelector('i')).toHaveClass('bi-chevron-left', 'icon-directional');
+      expect(next.querySelector('i')).toHaveClass('bi-chevron-right', 'icon-directional');
+    });
+
+    it('puts "previous" on the start side and "next" on the end side (logical, so they swap in RTL)', async () => {
+      const { prev, next } = await openGallery();
+      expect(prev).toHaveClass('start-3');
+      expect(next).toHaveClass('end-3');
+      expect(prev).not.toHaveClass('left-3');
+      expect(next).not.toHaveClass('right-3');
+    });
+
+    it('Next advances through the images in order and wraps; Previous steps back', async () => {
+      // The slide logic is index-based, so it is the same in LTR and RTL: "next" always
+      // means the following image, and only the arrow's POSITION and ICON change.
+      const { prev, next, user } = await openGallery();
+      expect(shown()).toBe('/img/a.webp');
+      await user.click(next);
+      expect(shown()).toBe('/img/b.webp');
+      await user.click(next);
+      expect(shown()).toBe('/img/c.webp');
+      await user.click(next);
+      expect(shown()).toBe('/img/a.webp'); // wraps to the first
+      await user.click(prev);
+      expect(shown()).toBe('/img/c.webp'); // wraps back to the last
+    });
+
+    it('keeps the "1 / 3" counter in reading order (a bidi run would render it "3 / 1")', async () => {
+      await openGallery();
+      expect(screen.getByText('1 / 3')).toHaveAttribute('dir', 'ltr');
+    });
+  });
+
   describe('store response on reviews', () => {
     const REVIEW = {
       id: 1,

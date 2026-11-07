@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { dashboardAPI } from "../services/api";
 import { formatToman } from '../utils/money';
+import { formatJalaliDate } from '../utils/jalaliDate';
 
 const CARD_ICONS = {
   card: "bi-credit-card-2-front",
@@ -96,9 +97,7 @@ const PaymentMethodsTab = () => {
                     <span>{fmt(m.total)} total</span>
                   </div>
                   <p className="text-xs text-gray-400 mt-1">
-                    Last used {new Date(m.last_used).toLocaleDateString("en-US", {
-                      year: "numeric", month: "short", day: "numeric",
-                    })}
+                    Last used {formatJalaliDate(m.last_used, "D MMMM YYYY")}
                   </p>
                 </div>
                 <span className="bg-teal-100 text-teal-700 text-xs px-2 py-1 rounded-full font-medium flex-shrink-0">
@@ -114,10 +113,10 @@ const PaymentMethodsTab = () => {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="text-left px-5 py-3 font-semibold text-gray-600">Order</th>
-                  <th className="text-left px-5 py-3 font-semibold text-gray-600 hidden sm:table-cell">Date</th>
-                  <th className="text-left px-5 py-3 font-semibold text-gray-600 hidden md:table-cell">Method</th>
-                  <th className="text-right px-5 py-3 font-semibold text-gray-600">Amount</th>
+                  <th className="text-start px-5 py-3 font-semibold text-gray-600">Order</th>
+                  <th className="text-start px-5 py-3 font-semibold text-gray-600 hidden sm:table-cell">Date</th>
+                  <th className="text-start px-5 py-3 font-semibold text-gray-600 hidden md:table-cell">Method</th>
+                  <th className="text-end px-5 py-3 font-semibold text-gray-600">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -126,11 +125,11 @@ const PaymentMethodsTab = () => {
                     <td className="px-5 py-3">
                       <span className="font-semibold text-gray-800">{order.order_number}</span>
                       {order.card_last_four && (
-                        <span className="ml-2 text-xs text-gray-400">**** {order.card_last_four}</span>
+                        <span className="ms-2 text-xs text-gray-400">**** {order.card_last_four}</span>
                       )}
                     </td>
                     <td className="px-5 py-3 text-gray-500 hidden sm:table-cell">
-                      {new Date(order.created_at).toLocaleDateString()}
+                      {formatJalaliDate(order.created_at)}
                     </td>
                     <td className="px-5 py-3 hidden md:table-cell">
                       <div className="flex items-center gap-1.5">
@@ -140,7 +139,7 @@ const PaymentMethodsTab = () => {
                         </span>
                       </div>
                     </td>
-                    <td className="px-5 py-3 text-right font-semibold text-gray-800">
+                    <td className="px-5 py-3 text-end font-semibold text-gray-800">
                       {fmt(order.total)}
                     </td>
                   </tr>

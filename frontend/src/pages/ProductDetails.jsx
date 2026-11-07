@@ -25,7 +25,7 @@ const Stars = ({ rating, size = 'text-base' }) => {
       {[...Array(5)].map((_, i) => (
         <i
           key={i}
-          className={`bi ${i < full ? 'bi-star-fill' : i === full && half ? 'bi-star-half' : 'bi-star'
+          className={`bi ${i < full ? 'bi-star-fill' : i === full && half ? 'bi-star-half icon-directional' : 'bi-star'
             }`}
         />
       ))}
@@ -42,7 +42,7 @@ const Toast = ({ message, type, onClose }) => {
 
   return (
     <div
-      className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg text-white transition-all ${type === 'success' ? 'bg-teal-600' : 'bg-red-500'
+      className={`fixed bottom-6 end-6 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-lg text-white transition-all ${type === 'success' ? 'bg-teal-600' : 'bg-red-500'
         }`}
     >
       <i
@@ -50,7 +50,7 @@ const Toast = ({ message, type, onClose }) => {
           } text-lg`}
       />
       <span className="text-sm font-medium">{message}</span>
-      <button onClick={onClose} className="ml-2 opacity-70 hover:opacity-100">
+      <button onClick={onClose} className="ms-2 opacity-70 hover:opacity-100">
         <i className="bi bi-x" />
       </button>
     </div>
@@ -70,12 +70,12 @@ const RelatedCard = ({ product }) => {
           onError={(e) => { e.target.src = '/assets/img/product/product-2.webp'; }}
         />
         {product.is_sale && (
-          <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-semibold px-2 py-0.5 rounded">
+          <span className="absolute top-2 start-2 bg-red-500 text-white text-xs font-semibold px-2 py-0.5 rounded">
             Sale
           </span>
         )}
         {product.is_new && (
-          <span className="absolute top-2 left-2 bg-teal-500 text-white text-xs font-semibold px-2 py-0.5 rounded">
+          <span className="absolute top-2 start-2 bg-teal-500 text-white text-xs font-semibold px-2 py-0.5 rounded">
             New
           </span>
         )}
@@ -318,7 +318,7 @@ const AddReviewForm = ({ productSlug, onSuccess }) => {
               </>
             ) : (
               <>
-                <i className="bi bi-send" />
+                <i className="bi bi-send icon-directional" />
                 Submit Review
               </>
             )}
@@ -662,20 +662,22 @@ const ProductDetails = () => {
                   <>
                     <button
                       onClick={handlePrev}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 rounded-full flex items-center justify-center hover:bg-white shadow-md transition"
+                      aria-label="Previous image"
+                      className="absolute start-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 rounded-full flex items-center justify-center hover:bg-white shadow-md transition"
                     >
-                      <i className="bi bi-chevron-left text-xl" />
+                      <i className="bi bi-chevron-left icon-directional text-xl" />
                     </button>
                     <button
                       onClick={handleNext}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 rounded-full flex items-center justify-center hover:bg-white shadow-md transition"
+                      aria-label="Next image"
+                      className="absolute end-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 rounded-full flex items-center justify-center hover:bg-white shadow-md transition"
                     >
-                      <i className="bi bi-chevron-right text-xl" />
+                      <i className="bi bi-chevron-right icon-directional text-xl" />
                     </button>
                   </>
                 )}
                 {allImages.length > 1 && (
-                  <div className="absolute bottom-3 right-3 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
+                  <div dir="ltr" className="absolute bottom-3 end-3 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
                     {currentIndex + 1} / {allImages.length}
                   </div>
                 )}
@@ -934,7 +936,7 @@ const ProductDetails = () => {
                   Free Shipping
                 </div>
                 <div className="bg-gray-50 p-2 rounded-lg">
-                  <i className="bi bi-arrow-return-left text-teal-600 block text-lg mb-1" />
+                  <i className="bi bi-arrow-return-left icon-directional text-teal-600 block text-lg mb-1" />
                   30-Day Returns
                 </div>
                 <div className="bg-gray-50 p-2 rounded-lg">
@@ -1065,7 +1067,7 @@ const ProductDetails = () => {
                     </div>
                     <div className="flex justify-between p-3">
                       <span className="text-gray-600">Rating</span>
-                      <span className="font-medium">{formatRating(product.rating)} / {formatRating(5)}</span>
+                      <span dir="ltr" className="font-medium">{formatRating(product.rating)} / {formatRating(5)}</span>
                     </div>
                   </div>
                 </div>
@@ -1142,7 +1144,7 @@ const ProductDetails = () => {
                             style={{ width: `${item.pct}%` }}
                           />
                         </div>
-                        <span className="text-sm text-gray-500 w-6 text-right">
+                        <span className="text-sm text-gray-500 w-6 text-end">
                           {item.count}
                         </span>
                       </div>
@@ -1186,7 +1188,7 @@ const ProductDetails = () => {
                         {review.store_response && (
                           <div
                             data-testid="store-response"
-                            className="ml-4 sm:ml-8 mb-3 rounded-lg border-l-4 border-teal-500 bg-teal-50 p-4"
+                            className="ms-4 sm:ms-8 mb-3 rounded-lg border-s-4 border-teal-500 bg-teal-50 p-4"
                           >
                             <div className="flex items-center justify-between gap-2 mb-1">
                               <span className="text-sm font-semibold text-teal-700 flex items-center gap-1">
@@ -1254,7 +1256,7 @@ const ProductDetails = () => {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-gray-800">Related Products</h2>
                 <Link to="/category" className="text-teal-600 hover:underline text-sm">
-                  View All <i className="bi bi-arrow-right" />
+                  View All <i className="bi bi-arrow-right icon-directional" />
                 </Link>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">

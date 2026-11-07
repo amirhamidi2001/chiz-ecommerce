@@ -69,7 +69,7 @@ const CategoryModal = ({ category, allCategories, onClose, onSaved }) => {
               {imgPreview && <img src={imgPreview} alt="" className="w-14 h-14 object-cover rounded-xl border" />}
               <button type="button" onClick={() => imgRef.current?.click()}
                 className="px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 transition">
-                <i className="bi bi-upload mr-1.5"></i>Upload
+                <i className="bi bi-upload me-1.5"></i>Upload
               </button>
               <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
             </div>

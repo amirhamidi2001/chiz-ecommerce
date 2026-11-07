@@ -59,9 +59,9 @@ const DataTable = ({
 
   const SortIcon = ({ col }) => {
     if (!col.sortable) return null;
-    if (sort === col.key) return <i className="bi bi-sort-up text-teal-400 ml-1 text-xs"></i>;
-    if (sort === `-${col.key}`) return <i className="bi bi-sort-down text-teal-400 ml-1 text-xs"></i>;
-    return <i className="bi bi-arrow-down-up text-gray-300 ml-1 text-xs"></i>;
+    if (sort === col.key) return <i className="bi bi-sort-up text-teal-400 ms-1 text-xs"></i>;
+    if (sort === `-${col.key}`) return <i className="bi bi-sort-down text-teal-400 ms-1 text-xs"></i>;
+    return <i className="bi bi-arrow-down-up text-gray-300 ms-1 text-xs"></i>;
   };
 
   return (
@@ -71,13 +71,13 @@ const DataTable = ({
         <div className="flex flex-wrap gap-2 items-center">
           {onSearch && (
             <div className="relative">
-              <i className="bi bi-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+              <i className="bi bi-search absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
               <input
                 type="text"
                 defaultValue={search}
                 onChange={handleSearch}
                 placeholder={searchPlaceholder}
-                className="pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-teal-500 w-56 bg-white"
+                className="ps-9 pe-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-teal-500 w-56 bg-white"
               />
             </div>
           )}
@@ -98,7 +98,7 @@ const DataTable = ({
                   <th
                     key={col.key}
                     onClick={() => col.sortable && handleSort(col.key)}
-                    className={`text-left px-5 py-3.5 font-semibold text-gray-600 whitespace-nowrap ${col.sortable ? "cursor-pointer hover:text-gray-800 select-none" : ""
+                    className={`text-start px-5 py-3.5 font-semibold text-gray-600 whitespace-nowrap ${col.sortable ? "cursor-pointer hover:text-gray-800 select-none" : ""
                       } ${col.className || ""}`}
                   >
                     {col.label}
@@ -106,7 +106,7 @@ const DataTable = ({
                   </th>
                 ))}
                 {rowActions && (
-                  <th className="text-right px-5 py-3.5 font-semibold text-gray-600">Actions</th>
+                  <th className="text-end px-5 py-3.5 font-semibold text-gray-600">Actions</th>
                 )}
               </tr>
             </thead>
@@ -121,7 +121,7 @@ const DataTable = ({
                     ))}
                     {rowActions && (
                       <td className="px-5 py-4">
-                        <div className="h-4 bg-gray-100 rounded animate-pulse w-16 ml-auto" />
+                        <div className="h-4 bg-gray-100 rounded animate-pulse w-16 ms-auto" />
                       </td>
                     )}
                   </tr>
@@ -142,7 +142,7 @@ const DataTable = ({
                       </td>
                     ))}
                     {rowActions && (
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="px-5 py-3.5 text-end">
                         <div className="flex gap-1.5 justify-end">{rowActions(row)}</div>
                       </td>
                     )}

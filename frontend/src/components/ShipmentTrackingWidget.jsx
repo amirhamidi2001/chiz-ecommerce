@@ -27,6 +27,8 @@
 // themselves — and the tracking number is always ALSO shown as plain,
 // copyable text so there's something to paste. Where no public tracking
 // site exists (SnapBox, AloPeyk), only the plain tracking number is shown.
+import { formatJalaliDate, JALALI_DATETIME_FORMAT } from '../utils/jalaliDate';
+
 const CARRIER_TRACKING_PAGES = {
   'iran post': 'https://tracking.post.ir/',
   tipax: 'https://www.tipax.ir/',
@@ -140,7 +142,7 @@ const ShipmentTrackingWidget = ({ shipment }) => {
 
       {last_tracked_at && (
         <p className="text-[11px] text-gray-400 mt-3">
-          Last updated {new Date(last_tracked_at).toLocaleString()}
+          Last updated {formatJalaliDate(last_tracked_at, JALALI_DATETIME_FORMAT)}
         </p>
       )}
     </div>

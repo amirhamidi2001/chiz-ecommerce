@@ -132,7 +132,7 @@ const ProductLists = () => {
               i < fullStars
                 ? 'bi-star-fill'
                 : i === fullStars && hasHalfStar
-                ? 'bi-star-half'
+                ? 'bi-star-half icon-directional'
                 : 'bi-star'
             }`}
           ></i>
@@ -175,11 +175,11 @@ const ProductLists = () => {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search..."
-                  className="w-full border border-gray-300 rounded-l-lg px-4 py-2 focus:outline-none focus:border-teal-500"
+                  className="w-full border border-gray-300 rounded-s-lg px-4 py-2 focus:outline-none focus:border-teal-500"
                 />
                 <button
                   type="submit"
-                  className="absolute right-0 top-0 h-full bg-teal-600 text-white px-4 rounded-r-lg hover:bg-teal-700"
+                  className="absolute end-0 top-0 h-full bg-teal-600 text-white px-4 rounded-e-lg hover:bg-teal-700"
                 >
                   <i className="bi bi-search"></i>
                 </button>
@@ -234,7 +234,7 @@ const ProductLists = () => {
                   <img
                     src={product.imageHover}
                     alt={product.name}
-                    className="absolute top-0 left-0 w-full h-64 object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                    className="absolute top-0 start-0 w-full h-64 object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                   />
                   {/* Overlay actions */}
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3">
@@ -248,7 +248,7 @@ const ProductLists = () => {
                   {/* Badge */}
                   {product.badge && (
                     <span
-                      className={`absolute top-3 left-3 text-white text-xs font-semibold px-2 py-1 rounded ${
+                      className={`absolute top-3 start-3 text-white text-xs font-semibold px-2 py-1 rounded ${
                         product.badge === 'New' ? 'bg-teal-500' : 'bg-red-500'
                       }`}
                     >
@@ -272,7 +272,7 @@ const ProductLists = () => {
                       {product.originalPrice ? (
                         <>
                           <span className="text-lg font-bold text-teal-700">{formatToman(product.price)}</span>
-                          <span className="text-sm text-gray-400 line-through ml-2">{formatToman(product.originalPrice)}</span>
+                          <span className="text-sm text-gray-400 line-through ms-2">{formatToman(product.originalPrice)}</span>
                         </>
                       ) : (
                         <span className="text-lg font-bold text-gray-800">{formatToman(product.price)}</span>
@@ -280,7 +280,7 @@ const ProductLists = () => {
                     </div>
                     <div className="flex items-center gap-1">
                       {renderStars(product.rating)}
-                      <span className="text-xs text-gray-500 ml-1">({product.reviews})</span>
+                      <span className="text-xs text-gray-500 ms-1">({product.reviews})</span>
                     </div>
                   </div>
                 </div>
@@ -293,7 +293,7 @@ const ProductLists = () => {
             <ul className="flex flex-wrap items-center gap-2">
               <li>
                 <a href="#" className="flex items-center gap-1 px-3 py-2 border rounded-md hover:bg-gray-50 transition">
-                  <i className="bi bi-arrow-left"></i>
+                  <i className="bi bi-arrow-left icon-directional"></i>
                   <span className="hidden sm:inline">Previous</span>
                 </a>
               </li>
@@ -307,7 +307,7 @@ const ProductLists = () => {
               <li>
                 <a href="#" className="flex items-center gap-1 px-3 py-2 border rounded-md hover:bg-gray-50 transition">
                   <span className="hidden sm:inline">Next</span>
-                  <i className="bi bi-arrow-right"></i>
+                  <i className="bi bi-arrow-right icon-directional"></i>
                 </a>
               </li>
             </ul>

@@ -1,5 +1,7 @@
+from core.jalali import JalaliAdminMixin, jalali_column
 from core.money import format_rial
 from django.contrib import admin
+from django.utils.translation import gettext_lazy as _
 
 from .models import Order, OrderItem
 
@@ -36,7 +38,7 @@ class OrderItemInline(admin.TabularInline):
 
 
 @admin.register(Order)
-class OrderAdmin(admin.ModelAdmin):
+class OrderAdmin(JalaliAdminMixin, admin.ModelAdmin):
     list_display = (
         "order_number",
         "user_email",
@@ -46,6 +48,7 @@ class OrderAdmin(admin.ModelAdmin):
         "order_total",
         "item_count",
         "created_at",
+        "created_at_jalali",
     )
     list_filter = ("status", "payment_method", "created_at", "shipping_country")
     search_fields = (
@@ -63,7 +66,9 @@ class OrderAdmin(admin.ModelAdmin):
         "discount",
         "total",
         "created_at",
+        "created_at_jalali",
         "updated_at",
+        "updated_at_jalali",
     )
     fieldsets = (
         (
@@ -107,7 +112,12 @@ class OrderAdmin(admin.ModelAdmin):
         (
             "Timestamps",
             {
-                "fields": ("created_at", "updated_at"),
+                "fields": (
+                    "created_at",
+                    "created_at_jalali",
+                    "updated_at",
+                    "updated_at_jalali",
+                ),
                 "classes": ("collapse",),
             },
         ),
@@ -115,6 +125,10 @@ class OrderAdmin(admin.ModelAdmin):
     inlines = [OrderItemInline]
     ordering = ("-created_at",)
     date_hierarchy = "created_at"
+
+    # Jalali (Solar Hijri) display beside the Gregorian columns — storage is unchanged.
+    created_at_jalali = jalali_column("created_at", _("Created (Jalali)"))
+    updated_at_jalali = jalali_column("updated_at", _("Updated (Jalali)"))
 
     def user_email(self, obj):
         return obj.user.email if obj.user else "—"

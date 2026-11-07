@@ -20,7 +20,7 @@ const Stars = ({ rating }) => {
             i < full
               ? 'bi-star-fill text-yellow-400'
               : i === full && half
-              ? 'bi-star-half text-yellow-400'
+              ? 'bi-star-half icon-directional text-yellow-400'
               : 'bi-star text-gray-300'
           }`}
         />
@@ -75,13 +75,13 @@ export const ProductCard = ({ product }) => {
           onError={(e) => { e.target.src = '/assets/img/product/product-2.webp'; }}
         />
         {badge && (
-          <span className={`absolute top-4 left-4 text-xs font-semibold px-2 py-1 rounded ${badgeClass}`}>
+          <span dir={badge.startsWith('-') ? 'ltr' : undefined} className={`absolute top-4 start-4 text-xs font-semibold px-2 py-1 rounded ${badgeClass}`}>
             {badge}
           </span>
         )}
 
         {/* Hover actions */}
-        <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0">
+        <div className="absolute top-4 end-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 rtl:-translate-x-4 group-hover:translate-x-0">
           <button className="bg-white p-2 rounded-full shadow hover:bg-teal-50 hover:text-teal-700 transition" title="Wishlist">
             <i className="bi bi-heart" />
           </button>
@@ -93,7 +93,7 @@ export const ProductCard = ({ product }) => {
         {/* Quick-select CTA */}
         <Link
           to={`/product/${product.slug}`}
-          className="absolute bottom-4 left-4 right-4 bg-white text-gray-800 py-2 rounded-lg text-center text-sm font-medium opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-2 group-hover:translate-y-0 hover:bg-teal-700 hover:text-white"
+          className="absolute bottom-4 start-4 end-4 bg-white text-gray-800 py-2 rounded-lg text-center text-sm font-medium opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-2 group-hover:translate-y-0 hover:bg-teal-700 hover:text-white"
         >
           Select Options
         </Link>
@@ -123,7 +123,7 @@ export const ProductCard = ({ product }) => {
                 {formatToman(product.price)}
               </span>
               {product.original_price && (
-                <span className="text-sm text-gray-400 line-through ml-2">
+                <span className="text-sm text-gray-400 line-through ms-2">
                   {formatToman(product.original_price)}
                 </span>
               )}
@@ -201,7 +201,7 @@ const BestSellers = () => {
               to="/category"
               className="inline-flex items-center gap-2 border border-gray-300 px-7 py-3 rounded-full font-medium hover:bg-gray-50 hover:border-teal-600 hover:text-teal-700 transition-all duration-200"
             >
-              View All Products <i className="bi bi-arrow-right" />
+              View All Products <i className="bi bi-arrow-right icon-directional" />
             </Link>
           </div>
         )}

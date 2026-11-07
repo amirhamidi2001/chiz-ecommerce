@@ -39,14 +39,14 @@ const Toast = ({ toast, onDismiss, duration = 3500 }) => {
 
   return (
     <div
-      className={`fixed top-6 right-6 z-[9999] flex items-center gap-2.5 px-5 py-3 rounded-xl shadow-xl text-sm font-medium text-white transition-all duration-300 ${STYLES[toast.type] || STYLES.success
+      className={`fixed top-6 end-6 z-[9999] flex items-center gap-2.5 px-5 py-3 rounded-xl shadow-xl text-sm font-medium text-white transition-all duration-300 ${STYLES[toast.type] || STYLES.success
         } ${visible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"}`}
     >
       <i className={`bi ${ICONS[toast.type] || ICONS.success} text-base`}></i>
       <span>{toast.msg}</span>
       <button
         onClick={() => { setVisible(false); setTimeout(() => onDismiss?.(), 300); }}
-        className="ml-2 opacity-70 hover:opacity-100 transition"
+        className="ms-2 opacity-70 hover:opacity-100 transition"
       >
         <i className="bi bi-x text-lg leading-none"></i>
       </button>

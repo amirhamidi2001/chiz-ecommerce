@@ -154,7 +154,7 @@ const ShippingInfo = () => {
                 <div key={faq.id} className="border border-gray-200 rounded-xl overflow-hidden">
                   <button
                     onClick={() => toggleFaq(faq.id)}
-                    className="w-full flex justify-between items-center p-5 text-left font-semibold text-gray-800 hover:bg-gray-50 transition"
+                    className="w-full flex justify-between items-center p-5 text-start font-semibold text-gray-800 hover:bg-gray-50 transition"
                   >
                     <div className="flex items-center gap-3">
                       <i className="bi bi-question-circle text-teal-600"></i>

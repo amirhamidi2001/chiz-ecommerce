@@ -40,7 +40,7 @@ const PwToggle = ({ show, onToggle }) => (
   <button
     type="button"
     onClick={onToggle}
-    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-teal-600 transition"
+    className="absolute end-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-teal-600 transition"
     aria-label="Toggle password visibility"
   >
     <i className={`bi ${show ? 'bi-eye-slash' : 'bi-eye'}`} />
@@ -159,7 +159,7 @@ const OTPCodeStep = ({ phoneNumber, onSubmitCode, onVerified, onBack }) => {
 
       <form onSubmit={handleVerify} noValidate>
         <div className="relative mb-4">
-          <i className="bi bi-shield-lock absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <i className="bi bi-shield-lock absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
             type="text"
             inputMode="numeric"
@@ -170,7 +170,7 @@ const OTPCodeStep = ({ phoneNumber, onSubmitCode, onVerified, onBack }) => {
               setCode(e.target.value.replace(/\D/g, '').slice(0, 6));
               if (codeError) setCodeError('');
             }}
-            className={`w-full border rounded-lg pl-10 pr-3 py-3 text-center text-lg tracking-[0.5em] focus:outline-none focus:border-teal-500 transition ${codeError ? 'border-red-400' : 'border-gray-300'}`}
+            className={`w-full border rounded-lg ps-10 pe-3 py-3 text-center text-lg tracking-[0.5em] focus:outline-none focus:border-teal-500 transition ${codeError ? 'border-red-400' : 'border-gray-300'}`}
             placeholder="••••••"
             required
           />
@@ -184,7 +184,7 @@ const OTPCodeStep = ({ phoneNumber, onSubmitCode, onVerified, onBack }) => {
         >
           {verifying
             ? <><Spinner /> Verifying…</>
-            : <>Verify <i className="bi bi-arrow-right" /></>}
+            : <>Verify <i className="bi bi-arrow-right icon-directional" /></>}
         </button>
 
         <div className="text-center mt-6 text-sm">
@@ -206,7 +206,7 @@ const OTPCodeStep = ({ phoneNumber, onSubmitCode, onVerified, onBack }) => {
 
         <div className="text-center mt-3 text-sm">
           <button type="button" onClick={onBack} className="text-gray-500 hover:underline">
-            <i className="bi bi-arrow-left me-1" /> Use a different number
+            <i className="bi bi-arrow-left icon-directional me-1" /> Use a different number
           </button>
         </div>
       </form>
@@ -393,12 +393,12 @@ const Login = () => {
                   <form onSubmit={handleLogin} noValidate>
                     {/* Email */}
                     <div className="relative mb-4">
-                      <i className="bi bi-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <i className="bi bi-envelope absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                       <input
                         type="email"
                         value={loginData.email}
                         onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
-                        className={`w-full border rounded-lg pl-10 pr-3 py-3 focus:outline-none focus:border-teal-500 transition ${loginErrors.email ? 'border-red-400' : 'border-gray-300'}`}
+                        className={`w-full border rounded-lg ps-10 pe-3 py-3 focus:outline-none focus:border-teal-500 transition ${loginErrors.email ? 'border-red-400' : 'border-gray-300'}`}
                         placeholder="Email address"
                         autoComplete="email"
                         required
@@ -408,12 +408,12 @@ const Login = () => {
 
                     {/* Password */}
                     <div className="relative mb-4">
-                      <i className="bi bi-lock absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <i className="bi bi-lock absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                       <input
                         type={showLoginPw ? 'text' : 'password'}
                         value={loginData.password}
                         onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg pl-10 pr-10 py-3 focus:outline-none focus:border-teal-500 transition"
+                        className="w-full border border-gray-300 rounded-lg ps-10 pe-10 py-3 focus:outline-none focus:border-teal-500 transition"
                         placeholder="Password"
                         autoComplete="current-password"
                         required
@@ -443,7 +443,7 @@ const Login = () => {
                     >
                       {loginLoading
                         ? <><Spinner /> Signing in…</>
-                        : <>Sign In <i className="bi bi-arrow-right" /></>}
+                        : <>Sign In <i className="bi bi-arrow-right icon-directional" /></>}
                     </button>
 
                     <div className="relative my-6">
@@ -467,7 +467,7 @@ const Login = () => {
                     <div className="text-center mt-6 text-sm">
                       <span className="text-gray-500">Don't have an account?</span>
                       <button type="button" onClick={() => setActiveForm('register')}
-                        className="ml-2 text-teal-600 font-medium hover:underline">
+                        className="ms-2 text-teal-600 font-medium hover:underline">
                         Create account
                       </button>
                     </div>
@@ -493,12 +493,12 @@ const Login = () => {
                         { field: 'lastName', label: 'Last name', errorKey: 'last_name', auto: 'family-name' },
                       ].map(({ field, label, errorKey, auto }) => (
                         <div key={field} className="relative flex-1">
-                          <i className="bi bi-person absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                          <i className="bi bi-person absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                           <input
                             type="text"
                             value={regData[field]}
                             onChange={(e) => setRegData({ ...regData, [field]: e.target.value })}
-                            className={`w-full border rounded-lg pl-10 pr-3 py-3 focus:outline-none focus:border-teal-500 transition ${regErrors[errorKey] ? 'border-red-400' : 'border-gray-300'}`}
+                            className={`w-full border rounded-lg ps-10 pe-3 py-3 focus:outline-none focus:border-teal-500 transition ${regErrors[errorKey] ? 'border-red-400' : 'border-gray-300'}`}
                             placeholder={label}
                             autoComplete={auto}
                             required
@@ -510,12 +510,12 @@ const Login = () => {
 
                     {/* Email */}
                     <div className="relative mb-4">
-                      <i className="bi bi-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <i className="bi bi-envelope absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                       <input
                         type="email"
                         value={regData.email}
                         onChange={(e) => setRegData({ ...regData, email: e.target.value })}
-                        className={`w-full border rounded-lg pl-10 pr-3 py-3 focus:outline-none focus:border-teal-500 transition ${regErrors.email ? 'border-red-400' : 'border-gray-300'}`}
+                        className={`w-full border rounded-lg ps-10 pe-3 py-3 focus:outline-none focus:border-teal-500 transition ${regErrors.email ? 'border-red-400' : 'border-gray-300'}`}
                         placeholder="Email address"
                         autoComplete="email"
                         required
@@ -525,12 +525,12 @@ const Login = () => {
 
                     {/* Password */}
                     <div className="relative mb-4">
-                      <i className="bi bi-lock absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <i className="bi bi-lock absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                       <input
                         type={showRegPw ? 'text' : 'password'}
                         value={regData.password}
                         onChange={(e) => setRegData({ ...regData, password: e.target.value })}
-                        className={`w-full border rounded-lg pl-10 pr-10 py-3 focus:outline-none focus:border-teal-500 transition ${regErrors.password ? 'border-red-400' : 'border-gray-300'}`}
+                        className={`w-full border rounded-lg ps-10 pe-10 py-3 focus:outline-none focus:border-teal-500 transition ${regErrors.password ? 'border-red-400' : 'border-gray-300'}`}
                         placeholder="Create password"
                         autoComplete="new-password"
                         required
@@ -541,12 +541,12 @@ const Login = () => {
 
                     {/* Confirm Password */}
                     <div className="relative mb-4">
-                      <i className="bi bi-lock-fill absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <i className="bi bi-lock-fill absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                       <input
                         type={showRegConf ? 'text' : 'password'}
                         value={regData.confirmPassword}
                         onChange={(e) => setRegData({ ...regData, confirmPassword: e.target.value })}
-                        className={`w-full border rounded-lg pl-10 pr-10 py-3 focus:outline-none focus:border-teal-500 transition ${regErrors.confirmPassword ? 'border-red-400' : 'border-gray-300'}`}
+                        className={`w-full border rounded-lg ps-10 pe-10 py-3 focus:outline-none focus:border-teal-500 transition ${regErrors.confirmPassword ? 'border-red-400' : 'border-gray-300'}`}
                         placeholder="Confirm password"
                         autoComplete="new-password"
                         required
@@ -582,7 +582,7 @@ const Login = () => {
                     >
                       {regLoading
                         ? <><Spinner /> Creating account…</>
-                        : <>Create Account <i className="bi bi-arrow-right" /></>}
+                        : <>Create Account <i className="bi bi-arrow-right icon-directional" /></>}
                     </button>
 
                     <div className="relative my-6">
@@ -598,7 +598,7 @@ const Login = () => {
                     <div className="text-center mt-6 text-sm">
                       <span className="text-gray-500">Already have an account?</span>
                       <button type="button" onClick={() => setActiveForm('login')}
-                        className="ml-2 text-teal-600 font-medium hover:underline">
+                        className="ms-2 text-teal-600 font-medium hover:underline">
                         Sign in
                       </button>
                     </div>
@@ -622,13 +622,13 @@ const Login = () => {
 
                       <form onSubmit={handlePhoneSubmit} noValidate>
                         <div className="relative mb-4">
-                          <i className="bi bi-phone absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                          <i className="bi bi-phone absolute start-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                           <input
                             type="tel"
                             inputMode="numeric"
                             value={phone}
                             onChange={(e) => setPhone(e.target.value.trim())}
-                            className={`w-full border rounded-lg pl-10 pr-3 py-3 focus:outline-none focus:border-teal-500 transition ${phoneErrors.phone_number ? 'border-red-400' : 'border-gray-300'}`}
+                            className={`w-full border rounded-lg ps-10 pe-3 py-3 focus:outline-none focus:border-teal-500 transition ${phoneErrors.phone_number ? 'border-red-400' : 'border-gray-300'}`}
                             placeholder="09123456789"
                             autoComplete="tel"
                             required
@@ -643,13 +643,13 @@ const Login = () => {
                         >
                           {phoneLoading
                             ? <><Spinner /> Sending code…</>
-                            : <>Send Code <i className="bi bi-arrow-right" /></>}
+                            : <>Send Code <i className="bi bi-arrow-right icon-directional" /></>}
                         </button>
 
                         <div className="text-center mt-6 text-sm">
                           <button type="button" onClick={() => setActiveForm('login')}
                             className="text-teal-600 font-medium hover:underline">
-                            <i className="bi bi-arrow-left me-1" /> Back to email login
+                            <i className="bi bi-arrow-left icon-directional me-1" /> Back to email login
                           </button>
                         </div>
                       </form>

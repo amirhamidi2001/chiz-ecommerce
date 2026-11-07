@@ -1,7 +1,21 @@
 <!doctype html>
-<html lang="en">
+<!--
+  Task 14.3.1.1: the document is Persian / right-to-left. lang="fa" also selects
+  Persian-appropriate fonts, hyphenation and screen-reader pronunciation.
+
+  KNOWN LIMITATION: this is hardcoded, so it cannot follow a language switch. English
+  is still in the backend's LANGUAGES (Task 14.1.1.1), but the target market is
+  Iran/Persian only and toggling is out of scope. If a bilingual site is ever needed,
+  set document.documentElement.lang / .dir from JavaScript based on the active
+  language instead of fixing them here.
+-->
+<html lang="fa" dir="rtl">
   <head>
     <meta charset="UTF-8" />
+    <!-- Fonts needed on every page, fetched in parallel with the CSS (crossorigin is required
+         for font preloads, even same-origin). Latin-extended is deliberately not preloaded. -->
+    <link rel="preload" href="/fonts/vazirmatn-arabic-wght.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/vazirmatn-latin-wght.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

@@ -213,7 +213,7 @@ const Blog = () => {
         <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center">
           <h1 className="text-3xl font-bold text-gray-800 mb-2 md:mb-0">Blog</h1>
           <nav className="text-sm">
-            <ol className="flex space-x-2">
+            <ol className="flex space-x-2 rtl:space-x-reverse">
               <li>
                 <Link to="/" className="text-gray-500 hover:text-teal-600">
                   Home
@@ -244,7 +244,7 @@ const Blog = () => {
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent flex items-end p-6">
                     <div className="text-white">
-                      <div className="flex items-center space-x-2 text-sm mb-2">
+                      <div className="flex items-center space-x-2 rtl:space-x-reverse text-sm mb-2">
                         {heroPost.category && (
                           <CategoryBadge name={heroPost.category.name} />
                         )}
@@ -290,7 +290,7 @@ const Blog = () => {
                         className="w-full h-48 object-cover"
                       />
                       <div className="p-4">
-                        <div className="flex items-center space-x-2 text-sm text-gray-500 mb-2">
+                        <div className="flex items-center space-x-2 rtl:space-x-reverse text-sm text-gray-500 mb-2">
                           {post.category && (
                             <span className="text-teal-600 font-semibold">
                               {post.category.name}
@@ -453,7 +453,7 @@ const Blog = () => {
                   ? categories.find((c) => c.slug === activeCategory)?.name || "Posts"
                   : "All Posts"}
               {pagination.count > 0 && (
-                <span className="ml-2 text-base font-normal text-gray-400">
+                <span className="ms-2 text-base font-normal text-gray-400">
                   ({pagination.count})
                 </span>
               )}
@@ -477,7 +477,7 @@ const Blog = () => {
               {error}
               <button
                 onClick={fetchGridPosts}
-                className="ml-3 underline hover:no-underline"
+                className="ms-3 underline hover:no-underline"
               >
                 Retry
               </button>
@@ -581,7 +581,7 @@ const Blog = () => {
                 disabled={currentPage === 1}
                 className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                <i className="bi bi-chevron-left" />
+                <i className="bi bi-chevron-left icon-directional" />
               </button>
 
               {[...Array(pagination.total_pages)].map((_, i) => {
@@ -633,7 +633,7 @@ const Blog = () => {
                 disabled={currentPage === pagination.total_pages}
                 className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                <i className="bi bi-chevron-right" />
+                <i className="bi bi-chevron-right icon-directional" />
               </button>
             </div>
           )}

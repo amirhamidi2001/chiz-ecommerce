@@ -57,7 +57,7 @@ const SaleCard = ({ product }) => {
           onError={(e) => { e.target.src = '/assets/img/product/product-5.webp'; }}
         />
         {product.discount_percent > 0 && (
-          <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded">
+          <span dir="ltr" className="absolute top-2 start-2 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded">
             -{product.discount_percent}%
           </span>
         )}
@@ -79,10 +79,10 @@ const SaleCard = ({ product }) => {
         {[...Array(5)].map((_, i) => (
           <i
             key={i}
-            className={`bi ${i < full ? 'bi-star-fill' : i === full && half ? 'bi-star-half' : 'bi-star'}`}
+            className={`bi ${i < full ? 'bi-star-fill' : i === full && half ? 'bi-star-half icon-directional' : 'bi-star'}`}
           />
         ))}
-        <span className="text-gray-400 ml-1">({formatReviewCount(product.reviews_count)})</span>
+        <span className="text-gray-400 ms-1">({formatReviewCount(product.reviews_count)})</span>
       </div>
     </Link>
   );

@@ -439,7 +439,7 @@ describe('AdminChat', () => {
       await user.click(roomBtn);
 
       await waitFor(() =>
-        expect(roomBtn.className).toMatch(/border-l-teal-600/)
+        expect(roomBtn.className).toMatch(/border-s-teal-600/)
       );
     });
 
@@ -455,7 +455,7 @@ describe('AdminChat', () => {
       await user.click(screen.getByRole('button', { name: /alice/i }));
 
       const bobBtn = screen.getByRole('button', { name: /bob/i });
-      expect(bobBtn.className).not.toMatch(/border-l-teal-600/);
+      expect(bobBtn.className).not.toMatch(/border-s-teal-600/);
     });
   });
 

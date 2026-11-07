@@ -147,7 +147,7 @@ const About = () => {
               target="_blank"
               rel="noopener noreferrer"
             >
-              <i className="bi bi-play-fill text-white text-3xl ml-1"></i>
+              <i className="bi bi-play-fill text-white text-3xl ms-1"></i>
             </a>
           </div>
         </div>
