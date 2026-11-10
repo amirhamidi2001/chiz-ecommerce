@@ -14,3 +14,4 @@ everything affected, so the implementing task does not rediscover scope mid-flig
 | # | Title | Status |
 |---|-------|--------|
 | [0001](0001-currency-storage.md) | Currency storage: whole-Toman amounts held as integer Rial | Accepted |
+| [0002](0002-slug-strategy.md) | Slug strategy: Latin-script slugs for Persian-named catalog and blog content | Proposed |

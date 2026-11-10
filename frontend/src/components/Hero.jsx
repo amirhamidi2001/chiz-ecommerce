@@ -59,7 +59,7 @@ const Hero = () => {
     : null;
 
   return (
-    <section className="bg-gradient-to-r from-emerald-50 to-white py-20 overflow-hidden">
+    <section className="bg-gradient-to-r rtl:bg-gradient-to-l from-emerald-50 to-white py-20 overflow-hidden">
       <div className="container mx-auto flex flex-col md:flex-row items-center gap-10 px-4">
 
         {/* ── Left: copy ─────────────────────────────────────────────────── */}

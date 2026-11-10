@@ -46,7 +46,7 @@ const SmallCategoryCard = ({ category, productCount, imgSrc, theme }) => (
         onError={(e) => { e.target.src = '/assets/img/product/product-1.webp'; }}
       />
       {/* gradient overlay for legibility */}
-      <div className="absolute inset-0 bg-gradient-to-l from-transparent to-white/30" />
+      <div className="absolute inset-0 bg-gradient-to-l rtl:bg-gradient-to-r from-transparent to-white/30" />
     </div>
     <div className="relative p-6 w-1/2 h-full flex flex-col justify-center z-10">
       <h4 className="text-xl font-bold text-gray-900 leading-snug line-clamp-2">
@@ -161,7 +161,7 @@ const PromoCards = () => {
                   className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
                   onError={(e) => { e.target.src = FALLBACK_IMAGES[0]; }}
                 />
-                <div className="absolute inset-0 bg-gradient-to-l from-transparent to-teal-50/60" />
+                <div className="absolute inset-0 bg-gradient-to-l rtl:bg-gradient-to-r from-transparent to-teal-50/60" />
               </div>
 
               {/* Left-side text */}

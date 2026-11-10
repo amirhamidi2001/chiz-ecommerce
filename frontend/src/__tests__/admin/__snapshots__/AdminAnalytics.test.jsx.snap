@@ -268,7 +268,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
       </div>
     </div>
     <div
-      class="grid lg:grid-cols-2 gap-6"
+      class="grid lg:grid-cols-2 gap-6 [&>*]:min-w-0"
     >
       <div
         class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm"
@@ -547,7 +547,7 @@ exports[`AdminAnalytics > Snapshot > matches snapshot after successful data load
       </div>
     </div>
     <div
-      class="grid lg:grid-cols-2 gap-6"
+      class="grid lg:grid-cols-2 gap-6 [&>*]:min-w-0"
     >
       <div
         class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm"

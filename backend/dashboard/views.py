@@ -379,6 +379,7 @@ class UserOrderViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return (
             Order.objects.filter(user=self.request.user)
+            .select_related("shipment")
             .prefetch_related("items")
             .order_by("-created_at")
         )

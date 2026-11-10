@@ -7,7 +7,9 @@ from .models import Category, Comment, Post
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
     list_display = ["name", "slug"]
-    prepopulated_fields = {"slug": ("name",)}
+    # No prepopulated slug: the admin JS strips every non-ASCII character, so a
+    # Persian name would pre-fill "" or a lossy "c". Left blank, save() builds the
+    # slug with persian_slugify (ADR 0002).
     search_fields = ["name"]
 
 
@@ -35,7 +37,9 @@ class PostAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "is_featured", "category", "created_at"]
     search_fields = ["title", "excerpt", "content"]
-    prepopulated_fields = {"slug": ("title",)}
+    # No prepopulated slug: the admin JS strips every non-ASCII character, so a
+    # Persian name would pre-fill "" or a lossy "c". Left blank, save() builds the
+    # slug with persian_slugify (ADR 0002).
     readonly_fields = [
         "views_count",
         "read_time",

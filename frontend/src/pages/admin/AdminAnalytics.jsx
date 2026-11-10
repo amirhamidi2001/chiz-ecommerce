@@ -219,7 +219,7 @@ const AdminAnalytics = () => {
       </div>
 
       {/* Orders + Users side by side */}
-      <div className="grid lg:grid-cols-2 gap-6">
+      <div className="grid lg:grid-cols-2 gap-6 [&>*]:min-w-0">
         {/* Orders chart */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
           <h3 className="font-bold text-gray-800 mb-5">Monthly Order Volume</h3>
@@ -279,7 +279,7 @@ const AdminAnalytics = () => {
       </div>
 
       {/* Product stats + top sellers */}
-      <div className="grid lg:grid-cols-2 gap-6">
+      <div className="grid lg:grid-cols-2 gap-6 [&>*]:min-w-0">
         {/* Product breakdown */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
           <h3 className="font-bold text-gray-800 mb-4">Product Inventory</h3>

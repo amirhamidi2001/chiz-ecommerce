@@ -52,7 +52,7 @@ const Header = () => {
           <div className="flex items-center gap-2">
             <i className="bi bi-telephone-fill text-emerald-600" />
             <span className="text-emerald-600">Need help? Call us:</span>
-            <a href="tel:+1234567890" className="text-teal-700 hover:underline">+1 (234) 567-890</a>
+            <a href="tel:+1234567890" dir="ltr" className="text-teal-700 hover:underline">+1 (234) 567-890</a>
           </div>
 
           <div className="flex gap-6">

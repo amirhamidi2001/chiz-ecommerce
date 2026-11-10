@@ -60,7 +60,7 @@ const Footer = () => {
               </li>
               <li className="flex gap-3">
                 <i className="bi bi-telephone text-teal-400"></i>
-                <span>+1 (555) 123-4567</span>
+                <span dir="ltr">+1 (555) 123-4567</span>
               </li>
               <li className="flex gap-3">
                 <i className="bi bi-envelope text-teal-400"></i>

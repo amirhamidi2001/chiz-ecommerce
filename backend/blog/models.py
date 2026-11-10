@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
-from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
+from shop.text_utils import persian_slugify, slug_base_length, unique_slug
 
 
 class Category(models.Model):
@@ -14,7 +14,12 @@ class Category(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)
+            self.slug = unique_slug(
+                Category,
+                persian_slugify(self.name, max_length=slug_base_length(Category))
+                or "category",
+                pk=self.pk,
+            )
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -66,7 +71,12 @@ class Post(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.title)
+            self.slug = unique_slug(
+                Post,
+                persian_slugify(self.title, max_length=slug_base_length(Post))
+                or "post",
+                pk=self.pk,
+            )
         # Auto-calculate read time based on content word count (~200 wpm)
         word_count = len(self.content.split())
         self.read_time = max(1, round(word_count / 200))

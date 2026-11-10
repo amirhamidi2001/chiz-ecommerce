@@ -67,7 +67,7 @@ const Support = () => {
               <i className="bi bi-telephone text-4xl text-teal-600 mb-3 block"></i>
               <h4 className="text-xl font-bold mb-2">Call Us</h4>
               <p className="text-gray-500 mb-4">24/7 support line</p>
-              <a href="tel:+15551234567" className="inline-block bg-teal-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-teal-700 transition">+1 (555) 123-4567</a>
+              <a href="tel:+15551234567" dir="ltr" className="inline-block bg-teal-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-teal-700 transition">+1 (555) 123-4567</a>
             </div>
             {/* Email Support */}
             <div className="bg-white border border-gray-100 rounded-2xl p-6 text-center shadow-sm hover:shadow-md transition group">

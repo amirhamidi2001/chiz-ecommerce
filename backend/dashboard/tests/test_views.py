@@ -303,6 +303,37 @@ class TestUserOrderViewSet:
         assert res.status_code == status.HTTP_200_OK
         assert res.data["order_number"] == order.order_number
 
+    def test_detail_includes_shipment_for_shipped_order(
+        self, customer_client, customer, make_order
+    ):
+        """Task 14.3.3.1: the account order modal reads this endpoint, so the Task 7.2.2.3
+        tracking widget needs `shipment` here (it used to be missing -> always 'Not yet
+        shipped')."""
+        from shipping.models import Shipment, ShippingCarrier
+
+        order = make_order(user=customer, status="shipped")
+        carrier, _ = ShippingCarrier.objects.get_or_create(
+            code="post", defaults={"display_name": "Iran Post", "is_active": True}
+        )
+        Shipment.objects.create(
+            order=order,
+            carrier=carrier,
+            tracking_number="RR1234567IR",
+            status=Shipment.Status.IN_TRANSIT,
+        )
+        res = customer_client.get(order_detail(order.pk))
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["shipment"]["tracking_number"] == "RR1234567IR"
+        assert res.data["shipment"]["status"] == "in_transit"
+
+    def test_detail_shipment_is_null_without_shipment(
+        self, customer_client, customer, make_order
+    ):
+        order = make_order(user=customer)
+        res = customer_client.get(order_detail(order.pk))
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["shipment"] is None
+
     def test_cannot_retrieve_another_users_order(
         self, customer_client, make_order, make_user
     ):

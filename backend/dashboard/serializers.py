@@ -11,6 +11,7 @@ from order.models import Order, OrderItem
 from order.services.state_machine import is_valid_transition
 from promotions.models import Coupon
 from rest_framework import serializers
+from shipping.serializers import ShipmentSerializer
 from shop.models import Brand, Category, Product, Review, StockMovement
 
 from .models import Address, Wishlist
@@ -266,6 +267,15 @@ class UserOrderListSerializer(serializers.ModelSerializer):
 
 class UserOrderDetailSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
+    # Task 14.3.3.1 (QA): the account "order details" modal reads THIS serializer, not
+    # order.serializers.OrderDetailSerializer, so without this field the Task 7.2.2.3
+    # tracking widget always rendered "Not yet shipped", even for in-transit orders.
+    shipment = serializers.SerializerMethodField()
+
+    def get_shipment(self, obj):
+        # getattr with a default: most orders have no Shipment (reverse OneToOne raises).
+        shipment = getattr(obj, "shipment", None)
+        return ShipmentSerializer(shipment).data if shipment is not None else None
 
     class Meta:
         model = Order
@@ -295,6 +305,7 @@ class UserOrderDetailSerializer(serializers.ModelSerializer):
             "total",
             "notes",
             "items",
+            "shipment",
         ]
 
 

@@ -10,11 +10,15 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator
 from django.db import models, transaction
 from django.utils import timezone
-from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
 from .search import SEARCH_VECTOR_SOURCE_FIELDS, refresh_product_search_vectors
-from .text_utils import normalize_persian_text
+from .text_utils import (
+    normalize_persian_text,
+    persian_slugify,
+    slug_base_length,
+    unique_slug,
+)
 from .validators import validate_ean13
 
 
@@ -52,10 +56,18 @@ class Category(models.Model):
 
     def save(self, *args, **kwargs):
         # Names feed Product.search_vector, so they are canonicalised like
-        # product text (see shop/text_utils.py).
+        # product text (see shop/text_utils.py). The slug is derived from the RAW
+        # name: normalisation strips ZWNJ, which persian_slugify needs as a word
+        # boundary.
+        raw_name = self.name
         self.name = normalize_persian_text(self.name)
         if not self.slug:
-            self.slug = slugify(self.name)
+            self.slug = unique_slug(
+                Category,
+                persian_slugify(raw_name, max_length=slug_base_length(Category))
+                or "category",
+                pk=self.pk,
+            )
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -72,10 +84,18 @@ class Brand(models.Model):
 
     def save(self, *args, **kwargs):
         # Names feed Product.search_vector, so they are canonicalised like
-        # product text (see shop/text_utils.py).
+        # product text (see shop/text_utils.py). The slug is derived from the RAW
+        # name: normalisation strips ZWNJ, which persian_slugify needs as a word
+        # boundary.
+        raw_name = self.name
         self.name = normalize_persian_text(self.name)
         if not self.slug:
-            self.slug = slugify(self.name)
+            self.slug = unique_slug(
+                Brand,
+                persian_slugify(raw_name, max_length=slug_base_length(Brand))
+                or "brand",
+                pk=self.pk,
+            )
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -276,13 +296,18 @@ class Product(models.Model):
 
     def save(self, *args, **kwargs):
         # Canonicalise Persian/Arabic character variants and strip zero-width
-        # characters BEFORE slug generation and the search_vector refresh, so
-        # stored text and normalised search queries always agree.
+        # characters BEFORE the search_vector refresh, so stored text and
+        # normalised search queries always agree.
+        # Slug input: keep the RAW name, ZWNJ is a word boundary (stripped below).
+        raw_name = self.name
         self.name = normalize_persian_text(self.name)
         self.short_description = normalize_persian_text(self.short_description)
         self.description = normalize_persian_text(self.description)
         if not self.slug:
-            base_slug = slugify(self.name)
+            base_slug = (
+                persian_slugify(raw_name, max_length=slug_base_length(Product))
+                or "product"
+            )
             slug = base_slug
             counter = 1
             while Product.objects.filter(slug=slug).exclude(pk=self.pk).exists():

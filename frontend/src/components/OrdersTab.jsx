@@ -297,9 +297,11 @@ const OrdersTab = () => {
               </div>
 
               {/* Product thumbnails */}
-              {order.preview_images?.length > 0 && (
+              {/* Task 14.3.3.1: skip blank snapshots - <img src=""> draws an empty bordered box and
+                  makes React warn ("empty string passed to the src attribute"). */}
+              {order.preview_images?.some(Boolean) && (
                 <div className="flex gap-2 mt-3">
-                  {order.preview_images.map((img, idx) => (
+                  {order.preview_images.filter(Boolean).map((img, idx) => (
                     <img
                       key={idx}
                       src={img}

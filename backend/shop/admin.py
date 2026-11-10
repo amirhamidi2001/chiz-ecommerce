@@ -25,7 +25,9 @@ class CategoryAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "slug", "parent", "created_at")
     list_filter = ("parent",)
     search_fields = ("name", "slug")
-    prepopulated_fields = {"slug": ("name",)}
+    # No prepopulated slug: the admin JS strips every non-ASCII character, so a
+    # Persian name would pre-fill "" or a lossy "c". Left blank, save() builds the
+    # slug with persian_slugify (ADR 0002).
     ordering = ("name",)
 
 
@@ -33,7 +35,9 @@ class CategoryAdmin(admin.ModelAdmin):
 class BrandAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "slug")
     search_fields = ("name", "slug")
-    prepopulated_fields = {"slug": ("name",)}
+    # No prepopulated slug: the admin JS strips every non-ASCII character, so a
+    # Persian name would pre-fill "" or a lossy "c". Left blank, save() builds the
+    # slug with persian_slugify (ADR 0002).
     ordering = ("name",)
 
 
@@ -117,7 +121,9 @@ class ProductAdmin(admin.ModelAdmin):
         "country_of_origin",
         "irc_regulatory_code",
     )
-    prepopulated_fields = {"slug": ("name",)}
+    # No prepopulated slug: the admin JS strips every non-ASCII character, so a
+    # Persian name would pre-fill "" or a lossy "c". Left blank, save() builds the
+    # slug with persian_slugify (ADR 0002).
     ordering = ("-created_at",)
     inlines = [ProductImageInline, ProductColorInline, ProductVariantInline]
     readonly_fields = ("created_at",)

@@ -32,6 +32,25 @@
 
 
 /*
+ * Task 14.3.3.1 (RTL QA) - LTR-content text inputs.
+ *
+ * Email and URL addresses are Latin text, but the input inherits dir="rtl", so the bidi
+ * algorithm drags the neutral characters at the end to the wrong side: a typed
+ * "ali.reza@example.com." is DRAWN ".ali.reza@example.com". `unicode-bidi: plaintext`
+ * lays each value out by its own first strong character (Latin -> LTR, so the address
+ * reads correctly; an empty field with a Persian placeholder stays RTL) while leaving the
+ * element's `direction` alone, so logical padding (ps-/pe-) and icon placement keep working.
+ * (`dir="ltr"` on the input was rejected: it flips ps-/pe-, so the text would run under
+ * the field's icon.) type=tel is already forced to LTR by Chromium's stylesheet.
+ */
+@layer base {
+  input[type="email"],
+  input[type="url"] {
+    unicode-bidi: plaintext;
+  }
+}
+
+/*
  * Task 14.3.2.1 - Vazirmatn, the site's Persian typeface (self-hosted, SIL OFL 1.1).
  *
  * One variable font (weight axis) split by script, so a browser downloads only the pieces a
