@@ -20,7 +20,12 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css">
-    <title>Chiz E-Commerce</title>
+    <!-- Pre-hydration fallback only (avoids an English flash before React mounts). Keep in sync
+         with DEFAULT_TITLE in src/constants/seo.js (indexHtml.test.js enforces it).
+         Deliberately NO static <meta name="description">: react-helmet-async on React 19 adds its
+         own tags rather than replacing static ones, so a static description would sit next to
+         every page's real one. -->
+    <title>Chiz | فروشگاه آنلاین لوازم آرایشی و بهداشتی</title>
   </head>
   <body>
     <div id="root"></div>

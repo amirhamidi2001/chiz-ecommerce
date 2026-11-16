@@ -1111,6 +1111,25 @@ class TestProductDetailView:
         res = api_client.get(url("product-detail", slug=product.slug))
         assert "description" in res.data
 
+    def test_image_urls_are_absolute(self, api_client, product):
+        """
+        Open Graph / link-preview crawlers (WhatsApp, Telegram, ...) need an ABSOLUTE
+        og:image URL, and the storefront feeds `images[].image` and `thumbnail_url`
+        straight into it (Task 15.1.3). A relative "/media/..." path here would make
+        every shared product card imageless, so pin it.
+        """
+        ProductImageFactory(product=product)
+        Product.objects.filter(pk=product.pk).update(
+            thumbnail="products/thumbnails/serum.jpg"
+        )
+        res = api_client.get(url("product-detail", slug=product.slug))
+
+        assert res.data["images"], "fixture should have produced a gallery image"
+        for img in res.data["images"]:
+            assert img["image"].startswith(("http://", "https://")), img["image"]
+        assert res.data["thumbnail_url"].startswith(("http://", "https://"))
+        assert res.data["thumbnail_url"].endswith("serum.jpg")
+
     def test_no_auth_required(self, api_client, product):
         res = api_client.get(url("product-detail", slug=product.slug))
         assert res.status_code == status.HTTP_200_OK

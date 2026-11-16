@@ -22,6 +22,19 @@ vi.mock('../context/CartContext', () => ({
 
 import { getProducts, getCategories, getBrands, getColors } from '../services/api';
 import { formatToman } from '../utils/money';
+import { WithSeo } from './seoTestUtils';
+import {
+  headTitles,
+  headDescriptions,
+  headMeta,
+  headOgProperties,
+  headCanonicals,
+  headHreflangs,
+  headRobots,
+  stubLocationOrigin,
+} from './seoTestHelpers';
+import { DEFAULT_TITLE } from '../constants/seo';
+import { STORE_NAME } from '../constants/store';
 
 // ─── Shared fixtures ──────────────────────────────────────────────────────────
 const makeProduct = (overrides = {}) => ({
@@ -897,3 +910,259 @@ describe('Category — numeral styles', () => {
     expect(screen.getByText(formatToman(499_900))).toBeInTheDocument();
   });
 });
+
+// ─── Page <title> / <meta description> (Task 15.1.1.2) ─────────────────────────
+
+const FA_CATEGORIES = [
+  {
+    id: 1,
+    name: 'مراقبت پوست',
+    slug: 'skincare',
+    children: [{ id: 2, name: 'سرم', slug: 'serum' }],
+  },
+  { id: 3, name: 'آرایش', slug: 'makeup', children: [] },
+];
+
+const renderCategoryWithSeo = (initialSearch = '') =>
+  render(
+    <WithSeo>
+      <MemoryRouter initialEntries={[`/category${initialSearch}`]}>
+        <Category />
+      </MemoryRouter>
+    </WithSeo>,
+  );
+
+describe('Category page title and description', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getProducts.mockResolvedValue(makeProductsResponse([makeProduct()]));
+    getCategories.mockResolvedValue(makeMetaResponse(FA_CATEGORIES));
+    getBrands.mockResolvedValue(makeMetaResponse([]));
+    getColors.mockResolvedValue(makeMetaResponse([]));
+  });
+
+  it('reflects the viewed category name (Persian) in the <title>', async () => {
+    renderCategoryWithSeo('?category=skincare');
+
+    await waitFor(() => expect(document.title).toBe(`مراقبت پوست | ${STORE_NAME}`));
+    await waitFor(() => expect(headDescriptions()).toHaveLength(1));
+    expect(headDescriptions()[0].getAttribute('content')).toContain('مراقبت پوست');
+    expect(headTitles()).toHaveLength(1);
+  });
+
+  it('resolves a SUBcategory slug to its name too', async () => {
+    renderCategoryWithSeo('?category=serum');
+    await waitFor(() => expect(document.title).toBe(`سرم | ${STORE_NAME}`));
+  });
+
+  it('shows the all-products title when no category is selected', async () => {
+    renderCategoryWithSeo();
+    await waitFor(() => expect(document.title).toBe(`همه محصولات | ${STORE_NAME}`));
+  });
+
+  it('reflects a search term typed into the listing', async () => {
+    renderCategoryWithSeo('?search=' + encodeURIComponent('سرم'));
+    await waitFor(() => expect(document.title).toBe(`نتایج جستجو برای «سرم» | ${STORE_NAME}`));
+  });
+
+  it('keeps the sitewide default (never the raw slug) while the category list is still loading', async () => {
+    getCategories.mockReturnValue(new Promise(() => { }));
+    renderCategoryWithSeo('?category=skincare');
+
+    await waitFor(() => expect(document.title).toBe(DEFAULT_TITLE));
+    expect(document.head.textContent).not.toMatch(/skincare|undefined|null/);
+    expect(headTitles()).toHaveLength(1);
+  });
+
+  it('keeps the sitewide default for an unknown category slug', async () => {
+    renderCategoryWithSeo('?category=does-not-exist');
+
+    await waitFor(() => expect(screen.queryByText('Loading...')).not.toBeInTheDocument());
+    expect(document.title).toBe(DEFAULT_TITLE);
+    expect(document.title).not.toContain('does-not-exist');
+  });
+});
+
+// ─── Open Graph tags (Task 15.1.3) ──────────────────────────────────────────────
+
+describe('Category page Open Graph tags', () => {
+  const ORIGIN = 'https://shop.example';
+  let restoreLocation;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    restoreLocation = stubLocationOrigin(ORIGIN);
+    getProducts.mockResolvedValue(makeProductsResponse([makeProduct()]));
+    getCategories.mockResolvedValue(makeMetaResponse(FA_CATEGORIES));
+    getBrands.mockResolvedValue(makeMetaResponse([]));
+    getColors.mockResolvedValue(makeMetaResponse([]));
+  });
+  afterEach(() => restoreLocation());
+
+  const first = (property) => headMeta(property)[0];
+
+  it('describes a category listing as a website page named after the viewed category', async () => {
+    renderCategoryWithSeo('?category=skincare');
+
+    await waitFor(() => expect(first('og:title')).toBe('مراقبت پوست'));
+    expect(first('og:type')).toBe('website');
+    expect(first('og:site_name')).toBe('Chiz');
+    expect(first('og:locale')).toBe('fa_IR');
+    await waitFor(() => expect(headDescriptions()).toHaveLength(1));
+    expect(first('og:description')).toBe(headDescriptions()[0].getAttribute('content'));
+    expect(first('og:description')).toContain('مراقبت پوست');
+  });
+
+  it('carries no product-specific tags, and uses the branded default image', async () => {
+    renderCategoryWithSeo('?category=skincare');
+
+    await waitFor(() => expect(first('og:title')).toBe('مراقبت پوست'));
+    expect(headOgProperties().filter((p) => p.startsWith('product:'))).toEqual([]);
+    expect(headMeta('og:image')).toEqual([`${ORIGIN}/og-default.jpg`]);
+  });
+
+  it('has each og:* property exactly once', async () => {
+    renderCategoryWithSeo('?category=skincare');
+
+    await waitFor(() => expect(first('og:title')).toBe('مراقبت پوست'));
+    const props = headOgProperties();
+    expect(props.filter((p, i) => props.indexOf(p) !== i)).toEqual([]);
+  });
+
+  it('names the all-products listing, and a search, sensibly', async () => {
+    const { unmount } = renderCategoryWithSeo();
+    await waitFor(() => expect(first('og:title')).toBe('همه محصولات'));
+    unmount();
+
+    renderCategoryWithSeo('?search=' + encodeURIComponent('سرم'));
+    await waitFor(() => expect(first('og:title')).toBe('نتایج جستجو برای «سرم»'));
+  });
+
+  it('keeps the sitewide Open Graph defaults (never the raw slug) while the category list loads', async () => {
+    getCategories.mockReturnValue(new Promise(() => { }));
+    renderCategoryWithSeo('?category=skincare');
+
+    await waitFor(() => expect(first('og:title')).toBe(DEFAULT_TITLE));
+    expect(first('og:type')).toBe('website');
+    // The raw slug must not leak into any human-facing text. (It IS in the canonical URL, which
+    // is built from the address alone and so is right even before category names have loaded.)
+    expect(document.title).not.toMatch(/skincare/);
+    for (const property of ['og:title', 'og:description']) {
+      expect(first(property)).not.toMatch(/skincare/);
+    }
+  });
+});
+
+// ─── Canonical link and robots (Task 15.1.4) ────────────────────────────────────
+// The category is a QUERY param (/category?category=<slug>) here, so the canonical has to be built
+// deliberately: a path-only canonical would merge every category into plain /category.
+
+describe('Category page canonical link and robots', () => {
+  const ORIGIN = 'https://shop.example';
+  const BASE = `${ORIGIN}/category?category=skincare`;
+  let restoreLocation;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    restoreLocation = stubLocationOrigin(ORIGIN);
+    getProducts.mockResolvedValue(makeProductsResponse([makeProduct()]));
+    getCategories.mockResolvedValue(makeMetaResponse(FA_CATEGORIES));
+    getBrands.mockResolvedValue(makeMetaResponse([]));
+    getColors.mockResolvedValue(makeMetaResponse([]));
+  });
+  afterEach(() => restoreLocation());
+
+  const canonicalFor = async (query) => {
+    const { unmount } = renderCategoryWithSeo(query);
+    await waitFor(() => expect(headCanonicals()).toHaveLength(1));
+    const href = headCanonicals()[0];
+    unmount();
+    await waitFor(() => expect(headCanonicals()).toHaveLength(0));
+    return href;
+  };
+
+  it('points a category at its own base URL, keeping the category slug', async () => {
+    expect(await canonicalFor('?category=skincare')).toBe(BASE);
+  });
+
+  it('gives different categories different canonicals (never all merged into /category)', async () => {
+    const skincare = await canonicalFor('?category=skincare');
+    const makeup = await canonicalFor('?category=makeup');
+    expect(skincare).not.toBe(makeup);
+    expect(skincare).not.toBe(`${ORIGIN}/category`);
+  });
+
+  it('is the bare /category URL when no category is selected', async () => {
+    expect(await canonicalFor('')).toBe(`${ORIGIN}/category`);
+  });
+
+  it('EXCLUDES filter, sort, page-size and flash-sale parameters', async () => {
+    const filtered =
+      '?category=skincare&brand=acme,zen&color=red&min_price=100000&max_price=900000' +
+      '&skin_type=oily&ordering=price&page_size=24&flash_sale=3&utm_source=ad';
+    expect(await canonicalFor(filtered)).toBe(BASE);
+  });
+
+  it('does not depend on the ORDER of the query parameters', async () => {
+    const a = await canonicalFor('?category=skincare&ordering=price&brand=acme&page=2');
+    const b = await canonicalFor('?page=2&brand=acme&ordering=price&category=skincare');
+    expect(a).toBe(b);
+    expect(a).toBe(`${BASE}&page=2`);
+  });
+
+  it('SELF-canonicalizes a paginated page (page 2+) instead of pointing at page 1', async () => {
+    expect(await canonicalFor('?category=skincare&page=2')).toBe(`${BASE}&page=2`);
+    expect(await canonicalFor('?category=skincare&page=5')).toBe(`${BASE}&page=5`);
+    expect(await canonicalFor('?page=2')).toBe(`${ORIGIN}/category?page=2`);
+  });
+
+  it('treats page 1 (or a junk page) as the base page, with no page parameter', async () => {
+    expect(await canonicalFor('?category=skincare&page=1')).toBe(BASE);
+    expect(await canonicalFor('?category=skincare&page=abc')).toBe(BASE);
+  });
+
+  it('keeps the page number on a filtered, paginated view but still drops the filters', async () => {
+    expect(await canonicalFor('?category=skincare&brand=acme&ordering=price&page=2')).toBe(
+      `${BASE}&page=2`,
+    );
+  });
+
+  it('percent-encodes a Persian category slug', async () => {
+    const slug = 'مراقبت-پوست';
+    expect(await canonicalFor(`?category=${encodeURIComponent(slug)}`)).toBe(
+      `${ORIGIN}/category?category=${encodeURIComponent(slug)}`,
+    );
+  });
+
+  it('is right from the first render, before the category list has loaded', async () => {
+    getCategories.mockReturnValue(new Promise(() => { }));
+    renderCategoryWithSeo('?category=skincare&brand=acme');
+
+    await waitFor(() => expect(headCanonicals()).toEqual([BASE]));
+    expect(document.title).toBe(DEFAULT_TITLE); // the title still waits for the category name
+  });
+
+  it('is indexable: no robots meta on a normal listing', async () => {
+    renderCategoryWithSeo('?category=skincare');
+    await waitFor(() => expect(headCanonicals()).toHaveLength(1));
+    expect(headRobots()).toEqual([]);
+  });
+
+  it('names the category’s canonical URL in hreflang, not just the path (/category)', async () => {
+    renderCategoryWithSeo('?category=skincare&brand=acme&ordering=price&page=2');
+
+    await waitFor(() => expect(headHreflangs()).toHaveLength(2));
+    expect(headHreflangs()).toEqual([
+      { hreflang: 'fa-ir', href: `${BASE}&page=2` },
+      { hreflang: 'x-default', href: `${BASE}&page=2` },
+    ]);
+    expect(headCanonicals()).toEqual([`${BASE}&page=2`]); // the same URL as the canonical
+  });
+
+  it('treats a free-text search as an internal search view: noindex, follow, and NO canonical', async () => {
+    renderCategoryWithSeo('?category=skincare&search=' + encodeURIComponent('سرم'));
+
+    await waitFor(() => expect(headRobots()).toEqual(['noindex, follow']));
+    expect(headCanonicals()).toEqual([]); // noindex + a canonical to ANOTHER url is a conflicting signal
+    expect(headHreflangs()).toEqual([]); // no canonical, so nothing to self-reference
+  });
+});
+

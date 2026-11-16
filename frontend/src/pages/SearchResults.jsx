@@ -5,6 +5,8 @@ import { isOnFlashSale } from '../utils/flashSale';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { getProducts, getCategories, getBrands } from '../services/api';
 import CosmeticFilters from '../components/CosmeticFilters';
+import Seo from '../components/Seo';
+import { buildSearchTitle, buildSearchDescription } from '../utils/seo';
 import { useFacetCounts } from '../hooks/useFacetCounts';
 import {
   cosmeticFiltersToParams,
@@ -741,6 +743,16 @@ const SearchResults = () => {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <>
+      {/* The search term comes straight from the URL, so it is known on first render. */}
+      {/* Internal search results are low-value, endlessly variable pages: keep them out of the
+          index (but let crawlers follow the product links), and give them no canonical. */}
+      <Seo
+        title={buildSearchTitle(query)}
+        description={buildSearchDescription(query)}
+        canonical={null}
+        robots="noindex, follow"
+      />
+
       {/* ── Breadcrumb + title ──────────────────────────────────────────── */}
       <div className="bg-gray-50 py-10 border-b">
         <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">

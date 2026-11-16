@@ -15,3 +15,5 @@ everything affected, so the implementing task does not rediscover scope mid-flig
 |---|-------|--------|
 | [0001](0001-currency-storage.md) | Currency storage: whole-Toman amounts held as integer Rial | Accepted |
 | [0002](0002-slug-strategy.md) | Slug strategy: Latin-script slugs for Persian-named catalog and blog content | Proposed |
+| [0003](0003-hreflang-deferred.md) | hreflang: self-reference only; multi-language support deferred | Accepted |
+| [0004](0004-robots-txt-build-time.md) | robots.txt: generated at build time, blocked unless explicitly opted in | Accepted |

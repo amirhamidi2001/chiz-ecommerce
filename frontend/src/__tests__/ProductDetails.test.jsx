@@ -8,6 +8,24 @@ import * as api from '../services/api';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { formatToman } from '../utils/money';
+import { WithSeo } from './seoTestUtils';
+import {
+  headTitles,
+  headDescriptions,
+  headMeta,
+  headOgProperties,
+  headCanonicals,
+  headHreflangs,
+  headRobots,
+  stubLocationOrigin,
+} from './seoTestHelpers';
+import { DEFAULT_TITLE, DEFAULT_DESCRIPTION } from '../constants/seo';
+import { STORE_NAME } from '../constants/store';
+import {
+  buildProductMetaDescription,
+  buildProductStructuredData,
+  serializeJsonLd,
+} from '../utils/seo';
 
 // ─── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -838,3 +856,618 @@ describe('ProductDetails', () => {
     });
   });
 });
+
+// ─── Page <title> / <meta description> (Task 15.1.1.2) ─────────────────────────
+// Rendered inside the same provider stack as App.jsx, so these assertions are about what
+// actually lands in document.head, including the sitewide default NOT lingering beside it.
+
+const FA_PRODUCT = {
+  ...MOCK_PRODUCT,
+  name: 'سرم ویتامین سی',
+  brand: { name: 'کلینیک' },
+  category: { name: 'مراقبت پوست' },
+  short_description:
+    'این سرم ویتامین سی با فرمولی سبک و بدون چربی پوست را روشن و یکنواخت می\u200cکند و ' +
+    'برای استفاده روزانه در هر نوع پوست مناسب است و لکه\u200cهای تیره را به\u200cتدریج کم می\u200cکند',
+};
+
+const renderWithSeo = () =>
+  render(
+    <WithSeo>
+      <MemoryRouter initialEntries={['/product/test-widget-pro']}>
+        <Routes>
+          <Route path="/product/:slug" element={<ProductDetails />} />
+        </Routes>
+      </MemoryRouter>
+    </WithSeo>,
+  );
+
+describe('ProductDetails page title and description', () => {
+  it("puts the product's real name and brand in the <title> once data has loaded", async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(FA_PRODUCT));
+    renderWithSeo();
+
+    await waitFor(() =>
+      expect(document.title).toBe(`سرم ویتامین سی | کلینیک | ${STORE_NAME}`),
+    );
+    expect(document.title).not.toBe(DEFAULT_TITLE);
+    expect(document.title).toContain('سرم ویتامین سی'); // Persian renders unmangled
+  });
+
+  it('sets a description built from the product, and leaves only ONE title and description in <head>', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(FA_PRODUCT));
+    renderWithSeo();
+
+    await waitFor(() => expect(document.title).toContain('سرم ویتامین سی'));
+    await waitFor(() => expect(headDescriptions()).toHaveLength(1));
+    expect(headDescriptions()[0].getAttribute('content')).toBe(
+      buildProductMetaDescription(FA_PRODUCT),
+    );
+    expect(headDescriptions()[0].getAttribute('content')).not.toBe(DEFAULT_DESCRIPTION);
+    expect(headTitles()).toHaveLength(1); // the sitewide default stepped aside, not duplicated
+  });
+
+  it('uses the template description when short_description is too short to be useful', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith({ ...FA_PRODUCT, short_description: 'جدید' }));
+    renderWithSeo();
+
+    await waitFor(() => expect(headDescriptions()[0]?.getAttribute('content')).toContain('کلینیک'));
+    const content = headDescriptions()[0].getAttribute('content');
+    expect(content).toContain('سرم ویتامین سی');
+    expect(content).toContain('مراقبت پوست');
+  });
+
+  it('drops the brand segment cleanly for a product without a brand', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith({ ...FA_PRODUCT, brand: null }));
+    renderWithSeo();
+
+    await waitFor(() => expect(document.title).toBe(`سرم ویتامین سی | ${STORE_NAME}`));
+  });
+
+  it('renders no broken title while the product is still loading: the sitewide default shows', async () => {
+    api.getProductDetails.mockReturnValue(new Promise(() => { }));
+    api.getRelatedProducts.mockReturnValue(new Promise(() => { }));
+    renderWithSeo();
+
+    await waitFor(() => expect(document.title).toBe(DEFAULT_TITLE));
+    expect(document.head.textContent).not.toMatch(/undefined|null/);
+    expect(headTitles()).toHaveLength(1);
+    expect(headDescriptions()).toHaveLength(1);
+    expect(headDescriptions()[0].getAttribute('content')).toBe(DEFAULT_DESCRIPTION);
+  });
+
+  it('keeps the sitewide default when the product fails to load (404)', async () => {
+    api.getProductDetails.mockImplementation(() => rejectWith(404, 'Not Found'));
+    renderWithSeo();
+
+    expect(await screen.findByText(/product not found/i)).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe(DEFAULT_TITLE));
+    expect(document.head.textContent).not.toMatch(/undefined|null/);
+  });
+});
+
+// ─── Schema.org JSON-LD structured data (Task 15.1.2) ──────────────────────────
+// Money rule under test: the platform transacts in RIAL (ADR 0001), so `price` is the raw Rial
+// integer with priceCurrency 'IRR'. Never Toman (1 Toman = 10 Rial) and never rialToToman()'d.
+
+const SD_ORIGIN = 'https://shop.example';
+
+const variant = (overrides = {}) => ({
+  id: 1,
+  sku: 'SRM-VC-30',
+  price: 4_990_000, // Rial. A Toman conversion would be 499_000.
+  effective_price: 4_490_000, // flash-sale price: must NOT be what is advertised
+  stock: 5,
+  is_active: true,
+  ...overrides,
+});
+
+const SD_PRODUCT = {
+  ...FA_PRODUCT,
+  slug: 'serum-vitamin-c',
+  price: 4_990_000,
+  stock: 5,
+  rating: '4.5', // DRF serialises the decimal as a string
+  reviews_count: 12,
+  thumbnail_url: `${SD_ORIGIN}/media/thumb.jpg`,
+  images: [{ id: 1, image: `${SD_ORIGIN}/media/a.jpg` }, { id: 2, image: `${SD_ORIGIN}/media/b.jpg` }],
+  variants: [variant()],
+};
+
+const build = (overrides = {}) =>
+  buildProductStructuredData({ ...SD_PRODUCT, ...overrides }, { origin: SD_ORIGIN });
+
+describe('buildProductStructuredData', () => {
+  describe('single-variant product', () => {
+    it('is valid, parseable JSON with a plain Product + Offer', () => {
+      const data = build();
+      const roundTripped = JSON.parse(JSON.stringify(data));
+
+      expect(roundTripped).toEqual(data); // nothing lost / undefined / NaN on the way through
+      expect(roundTripped['@context']).toBe('https://schema.org/');
+      expect(roundTripped['@type']).toBe('Product');
+      expect(roundTripped.name).toBe('سرم ویتامین سی');
+      expect(roundTripped.offers['@type']).toBe('Offer');
+    });
+
+    it('states the price in RAW RIAL with priceCurrency IRR, never Toman-converted', () => {
+      const { offers } = build();
+
+      expect(offers.priceCurrency).toBe('IRR');
+      expect(offers.price).toBe(4_990_000);
+      expect(typeof offers.price).toBe('number'); // a number, not "4,990,000" or "۴٬۹۹۰٬۰۰۰"
+      expect(offers.price).not.toBe(499_000); // Toman
+      expect(offers.price).not.toBe(49_900_000); // the brief's deliberately-wrong ×10 variant
+    });
+
+    it('advertises the regular price, not the flash-sale effective_price', () => {
+      expect(build().offers.price).toBe(4_990_000);
+    });
+
+    it('links to the real storefront route, percent-encoding a Persian slug', () => {
+      expect(build().offers.url).toBe(`${SD_ORIGIN}/product/serum-vitamin-c`);
+      expect(build({ slug: 'سرم-ویتامین-سی' }).offers.url).toBe(
+        `${SD_ORIGIN}/product/${encodeURIComponent('سرم-ویتامین-سی')}`,
+      );
+    });
+
+    it('includes brand, absolute de-duplicated images, the variant SKU and a plain-text description', () => {
+      const data = build({ thumbnail_url: `${SD_ORIGIN}/media/a.jpg`, short_description: '<p>سرم   سبک</p>' });
+      expect(data.brand).toEqual({ '@type': 'Brand', name: 'کلینیک' });
+      expect(data.image).toEqual([`${SD_ORIGIN}/media/a.jpg`, `${SD_ORIGIN}/media/b.jpg`]);
+      expect(data.sku).toBe('SRM-VC-30');
+      expect(data.description).toBe('سرم سبک');
+    });
+
+    it('strips HTML tags from text fields rather than passing markup into the JSON', () => {
+      const data = build({ name: 'سرم <b>ویتامین</b> سی', brand: { name: '<i>کلینیک</i>' } });
+      expect(data.name).toBe('سرم ویتامین سی');
+      expect(data.brand.name).toBe('کلینیک');
+      expect(build({ name: 'x<script>alert(1)</script>' }).name).toBe('x alert(1)'); // inert text
+    });
+
+    it('omits fields it has no value for instead of emitting undefined/empty ones', () => {
+      const data = build({ brand: null, images: [], thumbnail_url: null, short_description: '', description: '' });
+      expect(data).not.toHaveProperty('brand');
+      expect(data).not.toHaveProperty('image');
+      expect(data).not.toHaveProperty('description');
+    });
+  });
+
+  describe('multi-variant product', () => {
+    const multi = [
+      variant({ id: 1, sku: 'A', price: 4_990_000, stock: 0 }),
+      variant({ id: 2, sku: 'B', price: 7_500_000, stock: 3 }),
+      variant({ id: 3, sku: 'C', price: 6_000_000, stock: 1 }),
+    ];
+
+    it('uses an AggregateOffer with lowPrice / highPrice / offerCount when prices differ', () => {
+      const { offers } = build({ variants: multi });
+
+      expect(offers['@type']).toBe('AggregateOffer');
+      expect(offers.priceCurrency).toBe('IRR');
+      expect(offers.lowPrice).toBe(4_990_000);
+      expect(offers.highPrice).toBe(7_500_000);
+      expect(offers.offerCount).toBe(3);
+      expect(offers).not.toHaveProperty('price');
+    });
+
+    it('ignores inactive variants (the detail API returns them too)', () => {
+      const withInactive = [...multi, variant({ id: 4, sku: 'D', price: 100_000, stock: 50, is_active: false })];
+      const { offers } = build({ variants: withInactive });
+
+      expect(offers.lowPrice).toBe(4_990_000); // not the inactive 100_000
+      expect(offers.offerCount).toBe(3);
+    });
+
+    it('falls back to a plain Offer when the active variants all share one price', () => {
+      const { offers } = build({
+        variants: [variant({ id: 1, sku: 'A' }), variant({ id: 2, sku: 'B' })],
+      });
+      expect(offers['@type']).toBe('Offer');
+      expect(offers.price).toBe(4_990_000);
+    });
+
+    it('also treats "one active + several inactive" as a plain Offer', () => {
+      const { offers } = build({
+        variants: [variant({ id: 1 }), variant({ id: 2, price: 9_000_000, is_active: false })],
+      });
+      expect(offers['@type']).toBe('Offer');
+      expect(offers.price).toBe(4_990_000);
+    });
+
+    it('does not guess a product-level SKU when there are several variants', () => {
+      expect(build({ variants: multi })).not.toHaveProperty('sku');
+    });
+  });
+
+  describe('availability', () => {
+    it('is InStock when any active variant has stock', () => {
+      const data = build({
+        variants: [variant({ id: 1, stock: 0 }), variant({ id: 2, price: 6_000_000, stock: 2 })],
+      });
+      expect(data.offers.availability).toBe('https://schema.org/InStock');
+    });
+
+    it('is OutOfStock when every active variant is at zero', () => {
+      const data = build({
+        variants: [variant({ id: 1, stock: 0 }), variant({ id: 2, price: 6_000_000, stock: 0 })],
+      });
+      expect(data.offers.availability).toBe('https://schema.org/OutOfStock');
+    });
+
+    it('does not count stock held by an inactive variant', () => {
+      const data = build({
+        variants: [variant({ id: 1, stock: 0 }), variant({ id: 2, stock: 40, is_active: false })],
+      });
+      expect(data.offers.availability).toBe('https://schema.org/OutOfStock');
+    });
+
+    it('also applies to an AggregateOffer', () => {
+      const data = build({
+        variants: [variant({ id: 1, stock: 0 }), variant({ id: 2, price: 6_000_000, stock: 0 })],
+      });
+      expect(data.offers['@type']).toBe('AggregateOffer');
+      expect(data.offers.availability).toBe('https://schema.org/OutOfStock');
+    });
+
+    it('uses the legacy product price/stock for a product with no variants at all', () => {
+      const inStock = build({ variants: [], price: 3_000_000, stock: 4 });
+      expect(inStock.offers).toMatchObject({ '@type': 'Offer', price: 3_000_000 });
+      expect(inStock.offers.availability).toBe('https://schema.org/InStock');
+      expect(build({ variants: [], stock: 0 }).offers.availability).toBe('https://schema.org/OutOfStock');
+    });
+  });
+
+  describe('aggregateRating', () => {
+    it('is present with a numeric ratingValue when there are reviews', () => {
+      expect(build().aggregateRating).toEqual({
+        '@type': 'AggregateRating',
+        ratingValue: 4.5, // "4.5" string from the API becomes a number
+        reviewCount: 12,
+      });
+    });
+
+    it('is omitted entirely (not a zero/null stub) when there are no reviews', () => {
+      const data = build({ reviews_count: 0, rating: '0.0' });
+      expect(data).not.toHaveProperty('aggregateRating');
+      expect(JSON.stringify(data)).not.toContain('aggregateRating');
+    });
+
+    it.each([
+      ['a zero rating', { reviews_count: 3, rating: '0.0' }],
+      ['a missing rating', { reviews_count: 3, rating: null }],
+      ['an out-of-range rating', { reviews_count: 3, rating: '7.2' }],
+      ['a missing review count', { reviews_count: undefined, rating: '4.5' }],
+    ])('is omitted for %s', (_label, overrides) => {
+      expect(build(overrides)).not.toHaveProperty('aggregateRating');
+    });
+  });
+
+  describe('when no valid rich result can be formed', () => {
+    it('returns null without a name', () => {
+      expect(buildProductStructuredData(undefined)).toBeNull();
+      expect(buildProductStructuredData({ ...SD_PRODUCT, name: '  ' }, { origin: SD_ORIGIN })).toBeNull();
+    });
+
+    it('returns null when there is neither an offer nor a rating to state (Google rejects that)', () => {
+      expect(build({ variants: [], price: null, reviews_count: 0 })).toBeNull();
+    });
+
+    it('still renders with a rating alone when no price can be stated', () => {
+      const data = build({ variants: [], price: null });
+      expect(data).not.toHaveProperty('offers');
+      expect(data.aggregateRating.reviewCount).toBe(12);
+    });
+  });
+
+  describe('serializeJsonLd', () => {
+    it('round-trips through JSON.parse', () => {
+      const data = build();
+      expect(JSON.parse(serializeJsonLd(data))).toEqual(data);
+    });
+
+    it('escapes "<" so text can never close the <script> element, and loses nothing', () => {
+      const hostile = { name: 'x</script><script>alert(1)</script>', note: 'a\u2028b\u2029c' };
+      const json = serializeJsonLd(hostile);
+      expect(json).not.toContain('<');
+      expect(json).not.toMatch(/[\u2028\u2029]/);
+      expect(JSON.parse(json)).toEqual(hostile); // lossless
+    });
+
+    it('still protects a "<" that survives tag-stripping in the builder', () => {
+      const json = serializeJsonLd(build({ name: 'سرم </script' })); // no ">" so not a "tag"
+      expect(json).not.toContain('<');
+      expect(JSON.parse(json).name).toBe('سرم </script');
+    });
+
+    it('returns an empty string for no data', () => {
+      expect(serializeJsonLd(null)).toBe('');
+    });
+  });
+});
+
+describe('ProductDetails structured data in the page', () => {
+  // An earlier test in this file replaces window.location with `{ href: '' }` and never restores
+  // it, so don't rely on the global: pin a known origin for these tests and put things back.
+  const savedLocation = window.location;
+  beforeEach(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: { origin: SD_ORIGIN, href: `${SD_ORIGIN}/` },
+    });
+  });
+  afterEach(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: savedLocation,
+    });
+  });
+
+  const ldScripts = () => Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+
+  const renderPage = () =>
+    render(
+      <WithSeo>
+        <MemoryRouter initialEntries={['/product/serum-vitamin-c']}>
+          <Routes>
+            <Route path="/product/:slug" element={<ProductDetails />} />
+          </Routes>
+        </MemoryRouter>
+      </WithSeo>,
+    );
+
+  it('renders one parseable application/ld+json block that round-trips to the builder output', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(SD_PRODUCT));
+    renderPage();
+
+    await waitFor(() => expect(ldScripts()).toHaveLength(1));
+    const parsed = JSON.parse(ldScripts()[0].textContent);
+
+    const expected = JSON.parse(
+      JSON.stringify(buildProductStructuredData(SD_PRODUCT, { origin: SD_ORIGIN })),
+    );
+    expect(parsed).toEqual(expected);
+    expect(parsed['@type']).toBe('Product');
+    expect(parsed.name).toBe('سرم ویتامین سی');
+    expect(parsed.offers).toMatchObject({ '@type': 'Offer', priceCurrency: 'IRR', price: 4_990_000 });
+    expect(parsed.offers.url).toBe(`${SD_ORIGIN}/product/serum-vitamin-c`);
+    expect(parsed.aggregateRating.reviewCount).toBe(12);
+  });
+
+  it('renders an AggregateOffer on the page for a multi-variant product', async () => {
+    api.getProductDetails.mockReturnValue(
+      resolveWith({
+        ...SD_PRODUCT,
+        variants: [variant({ id: 1, sku: 'A' }), variant({ id: 2, sku: 'B', price: 7_500_000 })],
+      }),
+    );
+    renderPage();
+
+    await waitFor(() => expect(ldScripts()).toHaveLength(1));
+    expect(JSON.parse(ldScripts()[0].textContent).offers).toMatchObject({
+      '@type': 'AggregateOffer',
+      lowPrice: 4_990_000,
+      highPrice: 7_500_000,
+    });
+  });
+
+  it('is absent while the product is loading and after a failed load', async () => {
+    api.getProductDetails.mockReturnValue(new Promise(() => { }));
+    api.getRelatedProducts.mockReturnValue(new Promise(() => { }));
+    const { unmount } = renderPage();
+    await waitFor(() => expect(document.title).toBe(DEFAULT_TITLE));
+    expect(ldScripts()).toHaveLength(0);
+    unmount();
+
+    api.getProductDetails.mockImplementation(() => rejectWith(404, 'Not Found'));
+    api.getRelatedProducts.mockReturnValue(resolveWith([]));
+    renderPage();
+    expect(await screen.findByText(/product not found/i)).toBeInTheDocument();
+    expect(ldScripts()).toHaveLength(0);
+  });
+
+  it('is removed again when the visitor leaves the product page', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(SD_PRODUCT));
+    const { unmount } = renderPage();
+    await waitFor(() => expect(ldScripts()).toHaveLength(1));
+    unmount();
+    await waitFor(() => expect(ldScripts()).toHaveLength(0));
+  });
+
+  it('cannot be broken out of by hostile text (no raw "<" in the script body)', async () => {
+    // No ">" so tag-stripping leaves the "<" in place: the serializer's escaping is what protects.
+    api.getProductDetails.mockReturnValue(
+      resolveWith({ ...SD_PRODUCT, name: 'سرم </script', short_description: 'a </script><b' }),
+    );
+    renderPage();
+
+    await waitFor(() => expect(ldScripts()).toHaveLength(1));
+    const body = ldScripts()[0].textContent;
+    expect(body).not.toContain('<');
+    expect(JSON.parse(body).name).toBe('سرم </script'); // lossless after parsing
+    expect(ldScripts()[0].outerHTML.match(/<\/script>/g)).toHaveLength(1); // only its own closer
+    expect(document.querySelectorAll('script:not([type])')).toHaveLength(0); // nothing injected
+  });
+});
+
+// ─── Open Graph tags (Task 15.1.3) ──────────────────────────────────────────────
+// What a link-preview crawler that DOES run JavaScript sees in the real document <head>.
+
+describe('ProductDetails Open Graph tags', () => {
+  let restoreLocation;
+  beforeEach(() => {
+    restoreLocation = stubLocationOrigin(SD_ORIGIN);
+  });
+  afterEach(() => restoreLocation());
+
+  const renderPage = () =>
+    render(
+      <WithSeo>
+        <MemoryRouter initialEntries={['/product/serum-vitamin-c']}>
+          <Routes>
+            <Route path="/product/:slug" element={<ProductDetails />} />
+          </Routes>
+        </MemoryRouter>
+      </WithSeo>,
+    );
+  const first = (property) => headMeta(property)[0];
+
+  it('renders the product-specific og:* tags with the expected values', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(SD_PRODUCT));
+    renderPage();
+
+    await waitFor(() => expect(first('og:type')).toBe('product'));
+    expect(first('og:title')).toBe('سرم ویتامین سی'); // the bare product name
+    expect(first('og:url')).toBe(`${SD_ORIGIN}/product/serum-vitamin-c`);
+    expect(first('og:image')).toBe(`${SD_ORIGIN}/media/thumb.jpg`);
+    expect(first('og:image:alt')).toBe('سرم ویتامین سی');
+    expect(first('product:price:amount')).toBe('4990000'); // raw Rial, not Toman
+    expect(first('product:price:currency')).toBe('IRR');
+    // The site-wide tags must survive the default block stepping aside.
+    expect(first('og:site_name')).toBe('Chiz');
+    expect(first('og:locale')).toBe('fa_IR');
+  });
+
+  it('uses the SAME description for og:description and <meta name="description">', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(SD_PRODUCT));
+    renderPage();
+
+    // The default block already supplies og:* while loading, so wait for the PRODUCT's own tags.
+    await waitFor(() => expect(first('og:type')).toBe('product'));
+    await waitFor(() => expect(headDescriptions()).toHaveLength(1));
+    expect(first('og:description')).toBe(headDescriptions()[0].getAttribute('content'));
+    expect(first('og:description')).toBe(buildProductMetaDescription(SD_PRODUCT));
+  });
+
+  it('emits an ABSOLUTE og:image URL, resolving a relative API path against the site origin', async () => {
+    api.getProductDetails.mockReturnValue(
+      resolveWith({ ...SD_PRODUCT, thumbnail_url: null, images: [{ id: 1, image: '/media/rel.jpg' }] }),
+    );
+    renderPage();
+
+    await waitFor(() => expect(first('og:type')).toBe('product'));
+    const image = first('og:image');
+    expect(image).toBe(`${SD_ORIGIN}/media/rel.jpg`);
+    expect(['http:', 'https:']).toContain(new URL(image).protocol); // new URL() with no base: throws if relative
+  });
+
+  it('falls back to the branded default image for a product with no images, not a missing/broken tag', async () => {
+    api.getProductDetails.mockReturnValue(
+      resolveWith({ ...SD_PRODUCT, thumbnail_url: null, images: [] }),
+    );
+    renderPage();
+
+    await waitFor(() => expect(first('og:type')).toBe('product'));
+    expect(headMeta('og:image')).toEqual([`${SD_ORIGIN}/og-default.jpg`]);
+    expect(first('og:image:width')).toBe('1200');
+    expect(first('og:image:height')).toBe('630');
+    expect(first('og:image:alt')).toBe('Chiz');
+  });
+
+  it('has each og:* / product:* property exactly once (the default block steps aside)', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(SD_PRODUCT));
+    renderPage();
+
+    await waitFor(() => expect(first('og:type')).toBe('product'));
+    const props = headOgProperties();
+    expect(props.length).toBeGreaterThan(0);
+    expect(props.filter((p, i) => props.indexOf(p) !== i)).toEqual([]); // no duplicates
+  });
+
+  it('states the lowest regular price for a multi-variant product', async () => {
+    api.getProductDetails.mockReturnValue(
+      resolveWith({
+        ...SD_PRODUCT,
+        variants: [variant({ id: 1, sku: 'A' }), variant({ id: 2, sku: 'B', price: 7_500_000 })],
+      }),
+    );
+    renderPage();
+
+    await waitFor(() => expect(first('product:price:amount')).toBe('4990000'));
+  });
+
+  it('leaves out the price tags entirely (no "undefined") when no price can be determined', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith({ ...SD_PRODUCT, variants: [], price: null }));
+    renderPage();
+
+    await waitFor(() => expect(first('og:type')).toBe('product'));
+    expect(headMeta('product:price:amount')).toEqual([]);
+    expect(headMeta('product:price:currency')).toEqual([]);
+    expect(document.head.innerHTML).not.toMatch(/content="(undefined|null)"/);
+  });
+
+  it('shows the sitewide website/default-image tags while loading, with no product:* tags', async () => {
+    api.getProductDetails.mockReturnValue(new Promise(() => { }));
+    api.getRelatedProducts.mockReturnValue(new Promise(() => { }));
+    renderPage();
+
+    await waitFor(() => expect(first('og:type')).toBe('website'));
+    expect(first('og:title')).toBe(DEFAULT_TITLE);
+    expect(first('og:image')).toBe(`${SD_ORIGIN}/og-default.jpg`);
+    expect(headOgProperties().filter((p) => p.startsWith('product:'))).toEqual([]);
+  });
+});
+
+// ─── Canonical link (Task 15.1.4) ────────────────────────────────────────────────
+
+describe('ProductDetails canonical link', () => {
+  let restoreLocation;
+  beforeEach(() => {
+    restoreLocation = stubLocationOrigin(SD_ORIGIN);
+  });
+  afterEach(() => restoreLocation());
+
+  const renderAt = (url) =>
+    render(
+      <WithSeo>
+        <MemoryRouter initialEntries={[url]}>
+          <Routes>
+            <Route path="/product/:slug" element={<ProductDetails />} />
+          </Routes>
+        </MemoryRouter>
+      </WithSeo>,
+    );
+
+  it('points at the clean /product/<slug> URL', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(SD_PRODUCT));
+    renderAt('/product/serum-vitamin-c');
+
+    await waitFor(() => expect(headCanonicals()).toEqual([`${SD_ORIGIN}/product/serum-vitamin-c`]));
+    expect(headRobots()).toEqual([]); // product pages are meant to be indexed
+  });
+
+  it('drops tracking and variant query parameters, and agrees with og:url', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(SD_PRODUCT));
+    renderAt('/product/serum-vitamin-c?utm_source=telegram&variant=3&ref=abc');
+
+    await waitFor(() => expect(headCanonicals()).toEqual([`${SD_ORIGIN}/product/serum-vitamin-c`]));
+    await waitFor(() => expect(headMeta('og:url')).toEqual(headCanonicals()));
+  });
+
+  it('declares itself as fa-ir and x-default at that same URL (exactly two, no duplicates)', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith(SD_PRODUCT));
+    renderAt('/product/serum-vitamin-c?utm_source=telegram');
+
+    const url = `${SD_ORIGIN}/product/serum-vitamin-c`;
+    await waitFor(() => expect(headCanonicals()).toEqual([url]));
+    expect(headHreflangs()).toEqual([
+      { hreflang: 'fa-ir', href: url },
+      { hreflang: 'x-default', href: url },
+    ]);
+  });
+
+  it('percent-encodes a Persian slug', async () => {
+    api.getProductDetails.mockReturnValue(resolveWith({ ...SD_PRODUCT, slug: 'سرم-ویتامین-سی' }));
+    renderAt('/product/' + encodeURIComponent('سرم-ویتامین-سی'));
+
+    await waitFor(() =>
+      expect(headCanonicals()).toEqual([
+        `${SD_ORIGIN}/product/${encodeURIComponent('سرم-ویتامین-سی')}`,
+      ]),
+    );
+  });
+});
+

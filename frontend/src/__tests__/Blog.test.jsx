@@ -1,9 +1,11 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 
 import Blog from "../pages/Blog";
+import { WithSeo } from "./seoTestUtils";
+import { headCanonicals, headRobots, stubLocationOrigin } from "./seoTestHelpers";
 import { blogAPI } from "../services/api";
 
 // ─── Mock the entire blogAPI module ───────────────────────────────────────────
@@ -478,3 +480,57 @@ describe("Blog page", () => {
     });
   });
 });
+
+// ─── Canonical link and robots (Task 15.1.4) ────────────────────────────────────
+// /blog paginates and filters through query params, so a path-only canonical would send page 2
+// back to page 1.
+
+describe("Blog canonical link and robots", () => {
+  const ORIGIN = "https://shop.example";
+  let restoreLocation;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    restoreLocation = stubLocationOrigin(ORIGIN);
+    setupDefaultMocks();
+  });
+  afterEach(() => restoreLocation());
+
+  const renderBlog = (query = "") =>
+    render(
+      <WithSeo>
+        <MemoryRouter initialEntries={[`/blog${query}`]}>
+          <Blog />
+        </MemoryRouter>
+      </WithSeo>,
+    );
+
+  it("canonicalizes the blog index to /blog", async () => {
+    renderBlog();
+    await waitFor(() => expect(headCanonicals()).toEqual([`${ORIGIN}/blog`]));
+    expect(headRobots()).toEqual([]);
+  });
+
+  it("SELF-canonicalizes page 2+ instead of pointing at page 1", async () => {
+    renderBlog("?page=2");
+    await waitFor(() => expect(headCanonicals()).toEqual([`${ORIGIN}/blog?page=2`]));
+  });
+
+  it("keeps the category and the page, and drops everything else", async () => {
+    renderBlog("?page=3&utm_source=x&category=technology");
+    await waitFor(() =>
+      expect(headCanonicals()).toEqual([`${ORIGIN}/blog?category=technology&page=3`]),
+    );
+  });
+
+  it("treats a junk page number as the first page", async () => {
+    renderBlog("?page=abc");
+    await waitFor(() => expect(headCanonicals()).toEqual([`${ORIGIN}/blog`]));
+  });
+
+  it("treats a blog search as an internal search view: noindex, follow, no canonical", async () => {
+    renderBlog("?search=serum");
+    await waitFor(() => expect(headRobots()).toEqual(["noindex, follow"]));
+    expect(headCanonicals()).toEqual([]);
+  });
+});
+

@@ -16,6 +16,15 @@ vi.mock('../services/api', () => ({
 // We import the mocked functions AFTER vi.mock so the references are the spies.
 import { getProducts, getCategories, getBrands } from '../services/api';
 import { formatToman } from '../utils/money';
+import { WithSeo } from './seoTestUtils';
+import {
+  headTitles,
+  headDescriptions,
+  headCanonicals,
+  headHreflangs,
+  headRobots,
+} from './seoTestHelpers';
+import { STORE_NAME } from '../constants/store';
 
 // Mock context hooks so we can control their return values per test.
 const mockAddToCart = vi.fn();
@@ -998,3 +1007,79 @@ describe('Static filter fetch failure', () => {
     expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
   });
 });
+
+// ─── Page <title> / <meta description> (Task 15.1.1.2) ─────────────────────────
+
+describe('SearchResults page title and description', () => {
+  const renderWithSeo = (initialSearch = '') =>
+    render(
+      <WithSeo>
+        <MemoryRouter initialEntries={[`/search${initialSearch}`]}>
+          <SearchResults />
+        </MemoryRouter>
+      </WithSeo>,
+    );
+
+  it('puts the (Persian) search term in the <title>, even while results are still loading', async () => {
+    getProducts.mockReturnValue(new Promise(() => { }));
+    renderWithSeo('?q=' + encodeURIComponent('سرم'));
+
+    await waitFor(() => expect(document.title).toBe(`نتایج جستجو برای «سرم» | ${STORE_NAME}`));
+    await waitFor(() => expect(headDescriptions()).toHaveLength(1));
+    expect(headDescriptions()[0].getAttribute('content')).toContain('«سرم»');
+    expect(headTitles()).toHaveLength(1);
+  });
+
+  it('uses a generic search title when there is no query', async () => {
+    getProducts.mockReturnValue(resolvedProducts([]));
+    renderWithSeo();
+
+    await waitFor(() => expect(document.title).toBe(`جستجوی محصولات | ${STORE_NAME}`));
+    expect(document.head.textContent).not.toMatch(/undefined|null/);
+  });
+});
+
+// ─── Robots and canonical (Task 15.1.4) ─────────────────────────────────────────
+// Internal search results are low-value, endlessly variable pages: kept out of the index.
+
+describe('SearchResults page robots and canonical', () => {
+  const renderWithSeo = (initialSearch = '') =>
+    render(
+      <WithSeo>
+        <MemoryRouter initialEntries={[`/search${initialSearch}`]}>
+          <SearchResults />
+        </MemoryRouter>
+      </WithSeo>,
+    );
+
+  it('asks search engines not to index the page but to follow its links', async () => {
+    getProducts.mockReturnValue(resolvedProducts([]));
+    renderWithSeo('?q=' + encodeURIComponent('سرم'));
+
+    await waitFor(() => expect(headRobots()).toEqual(['noindex, follow']));
+  });
+
+  it('applies to every variant of the search URL, and while results are still loading', async () => {
+    getProducts.mockReturnValue(new Promise(() => { }));
+    renderWithSeo('?q=' + encodeURIComponent('سرم') + '&ordering=price&page=2&brand=acme');
+
+    await waitFor(() => expect(headRobots()).toEqual(['noindex, follow']));
+  });
+
+  it('applies to an empty search too', async () => {
+    getProducts.mockReturnValue(resolvedProducts([]));
+    renderWithSeo();
+
+    await waitFor(() => expect(headRobots()).toEqual(['noindex, follow']));
+  });
+
+  it('has no canonical link (noindex pages do not get one)', async () => {
+    getProducts.mockReturnValue(resolvedProducts([]));
+    renderWithSeo('?q=' + encodeURIComponent('سرم'));
+
+    await waitFor(() => expect(headRobots()).toHaveLength(1));
+    expect(headCanonicals()).toEqual([]);
+    expect(headHreflangs()).toEqual([]); // a noindex page names no language version of itself
+  });
+});
+

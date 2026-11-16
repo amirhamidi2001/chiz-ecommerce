@@ -28,12 +28,14 @@ from drf_spectacular.views import (
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
-from shop.sitemaps import CategorySitemap, ProductSitemap
+from shop.sitemaps import BrandSitemap, CategorySitemap, ProductSitemap
+from shop.social_preview import share_product_preview  # PoC (Task 15.1.2.3 spike)
 
 sitemaps = {
     "blog": BlogSitemap,
     "products": ProductSitemap,
     "categories": CategorySitemap,
+    "brands": BrandSitemap,
 }
 
 ADMIN_URL = config("ADMIN_URL", default="admin/")
@@ -68,6 +70,10 @@ urlpatterns = [
         name="redoc",
     ),
     path("sitemap.xml", sitemap, {"sitemaps": sitemaps}),
+    # PoC (Task 15.1.2.3 spike): link-preview page for crawlers that do not run JavaScript.
+    path(
+        "share/product/<str:slug>", share_product_preview, name="share-product-preview"
+    ),
 ]
 
 if settings.DEBUG:

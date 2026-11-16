@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { blogAPI } from "../services/api";
+import Seo from "../components/Seo";
+import { buildBlogCanonical } from "../utils/canonical";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -206,8 +208,19 @@ const Blog = () => {
 
   // ── Render ──
 
+  // Canonical: the category and page number are the listing's identity (page N canonicalizes to
+  // itself); a free-text search is an internal search view: noindex, no canonical.
+  const isSearchView = searchQuery.trim() !== "";
+
   return (
     <main className="bg-white">
+      <Seo
+        canonical={
+          isSearchView ? null : buildBlogCanonical({ category: activeCategory, page: currentPage })
+        }
+        robots={isSearchView ? "noindex, follow" : undefined}
+      />
+
       {/* ── Breadcrumb ────────────────────────────────────────────────── */}
       <div className="bg-gray-50 py-12 border-b">
         <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center">

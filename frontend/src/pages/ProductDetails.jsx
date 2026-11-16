@@ -5,6 +5,14 @@ import { getProductDetails, getRelatedProducts, getFrequentlyBoughtTogether, cre
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { STORE_NAME } from '../constants/store';
+import Seo from '../components/Seo';
+import {
+  buildProductTitle,
+  buildProductMetaDescription,
+  buildProductStructuredData,
+  buildProductOpenGraph,
+  buildProductCanonical,
+} from '../utils/seo';
 import { addRecentlyViewed } from '../utils/recentlyViewed';
 import { formatToman } from '../utils/money';
 import { formatRating, formatReviewCount } from '../utils/numerals';
@@ -622,6 +630,16 @@ const ProductDetails = () => {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
+      {/* Product data is loaded by this point (loading/error/!product return early above), so
+          the title/description are real; while loading, the sitewide default stays in place. */}
+      <Seo
+        title={buildProductTitle(product)}
+        description={buildProductMetaDescription(product)}
+        jsonLd={buildProductStructuredData(product)}
+        og={buildProductOpenGraph(product)}
+        canonical={buildProductCanonical(product)}
+      />
+
       {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
 
       {/* Page Title */}

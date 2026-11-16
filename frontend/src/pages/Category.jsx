@@ -7,6 +7,14 @@ import { getProducts, getCategories, getBrands, getColors } from '../services/ap
 import CosmeticFilters from '../components/CosmeticFilters';
 import { useFacetCounts } from '../hooks/useFacetCounts';
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback';
+import Seo from '../components/Seo';
+import { buildCategoryCanonical } from '../utils/canonical';
+import {
+  buildListingTitle,
+  buildListingHeading,
+  buildListingDescription,
+  findCategoryName,
+} from '../utils/seo';
 import { cosmeticPatchToUrlUpdates, getActiveCosmeticChips } from '../utils/cosmeticFilters';
 import {
   DEFAULT_SORT,
@@ -675,6 +683,24 @@ const Category = () => {
 
   const totalPages = pagination.total_pages || 1;
 
+  // ── Page <title>/<meta> ─────────────────────────────────────────────────────
+  // The URL holds a category SLUG; the display name only exists once the category list has
+  // loaded. Until it resolves (or if the slug is unknown) no title is passed, so <Seo> renders
+  // nothing and the sitewide default stays, rather than showing a raw slug like "skin-care".
+  const seoCategoryName = selectedCategory ? findCategoryName(categories, selectedCategory) : '';
+  const seoReady = !selectedCategory || Boolean(seoCategoryName);
+  const seoParts = { categoryName: seoCategoryName, search: filters.search };
+
+  // Canonical / robots come from the URL alone (not from category data), so they are right from
+  // the first render. The category slug and page number are the page's identity; every filter,
+  // sort, page-size and flash-sale variant canonicalizes to that same URL, and page N (N > 1) to
+  // itself. A free-text search is an internal search view: noindex, and NO canonical (noindex
+  // plus a canonical to a different URL risks the noindex being applied to the base category).
+  const isSearchView = filters.search.trim() !== '';
+  const seoCanonical = isSearchView
+    ? null
+    : buildCategoryCanonical({ category: selectedCategory, page: filters.page });
+
   const getPageNumbers = () => {
     const pages = [];
     const range = 2;
@@ -690,6 +716,14 @@ const Category = () => {
 
   return (
     <>
+      <Seo
+        title={seoReady ? buildListingTitle(seoParts) : null}
+        description={seoReady ? buildListingDescription(seoParts) : null}
+        og={seoReady ? { type: 'website', title: buildListingHeading(seoParts) } : undefined}
+        canonical={seoCanonical}
+        robots={isSearchView ? 'noindex, follow' : undefined}
+      />
+
       {/* Toast */}
       {toast && <Toast message={toast.message} type={toast.type} onClose={hideToast} />}
 

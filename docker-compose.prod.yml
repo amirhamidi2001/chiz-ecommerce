@@ -116,6 +116,12 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        VITE_SITE_URL: ${VITE_SITE_URL:-}   # public https origin for canonical/OG URLs
+        # robots.txt is "Disallow: /" unless this is exactly "true": set it ONLY for the real
+        # production site, never for staging/preview (needs a real https VITE_SITE_URL).
+        VITE_ALLOW_INDEXING: ${VITE_ALLOW_INDEXING:-}
+        VITE_SITEMAP_URL: ${VITE_SITEMAP_URL:-}   # optional; default <VITE_SITE_URL>/sitemap.xml
       # Uses the final nginx stage in frontend/Dockerfile (no "target" needed —
       # the last FROM in a multi-stage file is the default build target)
     container_name: frontend_prod

@@ -1,5 +1,6 @@
 // src/App.jsx
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 
 // ─── Context providers ────────────────────────────────────────────────────
 import { AuthProvider } from './context/AuthContext';
@@ -10,6 +11,8 @@ import { WishlistProvider } from './context/WishlistContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import ChatWidget from './components/ChatWidget';
+import DefaultSeo from './components/DefaultSeo';
+import SeoProvider from './context/SeoProvider';
 
 // ─── Admin layout ─────────────────────────────────────────────────────────
 import AdminLayout from './components/admin/AdminLayout';
@@ -137,83 +140,89 @@ const GuestRoute = ({ children }) => {
 // ═════════════════════════════════════════════════════════════════════════
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        {/*
-          WishlistProvider is nested inside AuthProvider so it can react to
-          auth-change events dispatched by AuthContext on login/logout.
-          CartProvider follows the same pattern.
-        */}
-        <CartProvider>
-          <WishlistProvider>
-            <Routes>
+    <HelmetProvider>
+      <SeoProvider>
+        <BrowserRouter>
+          <AuthProvider>
+            {/* Sitewide default <title>/<meta description>; pages override it by rendering <Seo> (see context/seoContext.js). */}
+            <DefaultSeo />
+            {/*
+              WishlistProvider is nested inside AuthProvider so it can react to
+              auth-change events dispatched by AuthContext on login/logout.
+              CartProvider follows the same pattern.
+            */}
+            <CartProvider>
+              <WishlistProvider>
+                <Routes>
 
-              {/* ── Storefront routes (Header + Footer via MainLayout) ──────── */}
-              <Route element={<MainLayout />}>
+                  {/* ── Storefront routes (Header + Footer via MainLayout) ──────── */}
+                  <Route element={<MainLayout />}>
 
-                {/* Public */}
-                <Route path="/" element={<Home />} />
-                <Route path="/about" element={<About />} />
-                <Route path="/cart" element={<Cart />} />
-                <Route path="/category" element={<Category />} />
-                <Route path="/contact" element={<Contact />} />
-                <Route path="/faq" element={<Faq />} />
-                <Route path="/payment-methods" element={<PaymentMethods />} />
-                <Route path="/privacy" element={<Privacy />} />
-                <Route path="/product-details" element={<ProductDetails />} />
-                <Route path="/product/:slug" element={<ProductDetails />} />
-                <Route path="/product-lists" element={<ProductLists />} />
-                <Route path="/return-policy" element={<ReturnPolicy />} />
-                <Route path="/search" element={<SearchResults />} />
-                <Route path="/shipping-info" element={<ShippingInfo />} />
-                <Route path="/support" element={<Support />} />
-                <Route path="/tos" element={<Tos />} />
-                <Route path="/blog" element={<Blog />} />
-                <Route path="/blog/:slug" element={<BlogDetails />} />
+                    {/* Public */}
+                    <Route path="/" element={<Home />} />
+                    <Route path="/about" element={<About />} />
+                    <Route path="/cart" element={<Cart />} />
+                    <Route path="/category" element={<Category />} />
+                    <Route path="/contact" element={<Contact />} />
+                    <Route path="/faq" element={<Faq />} />
+                    <Route path="/payment-methods" element={<PaymentMethods />} />
+                    <Route path="/privacy" element={<Privacy />} />
+                    <Route path="/product-details" element={<ProductDetails />} />
+                    <Route path="/product/:slug" element={<ProductDetails />} />
+                    <Route path="/product-lists" element={<ProductLists />} />
+                    <Route path="/return-policy" element={<ReturnPolicy />} />
+                    <Route path="/search" element={<SearchResults />} />
+                    <Route path="/shipping-info" element={<ShippingInfo />} />
+                    <Route path="/support" element={<Support />} />
+                    <Route path="/tos" element={<Tos />} />
+                    <Route path="/blog" element={<Blog />} />
+                    <Route path="/blog/:slug" element={<BlogDetails />} />
 
-                {/* Guest-only (redirect to /account when logged in) */}
-                <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
-                <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
-                <Route path="/reset-password/:uid/:token" element={<GuestRoute><ResetPassword /></GuestRoute>} />
-                <Route path="/confirm-email" element={<GuestRoute><ConfirmEmail /></GuestRoute>} />
+                    {/* Guest-only (redirect to /account when logged in) */}
+                    <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
+                    <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
+                    <Route path="/reset-password/:uid/:token" element={<GuestRoute><ResetPassword /></GuestRoute>} />
+                    <Route path="/confirm-email" element={<GuestRoute><ConfirmEmail /></GuestRoute>} />
 
-                {/* Auth-required */}
-                <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
-                <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
-                <Route path="/checkout" element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
-                <Route path="/checkout/failed" element={<ProtectedRoute><CheckoutFailed /></ProtectedRoute>} />
-                <Route path="/order-confirmation/:id" element={<ProtectedRoute><OrderConfirmation /></ProtectedRoute>} />
+                    {/* Auth-required */}
+                    <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
+                    <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
+                    <Route path="/checkout" element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
+                    <Route path="/checkout/failed" element={<ProtectedRoute><CheckoutFailed /></ProtectedRoute>} />
+                    <Route path="/order-confirmation/:id" element={<ProtectedRoute><OrderConfirmation /></ProtectedRoute>} />
 
-                {/* 404 */}
-                <Route path="*" element={<NotFound />} />
-              </Route>
+                    {/* 404 */}
+                    <Route path="*" element={<NotFound />} />
+                  </Route>
 
-              {/* ── Admin routes (AdminLayout — no storefront Header/Footer) ─ */}
-              <Route
-                path="/admin"
-                element={<AdminRoute><AdminLayout /></AdminRoute>}
-              >
-                <Route index element={<AdminDashboard />} />
-                <Route path="analytics" element={<AdminAnalytics />} />
-                <Route path="orders" element={<AdminOrders />} />
-                <Route path="products" element={<AdminProducts />} />
-                <Route path="categories" element={<AdminCategories />} />
-                <Route path="brands" element={<AdminBrands />} />
-                <Route path="coupons" element={<AdminCoupons />} />
-                <Route path="users" element={<AdminUsers />} />
-                <Route path="reviews" element={<AdminReviews />} />
-                <Route path="messages" element={<AdminMessages />} />
-                <Route path="chat" element={<AdminChat />} />
-                <Route path="blog" element={<AdminBlog />} />
-                {/* Unknown /admin/* → back to overview */}
-                <Route path="*" element={<Navigate to="/admin" replace />} />
-              </Route>
+                  {/* ── Admin routes (AdminLayout — no storefront Header/Footer) ─ */}
+                  <Route
+                    path="/admin"
+                    element={<AdminRoute><AdminLayout /></AdminRoute>}
+                  >
+                    <Route index element={<AdminDashboard />} />
+                    <Route path="analytics" element={<AdminAnalytics />} />
+                    <Route path="orders" element={<AdminOrders />} />
+                    <Route path="products" element={<AdminProducts />} />
+                    <Route path="categories" element={<AdminCategories />} />
+                    <Route path="brands" element={<AdminBrands />} />
+                    <Route path="coupons" element={<AdminCoupons />} />
+                    <Route path="users" element={<AdminUsers />} />
+                    <Route path="reviews" element={<AdminReviews />} />
+                    <Route path="messages" element={<AdminMessages />} />
+                    <Route path="chat" element={<AdminChat />} />
+                    <Route path="blog" element={<AdminBlog />} />
+                    {/* Unknown /admin/* → back to overview */}
+                    <Route path="*" element={<Navigate to="/admin" replace />} />
+                  </Route>
 
-            </Routes>
-          </WishlistProvider>
-        </CartProvider>
-      </AuthProvider>
-    </BrowserRouter>
+                </Routes>
+              </WishlistProvider>
+            </CartProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </SeoProvider>
+    </HelmetProvider>
   );
 }
 

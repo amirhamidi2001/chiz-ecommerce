@@ -18,3 +18,18 @@ describe('index.html root element', () => {
     expect(doc.querySelector('script[type="module"][src="/src/main.jsx"]')).not.toBeNull();
   });
 });
+
+// Task 15.1.1.1: index.html's <title> only shows for the instant before React hydrates
+// (react-helmet-async then adds the real one). It must be the Persian default, not the old
+// English "Chiz E-Commerce" placeholder, or that would flash on every page load.
+describe('index.html pre-hydration metadata', () => {
+  it('has the Persian default title from constants/seo.js', async () => {
+    const { DEFAULT_TITLE } = await import('../constants/seo');
+    expect(doc.title).toBe(DEFAULT_TITLE);
+    expect(doc.title).not.toMatch(/E-Commerce/i);
+  });
+
+  it('has no static meta description (it would duplicate the per-page one at runtime)', () => {
+    expect(doc.querySelector('meta[name="description"]')).toBeNull();
+  });
+});
