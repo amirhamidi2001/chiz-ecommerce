@@ -1,0 +1,5 @@
+{% for paragraph in paragraphs %}
+<tr>
+<td style="padding:8px 32px;direction:rtl;text-align:right;font-family:Vazirmatn,Tahoma,'Segoe UI',Arial,sans-serif;font-size:15px;line-height:2;color:#374151;">{{ paragraph|urlize|linebreaksbr }}</td>
+</tr>
+{% endfor %}

@@ -1,6 +1,6 @@
 import pytest
-from accounts.sms.base import SMSProvider, get_sms_provider
 from django.core.exceptions import ImproperlyConfigured
+from notifications.sms.base import SMSProvider, get_sms_provider
 
 
 class TestSMSProviderInterface:
@@ -31,7 +31,9 @@ class TestSMSProviderInterface:
 class TestGetSMSProvider:
 
     def test_returns_instance_of_configured_valid_provider(self, settings):
-        settings.SMS_PROVIDER_CLASS = "accounts.tests.sms_doubles.ValidTestProvider"
+        settings.SMS_PROVIDER_CLASS = (
+            "notifications.tests.sms_doubles.ValidTestProvider"
+        )
 
         provider = get_sms_provider()
 
@@ -41,7 +43,10 @@ class TestGetSMSProvider:
     def test_default_setting_value_is_the_console_provider_path(self, settings):
         # Sanity check on the configured default itself (Task 2.2.1.2
         # implements this class — not yet present as of this task).
-        assert settings.SMS_PROVIDER_CLASS == "accounts.sms.console.ConsoleSMSProvider"
+        assert (
+            settings.SMS_PROVIDER_CLASS
+            == "notifications.sms.console.ConsoleSMSProvider"
+        )
 
     def test_nonexistent_dotted_path_raises_improperly_configured(self, settings):
         settings.SMS_PROVIDER_CLASS = "totally.bogus.module.DoesNotExist"
@@ -66,7 +71,7 @@ class TestGetSMSProvider:
     def test_class_not_implementing_sms_provider_raises_improperly_configured(
         self, settings
     ):
-        settings.SMS_PROVIDER_CLASS = "accounts.tests.sms_doubles.NotAnSMSProvider"
+        settings.SMS_PROVIDER_CLASS = "notifications.tests.sms_doubles.NotAnSMSProvider"
 
         with pytest.raises(ImproperlyConfigured) as exc_info:
             get_sms_provider()
@@ -79,7 +84,7 @@ class TestGetSMSProvider:
         self, settings
     ):
         settings.SMS_PROVIDER_CLASS = (
-            "accounts.tests.sms_doubles.ProviderRequiringConstructorArgs"
+            "notifications.tests.sms_doubles.ProviderRequiringConstructorArgs"
         )
 
         with pytest.raises(ImproperlyConfigured) as exc_info:
@@ -90,7 +95,9 @@ class TestGetSMSProvider:
     def test_incomplete_provider_missing_send_raises_improperly_configured(
         self, settings
     ):
-        settings.SMS_PROVIDER_CLASS = "accounts.tests.sms_doubles.IncompleteProvider"
+        settings.SMS_PROVIDER_CLASS = (
+            "notifications.tests.sms_doubles.IncompleteProvider"
+        )
 
         with pytest.raises(ImproperlyConfigured):
             get_sms_provider()
@@ -104,8 +111,8 @@ class TestGetSMSProvider:
         """
         for bad_path in [
             "totally.bogus.module.DoesNotExist",
-            "accounts.tests.sms_doubles.NotAnSMSProvider",
-            "accounts.tests.sms_doubles.ProviderRequiringConstructorArgs",
+            "notifications.tests.sms_doubles.NotAnSMSProvider",
+            "notifications.tests.sms_doubles.ProviderRequiringConstructorArgs",
         ]:
             settings.SMS_PROVIDER_CLASS = bad_path
             with pytest.raises(ImproperlyConfigured):

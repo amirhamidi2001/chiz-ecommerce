@@ -1,0 +1,53 @@
+{% comment %}
+  Shared layout for every transactional email (Persian, right-to-left).
+
+  Email-client constraints this is written around — keep them in mind when editing:
+    * TABLE layout only (no flex/grid) and INLINE styles only: many clients strip
+      <head>/<style>, and none run <script>. No remote CSS, fonts or scripts.
+    * dir="rtl" is set explicitly on <html>, <body> and every <table>, AND
+      `direction:rtl;text-align:right` is repeated inline on every text cell —
+      clients don't reliably cascade either one.
+    * Latin tokens (order numbers, tracking codes, URLs, the brand name) are
+      wrapped in <span dir="ltr" style="direction:ltr;unicode-bidi:embed"> so they
+      keep their own order inside right-to-left text (<bdi> isn't supported by
+      Outlook).
+    * Solid background colours, not gradients; bgcolor= duplicated for Outlook.
+    * The site's Vazirmatn font isn't available in mail clients, so the stack
+      falls back to Tahoma/Segoe UI, which have Persian glyphs.
+  Blocks: heading (the H1), content (rows below it).
+{% endcomment %}<!DOCTYPE html>
+<html lang="fa" dir="rtl" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="x-apple-disable-message-reformatting">
+<title>{% block title %}{{ subject }}{% endblock %}</title>
+</head>
+<body dir="rtl" style="margin:0;padding:0;background-color:#f1f5f4;direction:rtl;text-align:right;font-family:Vazirmatn,Tahoma,'Segoe UI',Arial,sans-serif;">
+<table role="presentation" dir="rtl" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f1f5f4" style="direction:rtl;background-color:#f1f5f4;">
+<tr>
+<td align="center" style="padding:24px 12px;">
+<table role="presentation" dir="rtl" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="direction:rtl;width:100%;max-width:600px;background-color:#ffffff;border:1px solid #d1e7e3;">
+<tr>
+<td bgcolor="#0d9488" style="background-color:#0d9488;padding:24px 32px;direction:rtl;text-align:right;font-family:Vazirmatn,Tahoma,'Segoe UI',Arial,sans-serif;color:#ffffff;">
+<span dir="ltr" style="direction:ltr;unicode-bidi:embed;font-size:24px;font-weight:bold;letter-spacing:1px;">Chiz</span><br>
+<span style="font-size:13px;color:#d1fae5;">فروشگاه آنلاین لوازم آرایشی و بهداشتی</span>
+</td>
+</tr>
+<tr>
+<td style="padding:32px 32px 8px 32px;direction:rtl;text-align:right;font-family:Vazirmatn,Tahoma,'Segoe UI',Arial,sans-serif;">
+<h1 style="margin:0;font-size:21px;line-height:1.7;font-weight:bold;color:#0f766e;direction:rtl;text-align:right;font-family:Vazirmatn,Tahoma,'Segoe UI',Arial,sans-serif;">{% block heading %}{{ subject }}{% endblock %}</h1>
+</td>
+</tr>
+{% block content %}{% endblock %}
+<tr>
+<td bgcolor="#f9fafb" style="background-color:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;direction:rtl;text-align:right;font-family:Vazirmatn,Tahoma,'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.9;color:#6b7280;">
+<span dir="ltr" style="direction:ltr;unicode-bidi:embed;font-weight:bold;">Chiz</span> | فروشگاه آنلاین لوازم آرایشی و بهداشتی
+</td>
+</tr>
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>

@@ -89,10 +89,39 @@ class TestRegisterView:
         assert user.profile.first_name == "New"
         assert user.profile.last_name == "User"
 
-    def test_register_sends_welcome_email(self, api_client):
+    def test_register_sends_welcome_email(self, api_client, run_email_tasks):
+        """End to end: the queued task runs (here, synchronously) and the
+        email goes out. Sending is no longer inline — see the next tests."""
         api_client.post(REGISTER_URL, self.PAYLOAD, format="json")
         assert len(mail.outbox) == 1
         assert mail.outbox[0].to == ["newuser@example.com"]
+
+    def test_register_queues_the_welcome_email_instead_of_sending_it(
+        self, api_client, _email_queue_is_mocked
+    ):
+        """The request must not block on SMTP: the response is returned with
+        the email only QUEUED and nothing sent inline."""
+        res = api_client.post(REGISTER_URL, self.PAYLOAD, format="json")
+
+        assert res.status_code == status.HTTP_201_CREATED
+        _email_queue_is_mocked.assert_called_once()
+        kwargs = _email_queue_is_mocked.call_args.kwargs
+        assert kwargs["recipient"] == "newuser@example.com"
+        assert kwargs["event"] == "welcome"
+        assert kwargs["template_name"] == "accounts/emails/welcome.html"
+        assert mail.outbox == []
+
+    def test_register_still_succeeds_when_the_queue_is_down(
+        self, api_client, _email_queue_is_mocked
+    ):
+        """Registration must never fail because a welcome email couldn't be
+        queued (the old inline send used fail_silently=True for this reason)."""
+        _email_queue_is_mocked.side_effect = ConnectionError("broker down")
+
+        res = api_client.post(REGISTER_URL, self.PAYLOAD, format="json")
+
+        assert res.status_code == status.HTTP_201_CREATED
+        assert User.objects.filter(email="newuser@example.com").exists()
 
     def test_register_duplicate_email_returns_400(self, api_client, user):
         data = {**self.PAYLOAD, "email": user.email}
@@ -512,14 +541,45 @@ class TestPasswordResetRequestView:
         )
         assert res.status_code == status.HTTP_200_OK
 
-    def test_reset_email_is_sent_for_known_user(self, api_client, user):
+    def test_reset_email_is_sent_for_known_user(
+        self, api_client, user, run_email_tasks
+    ):
+        """End to end: the queued task runs and the email goes out."""
         api_client.post(PW_RESET_URL, {"email": user.email}, format="json")
         assert len(mail.outbox) == 1
         assert mail.outbox[0].to == [user.email]
 
-    def test_no_email_sent_for_unknown_user(self, api_client):
+    def test_reset_email_is_queued_not_sent_inline_for_known_user(
+        self, api_client, user, _email_queue_is_mocked
+    ):
+        res = api_client.post(PW_RESET_URL, {"email": user.email}, format="json")
+
+        assert res.status_code == status.HTTP_200_OK
+        _email_queue_is_mocked.assert_called_once()
+        kwargs = _email_queue_is_mocked.call_args.kwargs
+        assert kwargs["recipient"] == user.email
+        assert kwargs["event"] == "password_reset"
+        assert mail.outbox == []
+
+    def test_no_email_sent_for_unknown_user(self, api_client, _email_queue_is_mocked):
         api_client.post(PW_RESET_URL, {"email": "ghost@example.com"}, format="json")
         assert len(mail.outbox) == 0
+        _email_queue_is_mocked.assert_not_called()
+
+    def test_a_queue_outage_is_invisible_to_the_caller_and_cannot_reveal_accounts(
+        self, api_client, user, _email_queue_is_mocked
+    ):
+        """If queueing could raise, a known address would answer 500 and an
+        unknown one 200 — an account-enumeration oracle. Both must look alike."""
+        _email_queue_is_mocked.side_effect = ConnectionError("broker down")
+
+        known = api_client.post(PW_RESET_URL, {"email": user.email}, format="json")
+        unknown = api_client.post(
+            PW_RESET_URL, {"email": "ghost@example.com"}, format="json"
+        )
+
+        assert known.status_code == unknown.status_code == status.HTTP_200_OK
+        assert known.data == unknown.data
 
     def test_invalid_email_format_returns_400(self, api_client):
         res = api_client.post(PW_RESET_URL, {"email": "not-an-email"}, format="json")

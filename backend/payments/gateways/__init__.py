@@ -2,7 +2,7 @@
 Payment gateway interface + factory (Feature 6.1.1).
 
 Mirrors the SMSProvider interface established in Epic 2 Task 2.2.1.1
-(accounts.sms.base.SMSProvider + get_sms_provider()): concrete gateway
+(notifications.sms.base.SMSProvider + get_sms_provider()): concrete gateway
 backends never get referenced directly by callers — the initiate/
 callback views in Phase 6.2 only ever depend on the abstract
 PaymentGateway contract and resolve a concrete instance through

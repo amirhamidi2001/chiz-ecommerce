@@ -1,7 +1,7 @@
 import logging
 
-from accounts.sms.base import SMSProvider
-from accounts.sms.console import ConsoleSMSProvider
+from notifications.sms.base import SMSProvider
+from notifications.sms.console import ConsoleSMSProvider
 
 
 class TestConsoleSMSProvider:
@@ -18,12 +18,12 @@ class TestConsoleSMSProvider:
     def test_send_logs_phone_number_and_message(self, caplog):
         provider = ConsoleSMSProvider()
 
-        with caplog.at_level(logging.INFO, logger="accounts.sms"):
+        with caplog.at_level(logging.INFO, logger="notifications.sms"):
             provider.send("09123456789", "Your code is 654321")
 
         assert len(caplog.records) == 1
         record = caplog.records[0]
-        assert record.name == "accounts.sms"
+        assert record.name == "notifications.sms"
         assert record.levelno == logging.INFO
         # The logger uses %-style lazy formatting (logger.info("...%s...", a, b))
         # — check the fully rendered message, not the raw format string.
@@ -43,7 +43,7 @@ class TestConsoleSMSProvider:
         """Not stateful/singleton in any way that would break repeated use."""
         provider = ConsoleSMSProvider()
 
-        with caplog.at_level(logging.INFO, logger="accounts.sms"):
+        with caplog.at_level(logging.INFO, logger="notifications.sms"):
             assert provider.send("09121111111", "code A") is True
             assert provider.send("09122222222", "code B") is True
 
@@ -57,10 +57,13 @@ class TestConsoleSMSProviderSettingsWiring:
 
     def test_development_settings_point_at_console_provider(self, settings):
         # pytest.ini configures DJANGO_SETTINGS_MODULE = core.settings.development
-        assert settings.SMS_PROVIDER_CLASS == "accounts.sms.console.ConsoleSMSProvider"
+        assert (
+            settings.SMS_PROVIDER_CLASS
+            == "notifications.sms.console.ConsoleSMSProvider"
+        )
 
     def test_get_sms_provider_resolves_to_console_provider_under_dev_settings(self):
-        from accounts.sms.base import get_sms_provider
+        from notifications.sms.base import get_sms_provider
 
         provider = get_sms_provider()
         assert isinstance(provider, ConsoleSMSProvider)

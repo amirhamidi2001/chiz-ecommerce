@@ -54,6 +54,7 @@ urlpatterns = [
     path("api/payments/", include("payments.urls")),
     path("api/shipping/", include("shipping.urls")),
     path("api/promotions/", include("promotions.urls")),
+    path("api/notifications/", include("notifications.urls")),
     path("api/dashboard/", include("dashboard.urls", namespace="dashboard")),
     path("api/chat/", include("chat.urls", namespace="chat")),
     path("api/blog/", include("blog.urls", namespace="blog")),

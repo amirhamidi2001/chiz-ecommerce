@@ -5,7 +5,7 @@ Defines a small, swappable interface any payment gateway backend can
 implement, so the initiate/callback views built in Phase 6.2 depend
 only on this abstract contract — never a specific gateway SDK
 directly. This mirrors the SMSProvider interface established in Epic
-2 Task 2.2.1.1 (accounts.sms.base.SMSProvider): a plain ABC with the
+2 Task 2.2.1.1 (notifications.sms.base.SMSProvider): a plain ABC with the
 minimal set of methods every backend must support, plus small
 dataclass result types instead of dicts/tuples so the contract is
 explicit and self-documenting for whoever implements a concrete

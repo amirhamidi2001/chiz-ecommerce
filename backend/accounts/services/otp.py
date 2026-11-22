@@ -14,11 +14,11 @@ import logging
 import secrets
 
 from accounts.models import OTPCode
-from accounts.sms.base import get_sms_provider
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from notifications.sms.base import get_sms_provider
 
 logger = logging.getLogger("accounts.otp")
 

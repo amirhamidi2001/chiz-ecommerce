@@ -31,6 +31,11 @@ Two levels are provided:
   (like this Celery task) can't accidentally reuse the mutation logic
   without ALSO reusing the concurrency guard.
 
+On confirmed payment success the customer is also sent the ORDER_CONFIRMED
+notification — from `finalize_transaction_success()`, so it fires exactly once
+per transaction whichever entry point finalizes it (see
+`_notify_order_confirmed_on_commit` for why it lives here).
+
 Why this matters for the Celery task specifically: a "stuck" PENDING
 transaction the reconciliation task picks up could, in a rare but real
 race, be in the middle of receiving a genuine callback from the gateway
@@ -40,10 +45,14 @@ the exact same class of bug Task 6.2.1.5 fixed for duplicate callbacks
 first wins, and the other sees status != PENDING and applies nothing.
 """
 
+from core.money import rial_to_toman
 from django.db import transaction
+from notifications.models import NotificationTemplate
+from notifications.services import notify
 from order.models import Order
 from order.services.coupon import release_coupon_redemption
 from order.services.stock import release_reserved_stock
+from order.signals import suppress_status_notification
 
 
 def finalize_transaction_success(txn, result):
@@ -65,7 +74,10 @@ def finalize_transaction_success(txn, result):
     # touch here regarding stock; this transition is purely a status
     # change.
     txn.order.status = Order.Status.PROCESSING
-    txn.order.save(update_fields=["status"])
+    # The customer is told via ORDER_CONFIRMED (scheduled below), so skip the
+    # generic "status changed" message for this one transition.
+    with suppress_status_notification(txn.order):
+        txn.order.save(update_fields=["status"])
 
     # Task 6.4.1.2: the cart is cleared HERE, on confirmed payment
     # success — not at order-creation time. Addressed via order.user
@@ -77,6 +89,48 @@ def finalize_transaction_success(txn, result):
     cart = getattr(txn.order.user, "cart", None)
     if cart is not None:
         cart.clear()
+
+    _notify_order_confirmed_on_commit(txn.order)
+
+
+def _notify_order_confirmed_on_commit(order):
+    """
+    Send the "order confirmed" notification once this payment's transaction
+    has committed.
+
+    WHY HERE, not in PaymentCallbackView or OrderCreateSerializer.create():
+    * Not at order creation: the order is PENDING and unpaid then, and may
+      never complete (payment failure releases its stock) — telling the
+      customer it is "confirmed" would be false.
+    * Not in the view: the view can't tell whether *it* applied the
+      transition (two racing callbacks both see SUCCESS afterwards, so each
+      would send one), and it isn't involved at all when
+      reconcile_stuck_payment_transactions recovers a payment for a customer
+      who never came back from the gateway. This function runs exactly once
+      per transaction, under the row lock, from both entry points.
+
+    WHY on_commit: this runs inside process_verification_result()'s atomic
+    block, holding the transaction row lock. Sending after commit means a
+    rollback never produces a confirmation for an unpaid order, and the SMS
+    HTTP call doesn't hold a DB lock open.
+
+    Guest orders (order.user is None) and registered customers are handled
+    the same way: the checkout contact details on the order are passed
+    explicitly, which notify() prefers over the account's own.
+    """
+    context = {
+        "order_number": order.order_number,
+        # Customer-facing amounts are Toman (ADR 0001); orders store Rial.
+        "order_total": f"{rial_to_toman(order.total):,}",
+        "customer_name": order.first_name,
+        "email": order.email,
+        "phone_number": order.phone,
+    }
+    user = order.user
+
+    transaction.on_commit(
+        lambda: notify(user, NotificationTemplate.Event.ORDER_CONFIRMED, context)
+    )
 
 
 def finalize_transaction_failure(txn):

@@ -81,6 +81,11 @@ def _image_url(request, product):
     return f"{settings.FRONTEND_URL.rstrip('/')}/og-default.jpg"  # branded fallback
 
 
+def frontend_product_url(product):
+    """Absolute storefront URL of a product's detail page."""
+    return f"{settings.FRONTEND_URL.rstrip('/')}/product/{quote(product.slug, safe='-_.~')}"
+
+
 def build_product_preview(request, product):
     name = _normalize(product.name)
     brand = _normalize(product.brand.name) if product.brand_id else ""
@@ -89,7 +94,7 @@ def build_product_preview(request, product):
         "title": " | ".join(p for p in (name, brand, STORE_NAME) if p),
         "name": name,
         "description": _description(product),
-        "url": f"{settings.FRONTEND_URL.rstrip('/')}/product/{quote(product.slug, safe='-_.~')}",
+        "url": frontend_product_url(product),
         "image": _image_url(request, product),
         "price": str(int(price)) if price is not None else None,
     }

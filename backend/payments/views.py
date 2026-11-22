@@ -255,6 +255,10 @@ class PaymentCallbackView(APIView):
         )
 
         if result.success:
+            # The ORDER_CONFIRMED notification is sent from
+            # process_verification_result() -> finalize_transaction_success(),
+            # not here: that runs exactly once per transaction, and also on
+            # the reconciliation-task path that never touches this view.
             final_txn = process_verification_result(
                 gateway, authority, success=True, result=result
             )

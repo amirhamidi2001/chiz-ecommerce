@@ -185,3 +185,71 @@ class PaymentCallbackConcurrencyTests(TransactionTestCase):
         # SAME, correct order-confirmation URL — never a failure page.
         for _, redirect_url in results:
             self.assertIn(f"/order-confirmation/{order.id}", redirect_url)
+
+    def test_two_concurrent_successful_callbacks_send_exactly_one_confirmation(self):
+        """
+        The ORDER_CONFIRMED notification must go out once per payment, not
+        once per callback. Both racing requests end up seeing a SUCCESS
+        transaction, so a notification sent from the view's success branch
+        would fire twice; sent from finalize_transaction_success() (which
+        only the lock's winner reaches) it fires once. Also checks the
+        generic status-change message stays suppressed under concurrency.
+        """
+        user = make_user(email="racer2@example.com")
+        variant = make_variant(name="Race Item 2", slug="race-item-2", stock=5)
+        order = make_order(user, total=1_000_000)
+        make_order_item(order, variant, quantity=2)
+        authority = "A00000000000000000000000000000000wOGYpd"
+        PaymentTransaction.objects.create(
+            order=order,
+            gateway="zarinpal",
+            authority=authority,
+            amount=order.total,
+            status=PaymentTransaction.Status.PENDING,
+        )
+
+        def fake_get_payment_gateway(name=None):
+            return type(
+                "FakeGateway",
+                (),
+                {
+                    "extract_callback_params": staticmethod(
+                        lambda request: {
+                            "authority": authority,
+                            "is_customer_cancelled": False,
+                        }
+                    ),
+                    "verify_payment": staticmethod(
+                        lambda authority, amount: PaymentVerifyResult(
+                            success=True,
+                            ref_id="201202070",
+                            raw_response={"data": {"code": 100}},
+                        )
+                    ),
+                },
+            )()
+
+        with (
+            mock.patch("payments.services.notify") as confirmed,
+            mock.patch("order.signals.notify") as status_changed,
+            mock.patch(
+                "payments.views.get_payment_gateway",
+                side_effect=fake_get_payment_gateway,
+            ),
+        ):
+            results = _run_concurrently(
+                "/api/payments/callback/zarinpal/",
+                {"Authority": authority, "Status": "OK"},
+                count=2,
+            )
+
+        for status_code, _ in results:
+            self.assertEqual(status_code, 302)
+        self.assertEqual(
+            confirmed.call_count,
+            1,
+            f"Expected exactly one ORDER_CONFIRMED notification, "
+            f"got {confirmed.call_count}",
+        )
+        self.assertEqual(confirmed.call_args.args[1], "order_confirmed")
+        status_changed.assert_not_called()

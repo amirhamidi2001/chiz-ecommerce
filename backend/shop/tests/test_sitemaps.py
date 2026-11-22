@@ -9,6 +9,7 @@ the frontend, so a URL built from the request host (the bug being fixed) cannot 
 import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from xml.etree import ElementTree as ET
 
 import pytest
 from blog.tests.conftest import DraftPostFactory, PostFactory
@@ -21,7 +22,6 @@ from shop.tests.factories import (
     ProductFactory,
     ProductVariantFactory,
 )
-from xml.etree import ElementTree as ET
 
 FRONTEND_URL = "https://chiz.example"
 FRONTEND = urlparse(FRONTEND_URL)

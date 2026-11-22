@@ -10,7 +10,7 @@ Django's own import_string helper (the same mechanism Django uses to
 resolve things like AUTH_USER_MODEL).
 
 No concrete provider is implemented here — see Task 2.2.1.2 for the
-console/dev backend (accounts.sms.console.ConsoleSMSProvider, which
+console/dev backend (notifications.sms.console.ConsoleSMSProvider, which
 SMS_PROVIDER_CLASS defaults to).
 """
 
@@ -72,7 +72,7 @@ def get_sms_provider() -> SMSProvider:
     if not isinstance(instance, SMSProvider):
         raise ImproperlyConfigured(
             f"SMS_PROVIDER_CLASS={dotted_path!r} does not implement the "
-            "SMSProvider interface (accounts.sms.base.SMSProvider). It "
+            "SMSProvider interface (notifications.sms.base.SMSProvider). It "
             "must subclass SMSProvider and implement send()."
         )
 

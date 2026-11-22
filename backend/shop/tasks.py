@@ -1,8 +1,12 @@
 from celery import shared_task
+from core.money import rial_to_toman
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from notifications.models import NotificationTemplate
+from notifications.services import notify
 
 from .models import ProductVariant
+from .social_preview import frontend_product_url
 
 
 @shared_task
@@ -65,14 +69,17 @@ def notify_stock_alert_subscribers(variant_id):
 
     count = 0
     for sub in subscriptions:
-        # Actual email/SMS dispatch is Epic 16's notification system —
-        # this task only marks subscribers as notified and is
-        # deliberately structured so Epic 16 can plug in the real
-        # send() call at the marked location below without touching
-        # this detection/dedup logic.
-        # TODO: Epic 16 — replace this comment with a real
-        # notify(user, event="back_in_stock", context={"variant": variant})
-        # call once the unified notification service exists.
+        # notify() never raises, so a failed send can't abort this loop or
+        # block the dedup marking below (the outcome is in NotificationLog).
+        notify(
+            sub.user,
+            NotificationTemplate.Event.BACK_IN_STOCK,
+            {
+                "product_name": variant.product.name,
+                "variant_sku": variant.sku,
+                "product_url": frontend_product_url(variant.product),
+            },
+        )
         sub.notified_at = timezone.now()
         sub.save(update_fields=["notified_at"])
         count += 1
@@ -110,16 +117,21 @@ def notify_price_drop_subscribers(product_id, old_price, new_price):
 
     count = 0
     for item in subscribers:
-        # Actual email/SMS dispatch is Epic 16's notification system —
-        # like notify_stock_alert_subscribers, this task only finds the
-        # eligible subscribers and leaves one marked place for the real
-        # send() call.
-        # TODO: Epic 16 — replace this comment with a real
-        # notify(item.user, event="price_drop", context={"product": product, "old_price": old_price, "new_price": new_price})
-        # call once the unified notification service exists.
+        notify(
+            item.user,
+            NotificationTemplate.Event.PRICE_DROP,
+            {
+                "product_name": product.name,
+                # Customer-facing amounts are Toman (ADR 0001); the task
+                # arguments are Rial.
+                "old_price": f"{rial_to_toman(old_price):,}",
+                "new_price": f"{rial_to_toman(new_price):,}",
+                "product_url": frontend_product_url(product),
+            },
+        )
         count += 1
     return (
-        f"Would notify {count} wishlist subscriber(s) for product {product_id} "
+        f"Notified {count} wishlist subscriber(s) for product {product_id} "
         f"price drop {old_price} -> {new_price}."
     )
 

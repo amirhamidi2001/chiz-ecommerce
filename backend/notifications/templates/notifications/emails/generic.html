@@ -1,0 +1,6 @@
+{% extends "notifications/emails/base.html" %}
+{# Fallback layout for events without a dedicated template (status change, back in stock, price drop...): the subject as heading, then the admin-editable body copy. #}
+{% block content %}
+{% include "notifications/emails/_paragraphs.html" %}
+<tr><td style="padding:8px 32px 24px 32px;font-size:1px;line-height:1px;direction:rtl;text-align:right;">&nbsp;</td></tr>
+{% endblock %}

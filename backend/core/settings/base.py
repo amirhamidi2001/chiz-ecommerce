@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "payments.apps.PaymentsConfig",
     "shipping.apps.ShippingConfig",
     "promotions.apps.PromotionsConfig",
+    "notifications.apps.NotificationsConfig",
     "dashboard.apps.DashboardConfig",
     "chat.apps.ChatConfig",
     "blog.apps.BlogConfig",
@@ -349,8 +350,15 @@ OTP_MAX_VERIFICATION_ATTEMPTS = config(
 
 # ─── SMS provider (Feature 2.2.1) ───────────────────────────────────────────────
 SMS_PROVIDER_CLASS = config(
-    "SMS_PROVIDER_CLASS", default="accounts.sms.console.ConsoleSMSProvider"
+    "SMS_PROVIDER_CLASS", default="notifications.sms.console.ConsoleSMSProvider"
 )
+
+# Kavenegar (notifications.sms.kavenegar.KavenegarSMSProvider — Epic 16). Only
+# used when SMS_PROVIDER_CLASS points at it, which production.py does by
+# default. KAVENEGAR_SENDER_LINE is optional: when blank, Kavenegar sends from
+# the account's default line.
+KAVENEGAR_API_KEY = config("KAVENEGAR_API_KEY", default="")
+KAVENEGAR_SENDER_LINE = config("KAVENEGAR_SENDER_LINE", default="")
 
 
 # ─── Payment gateways (Feature 6.1.1) ───────────────────────────────────────────

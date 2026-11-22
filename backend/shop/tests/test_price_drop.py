@@ -5,7 +5,7 @@ Price-drop notifications for wishlisted products:
 
   * Product.lowest_active_price  — the "starting at" comparison basis
   * handle_variant_price_change  — shop/signals.py post_save hook on ProductVariant
-  * notify_price_drop_subscribers — shop/tasks.py (Epic 16 placeholder dispatch)
+  * notify_price_drop_subscribers — shop/tasks.py (dispatches via notifications.notify)
   * 0030 backfill migration       — baseline snapshot for pre-existing products
 
 Signal tests mock `notify_price_drop_subscribers.delay` (as the stock-alert
@@ -23,7 +23,9 @@ import pytest
 from dashboard.models import Wishlist
 from django.apps import apps
 from django.db import transaction
+from notifications.models import NotificationLog
 from shop.models import ProductPriceSnapshot
+from shop.social_preview import frontend_product_url
 from shop.tasks import notify_price_drop_subscribers
 from shop.tests.factories import ProductFactory, ProductVariantFactory, UserFactory
 
@@ -349,10 +351,17 @@ class TestPriceDropSignalEdgeCases:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@pytest.fixture
+def mock_notify():
+    """Replace notify() as shop.tasks sees it (Epic 16 closed the old TODO)."""
+    with patch("shop.tasks.notify") as mock:
+        yield mock
+
+
 @pytest.mark.django_db
 class TestNotifyPriceDropSubscribers:
 
-    def test_counts_only_authenticated_wishlist_subscribers(self, product):
+    def test_counts_only_authenticated_wishlist_subscribers(self, product, mock_notify):
         for _ in range(2):
             Wishlist.objects.create(user=UserFactory(), product=product)
         Wishlist.objects.create(session_key="guest-1", product=product)
@@ -361,44 +370,100 @@ class TestNotifyPriceDropSubscribers:
         result = notify_price_drop_subscribers(product.id, 100_000, 80_000)
 
         assert result == (
-            f"Would notify 2 wishlist subscriber(s) for product {product.id} "
+            f"Notified 2 wishlist subscriber(s) for product {product.id} "
             "price drop 100000 -> 80000."
         )
 
-    def test_guest_only_wishlist_notifies_nobody(self, product):
+    def test_calls_notify_per_authenticated_subscriber_with_toman_prices(
+        self, product, mock_notify
+    ):
+        user_a, user_b = UserFactory(), UserFactory()
+        Wishlist.objects.create(user=user_a, product=product)
+        Wishlist.objects.create(user=user_b, product=product)
+        Wishlist.objects.create(session_key="guest-1", product=product)
+
+        # Task arguments are Rial (ADR 0001); message text must be Toman.
+        notify_price_drop_subscribers(product.id, 12_500_000, 9_900_000)
+
+        assert mock_notify.call_count == 2
+        assert {call.args[0] for call in mock_notify.call_args_list} == {
+            user_a,
+            user_b,
+        }
+        for call in mock_notify.call_args_list:
+            assert call.args[1] == "price_drop"
+            assert call.args[2] == {
+                "product_name": product.name,
+                "old_price": "1,250,000",
+                "new_price": "990,000",
+                "product_url": frontend_product_url(product),
+            }
+
+    def test_guest_only_wishlist_notifies_nobody(self, product, mock_notify):
         Wishlist.objects.create(session_key="guest-1", product=product)
         result = notify_price_drop_subscribers(product.id, 100_000, 80_000)
-        assert result.startswith("Would notify 0 wishlist subscriber(s)")
+        assert result.startswith("Notified 0 wishlist subscriber(s)")
+        mock_notify.assert_not_called()
 
-    def test_other_products_subscribers_are_not_counted(self, product):
+    def test_other_products_subscribers_are_not_counted(self, product, mock_notify):
         other = ProductFactory()
-        Wishlist.objects.create(user=UserFactory(), product=product)
+        subscriber = UserFactory()
+        Wishlist.objects.create(user=subscriber, product=product)
         Wishlist.objects.create(user=UserFactory(), product=other)
         Wishlist.objects.create(user=UserFactory(), product=other)
 
         result = notify_price_drop_subscribers(product.id, 100_000, 80_000)
 
-        assert result.startswith("Would notify 1 wishlist subscriber(s)")
+        assert result.startswith("Notified 1 wishlist subscriber(s)")
+        mock_notify.assert_called_once()
+        assert mock_notify.call_args.args[0] == subscriber
 
-    def test_no_subscribers_is_fine(self, product):
+    def test_no_subscribers_is_fine(self, product, mock_notify):
         result = notify_price_drop_subscribers(product.id, 100_000, 80_000)
-        assert result.startswith("Would notify 0 wishlist subscriber(s)")
+        assert result.startswith("Notified 0 wishlist subscriber(s)")
+        mock_notify.assert_not_called()
 
-    def test_missing_product_returns_message_instead_of_raising(self):
+    def test_missing_product_returns_message_instead_of_raising(self, mock_notify):
         assert (
             notify_price_drop_subscribers(999999, 100_000, 80_000)
             == "Product no longer exists."
         )
+        mock_notify.assert_not_called()
 
-    def test_end_to_end_signal_to_task(self, product, cheap, dear, commit):
+    def test_real_notify_respects_the_promotions_preference(self, product):
+        """No mocks: promotions-off users get nothing logged, opted-in users
+        get an email attempt logged."""
+        opted_out = UserFactory(email="out@example.com")
+        opted_in = UserFactory(email="in@example.com")
+        opted_in.profile.promotions = True
+        opted_in.profile.save()
+        Wishlist.objects.create(user=opted_out, product=product)
+        Wishlist.objects.create(user=opted_in, product=product)
+
+        notify_price_drop_subscribers(product.id, 100_000, 80_000)
+
+        assert not NotificationLog.objects.filter(user=opted_out).exists()
+        log = NotificationLog.objects.get(user=opted_in)
+        assert (log.event, log.channel, log.recipient) == (
+            "price_drop",
+            "email",
+            "in@example.com",
+        )
+
+    def test_end_to_end_signal_to_task(self, product, cheap, dear, commit, mock_notify):
         """Real signal -> task (no mocks): .delay is executed eagerly."""
-        Wishlist.objects.create(user=UserFactory(), product=product)
+        subscriber = UserFactory()
+        Wishlist.objects.create(user=subscriber, product=product)
         with patch(
             "shop.signals.notify_price_drop_subscribers.delay",
             side_effect=notify_price_drop_subscribers,
         ) as spy:
             change(cheap, commit, price=80_000)
         spy.assert_called_once_with(product.id, 100_000, 80_000)
+        mock_notify.assert_called_once()
+        assert mock_notify.call_args.args[0] == subscriber
+        assert mock_notify.call_args.args[2]["old_price"] == "10,000"
+        assert mock_notify.call_args.args[2]["new_price"] == "8,000"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

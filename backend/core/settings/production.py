@@ -42,6 +42,36 @@ DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default=config("EMAIL_HOST_USE
 FRONTEND_URL = config("FRONTEND_URL")
 
 
+# ─── SMS provider (Feature 2.2.1 / Task 16.2.1.1) ─────────────────────────────
+# Real Kavenegar delivery by default. development.py pins the console provider
+# instead (which only prints — see its docstring); it must never be used here.
+# KAVENEGAR_API_KEY / KAVENEGAR_SENDER_LINE are read from the environment in
+# base.py.
+#
+# Same design choice as the ZarinPal check below: a WARNING at settings-import
+# time rather than a hard startup failure (this module can legitimately run in
+# a staging environment), so a deployment that forgot the credentials — and
+# would otherwise only find out when the first OTP fails — says so on boot.
+SMS_PROVIDER_CLASS = config(
+    "SMS_PROVIDER_CLASS", default="notifications.sms.kavenegar.KavenegarSMSProvider"
+)
+
+if SMS_PROVIDER_CLASS.endswith(".ConsoleSMSProvider"):
+    logger.warning(
+        "SMS_PROVIDER_CLASS is the console provider under production settings: "
+        "no SMS will actually be delivered (OTP login will silently never "
+        "reach any phone)."
+    )
+elif (
+    SMS_PROVIDER_CLASS == "notifications.sms.kavenegar.KavenegarSMSProvider"
+    and not KAVENEGAR_API_KEY  # noqa: F405 — from .base
+):
+    logger.warning(
+        "KAVENEGAR_API_KEY is empty while Kavenegar is the SMS provider: every "
+        "SMS (including OTP codes) will fail until it is set."
+    )
+
+
 # ─── Payment gateway (Feature 6.1.1 / Task 6.2.1.1) ────────────────────────────
 # ZARINPAL_SANDBOX and ZARINPAL_MERCHANT_ID are intentionally NOT overridden
 # here — they're read from the environment via core/settings/base.py's

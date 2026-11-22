@@ -1,0 +1,5 @@
+{# One label/value row of a details card. Args: label, value, ltr (value is a Latin token), suffix (optional unit). #}
+<tr>
+<td width="40%" valign="top" style="padding:12px 16px;border-bottom:1px solid #e5e7eb;direction:rtl;text-align:right;font-family:Vazirmatn,Tahoma,'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.8;color:#6b7280;">{{ label }}</td>
+<td width="60%" valign="top" style="padding:12px 16px;border-bottom:1px solid #e5e7eb;direction:rtl;text-align:right;font-family:Vazirmatn,Tahoma,'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.8;font-weight:bold;color:#111827;">{% if ltr %}<span dir="ltr" style="direction:ltr;unicode-bidi:embed;">{{ value }}</span>{% else %}{{ value }}{% endif %}{% if suffix %} {{ suffix }}{% endif %}</td>
+</tr>

@@ -1,11 +1,19 @@
+import logging
+
 from cart.services import merge_session_cart_into_user_cart
 from dashboard.services import merge_session_wishlist_into_user_wishlist
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
-from django.template.loader import render_to_string
+from django.utils import translation
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from django.utils.translation import gettext as _
+from notifications.email import (
+    DEFAULT_RECIPIENT_NAME,
+    EMAIL_LANGUAGE,
+    send_notification_email_task,
+)
+from notifications.models import NotificationTemplate
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -40,52 +48,74 @@ from .tokens import password_reset_token
 
 User = get_user_model()
 
+logger = logging.getLogger(__name__)
+
+
+def _queue_email(**kwargs):
+    """
+    Queue an email on Celery — off the request path, so a slow or down SMTP
+    server can no longer slow or fail the request.
+
+    Never raises. Registration must not fail because an email couldn't be
+    queued (the old inline send used fail_silently=True for the same reason),
+    and the password-reset view must stay indistinguishable for known and
+    unknown addresses: an error only for existing accounts would reveal them.
+    """
+    try:
+        send_notification_email_task.delay(**kwargs)
+    except Exception:  # noqa: BLE001 — see docstring
+        logger.exception("Could not queue %s email", kwargs.get("event"))
+
 
 def _send_welcome_email(user):
-    """Send a welcome email to a newly registered user."""
-    subject = _("Welcome! Your account is ready.")
-    message = render_to_string(
-        "accounts/emails/welcome.html",
-        {
-            "first_name": user.profile.first_name,
-            "email": user.email,
-        },
-    )
-    send_mail(
+    """
+    Queue a welcome email for a newly registered user.
+
+    Subject and plain-text part are rendered here under EMAIL_LANGUAGE
+    (Persian), not the request's language: the HTML (rendered by the task, also
+    in Persian) is RTL Persian only, and a subject/fallback that followed an
+    English Accept-Language header would contradict it.
+    """
+    first_name = user.profile.first_name or DEFAULT_RECIPIENT_NAME
+    with translation.override(EMAIL_LANGUAGE):
+        subject = _("Welcome! Your account is ready.")
+        text_message = _("Hi %(first_name)s, welcome! Your account is ready.") % {
+            "first_name": first_name
+        }
+    _queue_email(
+        recipient=user.email,
         subject=subject,
-        message=_("Hi %(first_name)s, welcome! Your account is ready.")
-        % {"first_name": user.profile.first_name},
-        from_email=None,
-        recipient_list=[user.email],
-        html_message=message,
-        fail_silently=True,
+        body_text=text_message,
+        template_name="accounts/emails/welcome.html",
+        context={
+            "first_name": first_name,
+            "email": user.email,
+            "shop_url": settings.FRONTEND_URL,
+        },
+        event=NotificationTemplate.Event.WELCOME,
+        user_id=user.pk,
     )
 
 
 def _send_password_reset_email(user, request):
-    """Generate a reset link and email it to the user."""
+    """Generate a reset link and queue the email carrying it (Persian, see above)."""
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     token = password_reset_token.make_token(user)
 
-    frontend_base = getattr(
-        __import__("django.conf", fromlist=["settings"]).settings,
-        "FRONTEND_URL",
-        "http://localhost:3000",
-    )
-    reset_url = f"{frontend_base}/reset-password/{uid}/{token}/"
+    reset_url = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}/"
 
-    subject = _("Reset your password")
-    message = render_to_string(
-        "accounts/emails/password_reset.html",
-        {"reset_url": reset_url, "first_name": user.profile.first_name},
-    )
-    send_mail(
+    first_name = user.profile.first_name or DEFAULT_RECIPIENT_NAME
+    with translation.override(EMAIL_LANGUAGE):
+        subject = _("Reset your password")
+        text_message = _("Reset your password here: %(url)s") % {"url": reset_url}
+    _queue_email(
+        recipient=user.email,
         subject=subject,
-        message=_("Reset your password here: %(url)s") % {"url": reset_url},
-        from_email=None,
-        recipient_list=[user.email],
-        html_message=message,
-        fail_silently=True,
+        body_text=text_message,
+        template_name="accounts/emails/password_reset.html",
+        context={"reset_url": reset_url, "first_name": first_name},
+        event=NotificationTemplate.Event.PASSWORD_RESET,
+        user_id=user.pk,
     )
 
 

@@ -1,5 +1,5 @@
 """
-Test-double SMS provider classes used by accounts/tests/test_sms.py.
+Test-double SMS provider classes used by notifications/tests/test_sms.py.
 
 These live in their own normal, importable module (rather than being
 defined inline inside the test functions) specifically because
@@ -8,7 +8,7 @@ Django's import_string — a class defined inside a test function isn't
 reliably importable by dotted path.
 """
 
-from accounts.sms.base import SMSProvider
+from notifications.sms.base import SMSProvider
 
 
 class ValidTestProvider(SMSProvider):
