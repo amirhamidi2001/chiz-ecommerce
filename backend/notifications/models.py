@@ -154,3 +154,46 @@ class NotificationLog(models.Model):
 
     def __str__(self):
         return f"{self.event} to {self.recipient} via {self.channel} — {self.status}"
+
+
+class UserNotification(models.Model):
+    """
+    A customer-facing, in-account notification (the "inbox").
+
+    Distinct from NotificationLog on purpose: the log is an ADMIN audit trail
+    (provider errors, internal event keys, one row per channel attempt) and is
+    never shown to customers. A UserNotification holds only the rendered,
+    customer-safe message plus an optional in-app destination, and is written
+    by the IN_APP channel sender (notifications/services_inapp.py).
+
+    In-app notifications need a real account to attach to, so there is no
+    guest variant: ``user`` is required.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="in_app_notifications",
+    )
+    event = models.CharField(max_length=30, choices=NotificationTemplate.Event.choices)
+    message = models.TextField()
+    link_url = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=(
+            "Optional in-app relative URL to navigate to when this notification "
+            "is clicked (e.g. an order detail page)."
+        ),
+    )
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "is_read", "-created_at"])]
+
+    def __str__(self):
+        # User.email is nullable (phone-only OTP accounts), so fall back
+        # rather than rendering "None — ...".
+        who = self.user.email or self.user.phone_number or f"user {self.user_id}"
+        return f"{who} — {self.event} ({'read' if self.is_read else 'unread'})"

@@ -134,3 +134,21 @@ def run_email_tasks():
         "notifications.tasks.send_notification_email_task.delay", side_effect=run
     ) as queue:
         yield queue
+
+
+# ─── Channel layer: in-memory for every test ───────────────────────────────
+#
+# create_in_app_notification() (Epic 16.4) pushes to the Channels layer, so any
+# test that sends an in-app notification would otherwise talk to the real
+# Redis channel layer — slow, and a failure/hang wherever Redis isn't running.
+# chat/tests/conftest.py applies the same override for the chat suite; this
+# makes it project-wide. InMemoryChannelLayer is process-local, so a sync
+# test's push is a harmless no-op, and WebsocketCommunicator tests receive it
+# when the sender runs via sync_to_async (same event loop).
+
+
+@pytest.fixture(autouse=True)
+def _in_memory_channel_layer(settings):
+    settings.CHANNEL_LAYERS = {
+        "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
+    }

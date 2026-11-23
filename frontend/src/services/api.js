@@ -490,6 +490,24 @@ export const chatAPI = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// IN-APP NOTIFICATIONS  →  /api/notifications/
+// ═══════════════════════════════════════════════════════════════════════════
+export const notificationsAPI = {
+  /**
+   * GET /api/notifications/?page_size=
+   * The authenticated user's notifications, newest first, paginated:
+   * { count, total_pages, next, previous, current_page, page_size, results }
+   */
+  list: (params) => api.get('/notifications/', { params }),
+
+  /** PATCH /api/notifications/<id>/ — mark one notification read. */
+  markRead: (id) => api.patch(`/notifications/${id}/`, { is_read: true }),
+
+  /** POST /api/notifications/mark-all-read/ → { updated: n } */
+  markAllRead: () => api.post('/notifications/mark-all-read/'),
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ADMIN DASHBOARD  →  /api/dashboard/admin/
 // ═══════════════════════════════════════════════════════════════════════════
 export const adminAPI = {

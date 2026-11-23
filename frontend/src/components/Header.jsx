@@ -5,6 +5,7 @@ import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { useAuth } from '../context/AuthContext';
 import SearchBox from './SearchBox';
+import NotificationBell from './NotificationBell';
 import { FREE_SHIPPING_THRESHOLD_RIAL } from '../constants/pricing';
 import { formatToman } from '../utils/money';
 
@@ -150,6 +151,9 @@ const Header = () => {
               )}
             </div>
           </div>
+
+          {/* ── Notifications (accounts only: an inbox needs a user) ──────── */}
+          {isAuthenticated && <NotificationBell />}
 
           {/* ── Wishlist ─────────────────────────────────────────────────── */}
           <Link to="/account?tab=wishlist" className="relative text-emerald-700 text-xl hover:text-teal-700" aria-label="Wishlist">

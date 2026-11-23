@@ -1,7 +1,23 @@
-from django.urls import path  # noqa: F401
+from django.urls import path
+
+from .views import (
+    MarkAllNotificationsReadView,
+    UserNotificationDetailView,
+    UserNotificationListView,
+)
 
 app_name = "notifications"
 
-# No endpoints yet — in-app notification, preference, and template routes
-# are added by later tasks in this epic.
-urlpatterns = []
+urlpatterns = [
+    path("", UserNotificationListView.as_view(), name="notification-list"),
+    path(
+        "mark-all-read/",
+        MarkAllNotificationsReadView.as_view(),
+        name="notification-mark-all-read",
+    ),
+    path(
+        "<int:pk>/",
+        UserNotificationDetailView.as_view(),
+        name="notification-detail",
+    ),
+]

@@ -5,6 +5,7 @@ import { HelmetProvider } from 'react-helmet-async';
 // ─── Context providers ────────────────────────────────────────────────────
 import { AuthProvider } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
+import { NotificationProvider } from './context/NotificationContext';
 import { WishlistProvider } from './context/WishlistContext';
 
 // ─── Shared layout pieces ─────────────────────────────────────────────────
@@ -151,6 +152,8 @@ function App() {
               auth-change events dispatched by AuthContext on login/logout.
               CartProvider follows the same pattern.
             */}
+            {/* NotificationProvider reads auth state, so it sits inside AuthProvider. */}
+            <NotificationProvider>
             <CartProvider>
               <WishlistProvider>
                 <Routes>
@@ -219,6 +222,7 @@ function App() {
                 </Routes>
               </WishlistProvider>
             </CartProvider>
+            </NotificationProvider>
           </AuthProvider>
         </BrowserRouter>
       </SeoProvider>
