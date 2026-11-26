@@ -170,3 +170,54 @@ class Wishlist(models.Model):
 
     def get_full_name(self, obj):
         return obj.full_name
+
+
+class PriceAdjustmentLog(models.Model):
+    """
+    Audit record of one COMMITTED bulk price update (never of a dry run).
+
+    Answers "who changed prices, when, and by how much" without having to
+    reconstruct it. category/brand/variant scope is stored as plain ids (not
+    foreign keys) so deleting a category or brand can neither cascade into,
+    nor be blocked by, the audit trail; `actor` is SET_NULL for the same
+    reason. `changes` keeps [variant_id, old_price, new_price] for every
+    variant that actually changed, because the old prices are otherwise
+    unrecoverable (rounding to whole Toman and the zero floor lose
+    information a percentage alone can't undo).
+
+    Not StockMovement: that model is specifically for stock changes.
+    """
+
+    class AdjustmentType(models.TextChoices):
+        PERCENT_INCREASE = "percent_increase", _("Percentage Increase")
+        PERCENT_DECREASE = "percent_decrease", _("Percentage Decrease")
+        FIXED_INCREASE = "fixed_increase", _("Fixed Rial Increase")
+        FIXED_DECREASE = "fixed_decrease", _("Fixed Rial Decrease")
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="price_adjustments",
+    )
+    adjustment_type = models.CharField(max_length=20, choices=AdjustmentType.choices)
+    # Percent points (1-100) or a Rial amount, depending on adjustment_type.
+    value = models.PositiveBigIntegerField()
+    category_id = models.PositiveIntegerField(null=True, blank=True)
+    brand_id = models.PositiveIntegerField(null=True, blank=True)
+    variant_ids = models.JSONField(default=list, blank=True)
+    # Variants in scope vs. variants whose price actually changed.
+    matched_count = models.PositiveIntegerField()
+    affected_count = models.PositiveIntegerField()
+    changes = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return (
+            f"{self.adjustment_type} {self.value} → {self.affected_count} variants "
+            f"by {self.actor or 'unknown'}"
+        )

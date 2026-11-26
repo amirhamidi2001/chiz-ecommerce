@@ -1,6 +1,7 @@
 from accounts.models import Profile
 from blog.models import Comment, Post
 from contact.models import ContactMessage
+from core.money import MAX_RIAL_AMOUNT, RIAL_PER_TOMAN
 from core.serializers import RialSerializerField
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -14,7 +15,7 @@ from rest_framework import serializers
 from shipping.serializers import ShipmentSerializer
 from shop.models import Brand, Category, Product, Review, StockMovement
 
-from .models import Address, Wishlist
+from .models import Address, PriceAdjustmentLog, Wishlist
 from .services import get_wishlist_owner_kwargs
 
 User = get_user_model()
@@ -909,3 +910,85 @@ class AdminCouponSerializer(serializers.ModelSerializer):
         except DjangoValidationError as exc:
             raise serializers.ValidationError(exc.message_dict)
         return attrs
+
+
+class BulkPriceUpdateSerializer(serializers.Serializer):
+    """
+    Input for the bulk ProductVariant price update.
+
+    Operates on ProductVariant.price — the real, authoritative price since
+    Epic 3 — never on the legacy Product.price/Product.stock fields that
+    AdminProductSerializer still exposes.
+
+    dry_run defaults to True ON PURPOSE: a bulk price mutation must be
+    committed deliberately (dry_run=false), never by omission. (DRF would
+    read an absent BooleanField as False for form-encoded bodies, but a
+    field `default` also becomes its empty-form value, so an omitted
+    dry_run stays True for JSON and form requests alike — tested.)
+    """
+
+    AdjustmentType = PriceAdjustmentLog.AdjustmentType
+
+    adjustment_type = serializers.ChoiceField(choices=AdjustmentType.choices)
+    # Percent points (1-100) or a Rial amount, depending on adjustment_type.
+    value = serializers.IntegerField(min_value=1, max_value=MAX_RIAL_AMOUNT)
+    category_id = serializers.IntegerField(required=False, allow_null=True)
+    brand_id = serializers.IntegerField(required=False, allow_null=True)
+    variant_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True,
+    )
+    dry_run = serializers.BooleanField(default=True)
+
+    def validate_category_id(self, value):
+        if value and not Category.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("Category does not exist.")
+        return value
+
+    def validate_brand_id(self, value):
+        if value and not Brand.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("Brand does not exist.")
+        return value
+
+    def validate(self, attrs):
+        if not (
+            attrs.get("category_id")
+            or attrs.get("brand_id")
+            or attrs.get("variant_ids")
+        ):
+            raise serializers.ValidationError(
+                "Specify at least one of category_id, brand_id, or variant_ids "
+                "to scope the update."
+            )
+        kind = attrs["adjustment_type"]
+        value = attrs["value"]
+        if kind in (
+            self.AdjustmentType.PERCENT_INCREASE,
+            self.AdjustmentType.PERCENT_DECREASE,
+        ):
+            # Both directions: a decrease over 100 is meaningless and, since
+            # decreases are floored at 0, would silently zero every price.
+            if value > 100:
+                raise serializers.ValidationError(
+                    {"value": "Percentage adjustment cannot exceed 100."}
+                )
+        elif value % RIAL_PER_TOMAN:
+            # Prices are whole-Toman (multiples of 10 Rial) at the DB level.
+            raise serializers.ValidationError(
+                {"value": "Fixed amount must be a multiple of 10 Rial (whole Toman)."}
+            )
+        return attrs
+
+
+class BulkProductImportSerializer(serializers.Serializer):
+    """
+    Multipart input for POST admin/products/bulk-import/.
+
+    dry_run defaults to True (preview only; nothing is kept) — committing
+    needs an explicit dry_run=false, as with the bulk price update. An
+    unrecognised value (e.g. "banana") is a 400 rather than being guessed.
+    """
+
+    file = serializers.FileField()
+    dry_run = serializers.BooleanField(default=True)

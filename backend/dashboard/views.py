@@ -1,5 +1,6 @@
 import csv
 import re
+from types import SimpleNamespace
 
 from accounts.models import Profile
 from blog.models import Category as BlogCategory
@@ -7,11 +8,13 @@ from blog.models import Comment as BlogComment
 from blog.models import Post as BlogPost
 from cart.views import get_or_create_cart
 from contact.models import ContactMessage
+from core.money import MAX_RIAL_AMOUNT
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
-from django.http import StreamingHttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django_filters.rest_framework import DjangoFilterBackend
@@ -32,7 +35,7 @@ from shop.models import Brand, Category, Product, ProductVariant, Review, StockM
 from shop.serializers import ProductVariantSerializer
 from shop.services import refresh_product_review_stats
 
-from . import services
+from . import product_import, services
 from .filters import (
     AdminCategoryFilter,
     AdminCommentFilter,
@@ -40,9 +43,10 @@ from .filters import (
     AdminPostFilter,
     AdminProductFilter,
     AdminUserFilter,
+    AdminVariantExportFilter,
     UserOrderFilter,
 )
-from .models import Address, Wishlist
+from .models import Address, PriceAdjustmentLog, Wishlist
 from .permissions import IsAdminOrSuperuser
 from .serializers import (
     AddressSerializer,
@@ -62,6 +66,8 @@ from .serializers import (
     AdminUserUpdateSerializer,
     AvatarUploadSerializer,
     BlogCategorySerializer,
+    BulkPriceUpdateSerializer,
+    BulkProductImportSerializer,
     ChangePasswordSerializer,
     NotificationSettingsSerializer,
     ProfileSerializer,
@@ -419,35 +425,135 @@ class UserReviewViewSet(viewsets.ModelViewSet):
 
 
 class AdminOverviewView(APIView):
-    """GET /dashboard/admin/overview/ — full analytics overview."""
+    """
+    GET /dashboard/admin/overview/ — full analytics overview.
+
+    ?period=7d|30d|90d|1y (default 30d), or
+    ?period=custom&start=YYYY-MM-DD&end=YYYY-MM-DD (inclusive; ISO datetimes
+    also accepted). A bad custom range returns 400 {"detail": ...}.
+    """
 
     permission_classes = [IsAdminOrSuperuser]
 
     def get(self, request):
         period = request.query_params.get("period", "30d")
-        data = services.get_admin_overview(period)
+        try:
+            data = services.get_admin_overview(
+                period,
+                request.query_params.get("start"),
+                request.query_params.get("end"),
+            )
+        except services.InvalidDateRange as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         data["order_status_distribution"] = services.get_order_status_distribution()
         data["monthly_revenue"] = services.get_monthly_revenue()
-        data["top_products"] = services.get_top_products()
+        # Same window as the KPIs above (already validated by the call above).
+        start, end = services.get_date_range(
+            period,
+            request.query_params.get("start"),
+            request.query_params.get("end"),
+        )
+        data["top_products"] = services.get_top_products(start=start, end=end)
         data["user_stats"] = services.get_user_stats()
         data["product_stats"] = services.get_product_stats()
         data["recent_orders"] = services.get_recent_orders(8)
         return Response(data)
 
 
+def _report_range(request):
+    """
+    (start, end) for a reporting endpoint from ?period=…&start=…&end=….
+
+    Same params as the overview endpoint (7d/30d/90d/1y/custom). Unlike the
+    overview, no `period` — or period=all — means all-time: (None, None).
+    Raises services.InvalidDateRange for a bad custom range.
+    """
+    period = request.query_params.get("period")
+    if period in (None, "", "all"):
+        return None, None
+    return services.get_date_range(
+        period,
+        request.query_params.get("start"),
+        request.query_params.get("end"),
+    )
+
+
 class AdminRevenueStatsView(APIView):
-    """GET /dashboard/admin/revenue-stats/ — detailed revenue chart data."""
+    """
+    GET /dashboard/admin/revenue-stats/ — detailed revenue chart data.
+
+    top_products is all-time unless ?period=… (see _report_range) is given.
+    """
 
     permission_classes = [IsAdminOrSuperuser]
 
     def get(self, request):
         months = int(request.query_params.get("months", 12))
+        try:
+            start, end = _report_range(request)
+        except services.InvalidDateRange as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             {
                 "monthly_revenue": services.get_monthly_revenue(months),
-                "top_products": services.get_top_products(10),
+                "top_products": services.get_top_products(10, start, end),
             }
         )
+
+
+def _parse_limit(request, default=10, maximum=100):
+    """?limit=N as an int in [1, maximum]; ValueError (with message) otherwise."""
+    raw = request.query_params.get("limit", str(default))
+    try:
+        limit = int(raw)
+    except ValueError:
+        limit = 0
+    if not 1 <= limit <= maximum:
+        raise ValueError(f"'limit' must be an integer between 1 and {maximum}.")
+    return limit
+
+
+class _AdminTopReportView(APIView):
+    """
+    Shared GET handling for the top-products / top-variants reports:
+    ?limit=N (1–100, default 10) plus the period params of _report_range.
+    Bad input returns 400 {"detail": …}.
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+    result_key = ""
+
+    def report(self, limit, start, end):  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def get(self, request):
+        try:
+            limit = _parse_limit(request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            start, end = _report_range(request)
+        except services.InvalidDateRange as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({self.result_key: self.report(limit, start, end)})
+
+
+class AdminTopProductsView(_AdminTopReportView):
+    """GET /dashboard/admin/top-products/ — best sellers by product."""
+
+    result_key = "top_products"
+
+    def report(self, limit, start, end):
+        return services.get_top_products(limit, start, end)
+
+
+class AdminTopVariantsView(_AdminTopReportView):
+    """GET /dashboard/admin/top-variants/ — best sellers by variant (SKU)."""
+
+    result_key = "top_variants"
+
+    def report(self, limit, start, end):
+        return services.get_top_variants(limit, start, end)
 
 
 class AdminUserStatsView(APIView):
@@ -466,6 +572,363 @@ class AdminProductStatsView(APIView):
 
     def get(self, request):
         return Response(services.get_product_stats())
+
+
+class _AdminInventoryListView(APIView):
+    """
+    Shared GET handling for the actionable inventory lists.
+
+    Response: {"count": <all matching variants>, **echoed params,
+    "results": [...]}, where `results` is capped by ?limit=N (1–200,
+    default 50) and `count` is the uncapped total — for stock lists the same
+    number the overview's low_stock/out_of_stock summary shows — so the UI
+    can say "showing 50 of 120".
+
+    Each row carries `admin_url`: an absolute link to that variant's edit
+    form in Django admin (ProductVariantAdmin) so it can be restocked or
+    corrected directly; `product_id` is included for the React product admin
+    page. (Restocking over the API is
+    POST admin/variants/<variant_id>/adjust-stock/.)
+
+    Subclasses may declare extra query params via extra_params(); they are
+    passed to queryset()/rows() and echoed in the response. A ValueError
+    from any parsing becomes a 400.
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+
+    def extra_params(self, request) -> dict:
+        return {}
+
+    def queryset(self, **extra):  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def rows(self, limit, **extra):  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def get(self, request):
+        try:
+            limit = _parse_limit(request, default=50, maximum=200)
+            extra = self.extra_params(request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        rows = self.rows(limit, **extra)
+        for row in rows:
+            row["admin_url"] = request.build_absolute_uri(
+                reverse("admin:shop_productvariant_change", args=[row["variant_id"]])
+            )
+        return Response(
+            {"count": self.queryset(**extra).count(), **extra, "results": rows}
+        )
+
+
+class AdminLowStockView(_AdminInventoryListView):
+    """GET /dashboard/admin/inventory/low-stock/"""
+
+    def queryset(self, **extra):
+        return services.low_stock_variants_qs()
+
+    def rows(self, limit, **extra):
+        return services.get_low_stock_variants(limit)
+
+
+class AdminOutOfStockView(_AdminInventoryListView):
+    """GET /dashboard/admin/inventory/out-of-stock/"""
+
+    def queryset(self, **extra):
+        return services.out_of_stock_variants_qs()
+
+    def rows(self, limit, **extra):
+        return services.get_out_of_stock_variants(limit)
+
+
+class AdminNearExpiryView(_AdminInventoryListView):
+    """
+    GET /dashboard/admin/inventory/near-expiry/?days=90
+
+    Active variants expiring within `days` days (0–365, default 90 — the same
+    window as the Django-admin "expiring within 90 days" filter), soonest
+    first. Already-expired variants are NOT here; see AdminExpiredView.
+    """
+
+    def extra_params(self, request):
+        raw = request.query_params.get("days", "90")
+        try:
+            days = int(raw)
+        except ValueError:
+            days = -1
+        if not 0 <= days <= 365:
+            raise ValueError("'days' must be an integer between 0 and 365.")
+        return {"days": days}
+
+    def queryset(self, days=90, **extra):
+        return services.near_expiry_variants_qs(days)
+
+    def rows(self, limit, days=90, **extra):
+        return services.get_near_expiry_variants(days, limit)
+
+
+class AdminExpiredView(_AdminInventoryListView):
+    """
+    GET /dashboard/admin/inventory/expired/
+
+    Variants already past expiration_date but still is_active=True: stock the
+    nightly sweep hasn't deactivated (yet). Rows overdue by more than a day
+    or so suggest the sweep isn't running — the frontend should present this
+    report as a warning, unlike the routine near-expiry list.
+    """
+
+    def queryset(self, **extra):
+        return services.expired_still_active_variants_qs()
+
+    def rows(self, limit, **extra):
+        return services.get_expired_still_active_variants(limit)
+
+
+class AdminCouponUsageView(APIView):
+    """
+    GET /dashboard/admin/promotions/coupon-usage/?limit=50
+
+    Coupon performance report (see services.get_coupon_usage_report):
+    {"count": <all coupons>, "results": [...]}, most-redeemed first, with
+    `results` capped by ?limit=N (1–200, default 50). usage_rate_pct is null
+    for unlimited coupons — display "Unlimited".
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+
+    def get(self, request):
+        try:
+            limit = _parse_limit(request, default=50, maximum=200)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "count": services.coupon_usage_qs().count(),
+                "results": services.get_coupon_usage_report(limit),
+            }
+        )
+
+
+class BulkPriceUpdateView(APIView):
+    """
+    POST /dashboard/admin/products/bulk-price-update/
+
+    Adjust ProductVariant.price (the real price since Epic 3 — not
+    Product.price) by a percentage or fixed Rial amount across the active
+    variants matching category_id AND brand_id AND variant_ids (whichever are
+    given; at least one is required).
+
+    dry_run defaults to TRUE: the response previews the change (affected_count
+    is the true number of variants in scope; `preview` is capped at 50 rows)
+    and nothing is written. Only an explicit dry_run=false commits.
+
+    Commit behaviour:
+    * Rows are locked, re-read and recomputed inside one transaction, so the
+      result reflects the prices at commit time and all-or-nothing applies.
+    * Each variant is saved through save() — NOT queryset.update() — so the
+      existing ProductVariant signals run: the product-list cache is
+      invalidated, ProductPriceSnapshot baselines stay current, and
+      wishlist price-drop notifications are queued exactly as for any other
+      price change. A bulk update() would silently skip all of that.
+    * Variants whose price would not change are skipped (no save, no signal).
+    * One PriceAdjustmentLog row records actor, parameters and counts.
+    * If any new price would exceed MAX_RIAL_AMOUNT the request is rejected
+      (400), in dry-run too, so a preview never promises what a commit
+      can't do.
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+    PREVIEW_LIMIT = 50
+
+    @staticmethod
+    def _scoped_variants(data):
+        qs = ProductVariant.objects.filter(is_active=True)
+        if data.get("category_id"):
+            qs = qs.filter(product__category_id=data["category_id"])
+        if data.get("brand_id"):
+            qs = qs.filter(product__brand_id=data["brand_id"])
+        if data.get("variant_ids"):
+            qs = qs.filter(id__in=data["variant_ids"])
+        return qs.select_related("product").order_by("id")
+
+    @staticmethod
+    def _too_expensive(plan):
+        return [v.id for v, new_price in plan if new_price > MAX_RIAL_AMOUNT]
+
+    def post(self, request):
+        serializer = BulkPriceUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if data["dry_run"]:
+            plan = services.plan_price_adjustment(
+                self._scoped_variants(data), data["adjustment_type"], data["value"]
+            )
+            return self._respond_if_too_expensive(plan) or Response(
+                {
+                    "dry_run": True,
+                    "affected_count": len(plan),
+                    "changed_count": sum(1 for v, n in plan if n != v.price),
+                    "preview": [
+                        {
+                            "variant_id": v.id,
+                            "sku": v.sku,
+                            "product_name": v.product.name,
+                            "old_price": v.price,
+                            "new_price": new_price,
+                        }
+                        for v, new_price in plan[: self.PREVIEW_LIMIT]
+                    ],
+                }
+            )
+
+        with transaction.atomic():
+            # Lock in id order (orders lock variants the same way), then
+            # recompute from the locked, current prices.
+            locked = self._scoped_variants(data).select_for_update(of=("self",))
+            plan = services.plan_price_adjustment(
+                locked, data["adjustment_type"], data["value"]
+            )
+            too_expensive = self._respond_if_too_expensive(plan)
+            if too_expensive:
+                return too_expensive
+
+            changes = []
+            for variant, new_price in plan:
+                if new_price == variant.price:
+                    continue
+                changes.append([variant.id, variant.price, new_price])
+                variant.price = new_price
+                variant.save(update_fields=["price", "updated_at"])
+
+            log = PriceAdjustmentLog.objects.create(
+                actor=request.user,
+                adjustment_type=data["adjustment_type"],
+                value=data["value"],
+                category_id=data.get("category_id") or None,
+                brand_id=data.get("brand_id") or None,
+                variant_ids=data.get("variant_ids") or [],
+                matched_count=len(plan),
+                affected_count=len(changes),
+                changes=changes,
+            )
+        return Response(
+            {
+                "dry_run": False,
+                "matched_count": len(plan),
+                "updated_count": len(changes),
+                "log_id": log.id,
+            }
+        )
+
+    def _respond_if_too_expensive(self, plan):
+        offenders = self._too_expensive(plan)
+        if not offenders:
+            return None
+        return Response(
+            {
+                "detail": (
+                    f"{len(offenders)} variant(s) would exceed the maximum price "
+                    f"of {MAX_RIAL_AMOUNT} Rial. Narrow the selection or reduce "
+                    "the adjustment."
+                ),
+                "variant_ids": offenders[:20],
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class BulkProductImportView(APIView):
+    """
+    POST /dashboard/admin/products/bulk-import/   (multipart: file, dry_run)
+
+    Import products and variants from a .csv or .xlsx (schema, lookup rules
+    and units: dashboard/product_import.py and docs/bulk-product-import.md;
+    a ready-made file: GET admin/products/import-template/).
+
+    Per-row, not all-or-nothing: rows that fail are reported with their
+    spreadsheet row number while every valid row still goes through. A file
+    that cannot be used at all (bad format, missing/unknown columns, too
+    large) is a 400 on `file`.
+
+    dry_run defaults to TRUE. The same code runs either way; a dry run rolls
+    the transaction back at the end, so the preview shows exactly what a
+    real import would do (including generated SKUs, which a rolled-back
+    preview will not keep). Response: counts, `errors` (first 100) and
+    `preview` (first 50 successful rows).
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+    parser_classes = [MultiPartParser]
+    ERROR_LIMIT = 100
+    PREVIEW_LIMIT = 50
+
+    def post(self, request):
+        serializer = BulkProductImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        dry_run = serializer.validated_data["dry_run"]
+
+        try:
+            rows = product_import.parse_import_file(serializer.validated_data["file"])
+        except product_import.FileError as exc:
+            return Response({"file": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+
+        results = product_import.run_import(rows, request.user, dry_run)
+        succeeded = results["succeeded"]
+        errors = results["errors"]
+        return Response(
+            {
+                "dry_run": dry_run,
+                "total_rows": len(rows),
+                "created_count": sum(1 for r in succeeded if r["action"] == "created"),
+                "updated_count": sum(1 for r in succeeded if r["action"] == "updated"),
+                "products_created_count": sum(
+                    1 for r in succeeded if r["product_created"]
+                ),
+                "error_count": len(errors),
+                "errors": errors[: self.ERROR_LIMIT],
+                "preview": succeeded[: self.PREVIEW_LIMIT],
+            }
+        )
+
+
+class ProductImportTemplateView(APIView):
+    """
+    GET /dashboard/admin/products/import-template/?file_type=csv|xlsx
+
+    A blank import file: the exact header row (generated from the same
+    IMPORT_COLUMNS the importer validates against) plus one example row.
+    The .xlsx also carries an "instructions" sheet; only its first sheet is
+    imported. (Not `?format=` — DRF reserves that for renderer selection.)
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+
+    FILES = {
+        "csv": (
+            "text/csv; charset=utf-8",
+            "product-import-template.csv",
+            product_import.build_template_csv,
+        ),
+        "xlsx": (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "product-import-template.xlsx",
+            product_import.build_template_xlsx,
+        ),
+    }
+
+    def get(self, request):
+        file_type = request.query_params.get("file_type", "csv").lower()
+        if file_type not in self.FILES:
+            return Response(
+                {"file_type": "Must be 'csv' or 'xlsx'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        content_type, filename, build = self.FILES[file_type]
+        response = HttpResponse(build(), content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class AdminVariantAdjustStockView(APIView):
@@ -640,6 +1103,162 @@ def _csv_safe(value):
         if not _PLAIN_NUMBER_RE.fullmatch(value):
             return "'" + value
     return value
+
+
+class XLSXPassthroughRenderer(BaseRenderer):
+    """
+    Lets `?format=xlsx` / `Accept: …spreadsheetml.sheet` pass DRF's content
+    negotiation on the catalog export (same idea as CSVPassthroughRenderer).
+    The workbook itself is returned as a plain HttpResponse; this only ever
+    renders error responses, as JSON.
+    """
+
+    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    format = "xlsx"
+    charset = None
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return JSONRenderer().render(data, accepted_media_type, renderer_context)
+
+
+class BulkProductExportView(APIView):
+    """
+    GET /dashboard/admin/products/bulk-export/?format=csv|xlsx   (default csv)
+
+    The catalog as a spreadsheet in EXACTLY the schema the bulk importer
+    expects (product_import.IMPORT_COLUMNS), so export → edit in Excel →
+    re-import round-trips: one row per VARIANT, each carrying its SKU (so a
+    re-import updates it instead of duplicating it) and repeating its
+    product's shared attributes. (`?file_type=` is accepted too, matching the
+    import-template endpoint.)
+
+    Filters — the same params as the admin product list:
+      category, brand, is_sale, is_new      (AdminProductFilter, on the product)
+      search                                 (the list's SearchFilter fields)
+      min_price, max_price, in_stock         applied to the VARIANTS — see
+                                             AdminVariantExportFilter for why
+                                             not the product-list versions.
+    A malformed filter is a 400, never a silent "export everything".
+    Inactive variants are included (a backup/edit round trip must not drop
+    them). Rows are ordered by product name, then id, so a product's variants
+    sit together.
+
+    CSV is streamed (UTF-8 with BOM for Excel) in chunks, so catalog size is
+    not a memory concern; cells starting with = + - @ are quote-prefixed like
+    the order export, and the importer strips that prefix again.
+    XLSX is built in memory — a known limit: past MAX_XLSX_EXPORT_ROWS the
+    request is refused with a pointer to CSV (or to a narrower filter).
+    Note the importer accepts at most MAX_IMPORT_ROWS (1,000) rows per file:
+    a bigger export has to be filtered into pieces to be re-imported.
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+    renderer_classes = [JSONRenderer, CSVPassthroughRenderer, XLSXPassthroughRenderer]
+    VARIANT_LEVEL_PARAMS = ("min_price", "max_price", "in_stock")
+    BOOLEAN_PARAMS = ("is_sale", "is_new", "in_stock")
+    XLSX_TYPE = XLSXPassthroughRenderer.media_type
+
+    def get(self, request):
+        # Explicit ?file_type= wins; otherwise whatever ?format= / Accept
+        # negotiated (a renderer only exists for csv and xlsx); default CSV.
+        fmt = request.query_params.get("file_type")
+        if fmt is None:
+            negotiated = getattr(request.accepted_renderer, "format", "")
+            fmt = negotiated if negotiated in ("csv", "xlsx") else "csv"
+        fmt = fmt.lower()
+        if fmt not in ("csv", "xlsx"):
+            return Response(
+                {"file_type": "Must be 'csv' or 'xlsx'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        variants = self._filtered_variants(request)
+        labels = product_import.export_category_labels()
+        stamp = timezone.now().strftime("%Y-%m-%d")
+        if fmt == "xlsx":
+            return self._export_xlsx(variants, labels, stamp)
+        return self._export_csv(variants, labels, stamp)
+
+    def _filtered_variants(self, request):
+        # Product-level filters. The variant-level params are removed first:
+        # AdminProductFilter would apply them to the legacy Product fields.
+        params = request.query_params.copy()
+        # django-filter silently ignores a boolean it doesn't recognise, which
+        # here would mean "ture" → the WHOLE catalog. Be strict instead.
+        for name in self.BOOLEAN_PARAMS:
+            if name in params:
+                value = params[name].strip().lower()
+                if value not in ("true", "false"):
+                    raise ValidationError({name: ["Must be 'true' or 'false'."]})
+                params[name] = value
+        variant_params = params.copy()
+        for name in self.VARIANT_LEVEL_PARAMS:
+            params.pop(name, None)
+
+        product_filter = AdminProductFilter(params, queryset=Product.objects.all())
+        if not product_filter.is_valid():
+            raise ValidationError(
+                {k: list(v) for k, v in product_filter.errors.items()}
+            )
+        products = filters.SearchFilter().filter_queryset(
+            request,
+            product_filter.qs,
+            SimpleNamespace(search_fields=AdminProductViewSet.search_fields),
+        )
+
+        variants = ProductVariant.objects.filter(product__in=products.values("pk"))
+        variant_filter = AdminVariantExportFilter(variant_params, queryset=variants)
+        if not variant_filter.is_valid():
+            raise ValidationError(
+                {k: list(v) for k, v in variant_filter.errors.items()}
+            )
+        return variant_filter.qs.select_related(
+            "product", "product__brand", "color"
+        ).order_by("product__name", "product_id", "id")
+
+    def _export_csv(self, variants, labels, stamp):
+        names = product_import.IMPORT_COLUMN_NAMES
+
+        def row_generator():
+            writer = csv.writer(Echo())
+            # BOM so Excel reads the UTF-8 file correctly (Persian text).
+            yield "\ufeff" + writer.writerow(names)
+            for variant in variants.iterator(chunk_size=500):
+                cells = product_import.export_row(variant, labels)
+                yield writer.writerow(
+                    [_csv_safe(product_import.csv_text(cells[name])) for name in names]
+                )
+
+        response = StreamingHttpResponse(
+            row_generator(), content_type="text/csv; charset=utf-8"
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="catalog_export_{stamp}.csv"'
+        )
+        return response
+
+    def _export_xlsx(self, variants, labels, stamp):
+        count = variants.count()
+        if count > product_import.MAX_XLSX_EXPORT_ROWS:
+            return Response(
+                {
+                    "detail": (
+                        f"{count} variants is too many for an Excel export (limit "
+                        f"{product_import.MAX_XLSX_EXPORT_ROWS}). Use format=csv, "
+                        "which streams, or narrow the export with filters."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        data = product_import.build_export_xlsx(
+            product_import.export_row(v, labels)
+            for v in variants.iterator(chunk_size=500)
+        )
+        response = HttpResponse(data, content_type=self.XLSX_TYPE)
+        response["Content-Disposition"] = (
+            f'attachment; filename="catalog_export_{stamp}.xlsx"'
+        )
+        return response
 
 
 class AdminOrderViewSet(viewsets.ModelViewSet):

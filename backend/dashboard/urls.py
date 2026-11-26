@@ -59,12 +59,67 @@ urlpatterns = [
         name="admin-revenue",
     ),
     path(
+        "admin/top-products/",
+        views.AdminTopProductsView.as_view(),
+        name="admin-top-products",
+    ),
+    path(
+        "admin/top-variants/",
+        views.AdminTopVariantsView.as_view(),
+        name="admin-top-variants",
+    ),
+    path(
         "admin/user-stats/", views.AdminUserStatsView.as_view(), name="admin-user-stats"
     ),
     path(
         "admin/product-stats/",
         views.AdminProductStatsView.as_view(),
         name="admin-product-stats",
+    ),
+    path(
+        "admin/inventory/low-stock/",
+        views.AdminLowStockView.as_view(),
+        name="admin-inventory-low-stock",
+    ),
+    path(
+        "admin/inventory/out-of-stock/",
+        views.AdminOutOfStockView.as_view(),
+        name="admin-inventory-out-of-stock",
+    ),
+    path(
+        "admin/inventory/near-expiry/",
+        views.AdminNearExpiryView.as_view(),
+        name="admin-inventory-near-expiry",
+    ),
+    path(
+        "admin/inventory/expired/",
+        views.AdminExpiredView.as_view(),
+        name="admin-inventory-expired",
+    ),
+    path(
+        "admin/promotions/coupon-usage/",
+        views.AdminCouponUsageView.as_view(),
+        name="admin-coupon-usage",
+    ),
+    path(
+        "admin/products/bulk-price-update/",
+        views.BulkPriceUpdateView.as_view(),
+        name="admin-bulk-price-update",
+    ),
+    path(
+        "admin/products/bulk-import/",
+        views.BulkProductImportView.as_view(),
+        name="admin-product-bulk-import",
+    ),
+    path(
+        "admin/products/bulk-export/",
+        views.BulkProductExportView.as_view(),
+        name="admin-product-bulk-export",
+    ),
+    path(
+        "admin/products/import-template/",
+        views.ProductImportTemplateView.as_view(),
+        name="admin-product-import-template",
     ),
     path(
         "admin/variants/<int:pk>/adjust-stock/",

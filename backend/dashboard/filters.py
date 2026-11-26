@@ -2,7 +2,7 @@ import django_filters
 from blog.models import Category, Comment, Post
 from django.contrib.auth import get_user_model
 from order.models import Order
-from shop.models import Product
+from shop.models import Product, ProductVariant
 
 User = get_user_model()
 
@@ -77,6 +77,34 @@ class AdminProductFilter(django_filters.FilterSet):
             "max_price",
             "in_stock",
         ]
+
+
+class AdminVariantExportFilter(django_filters.FilterSet):
+    """
+    Price / stock filters for the catalog export, applied to the VARIANTS.
+
+    AdminProductFilter's min_price / max_price / in_stock query the legacy
+    Product.price / Product.stock fields, which the storefront and checkout
+    have not used since Epic 3 — filtering an export by them would select
+    products by dead data. The export keeps AdminProductFilter for the
+    product-level params (category, brand, is_sale, is_new) and answers these
+    three against the real ProductVariant values instead.
+    """
+
+    min_price = django_filters.NumberFilter(field_name="price", lookup_expr="gte")
+    max_price = django_filters.NumberFilter(field_name="price", lookup_expr="lte")
+    in_stock = django_filters.BooleanFilter(method="filter_in_stock")
+
+    def filter_in_stock(self, queryset, name, value):
+        if value is True:
+            return queryset.filter(stock__gt=0)
+        if value is False:
+            return queryset.filter(stock=0)
+        return queryset
+
+    class Meta:
+        model = ProductVariant
+        fields = ["min_price", "max_price", "in_stock"]
 
 
 # ─── Admin: Users ────────────────────────────────────────────────────────────

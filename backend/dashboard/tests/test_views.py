@@ -1816,3 +1816,2454 @@ class TestAdminReviewStoreResponse:
         assert res.status_code == status.HTTP_403_FORBIDDEN
         review.refresh_from_db()
         assert review.store_response == ""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Bulk price update (ProductVariant.price — NOT the legacy Product.price)
+# ══════════════════════════════════════════════════════════════════════════════
+
+BULK_URL = "/api/dashboard/admin/products/bulk-price-update/"
+
+
+def _price(variant):
+    from shop.models import ProductVariant
+
+    return ProductVariant.objects.get(pk=variant.pk).price
+
+
+@pytest.fixture
+def two_categories(make_category, make_brand, make_product, make_variant):
+    """cat_a has brand_x (2 variants) + brand_y (1); cat_b has brand_x (1)."""
+    cat_a, cat_b = make_category("Skincare"), make_category("Makeup")
+    brand_x, brand_y = make_brand("BrandX"), make_brand("BrandY")
+    p_ax = make_product(name="AX", category=cat_a, brand=brand_x)
+    p_ay = make_product(name="AY", category=cat_a, brand=brand_y)
+    p_bx = make_product(name="BX", category=cat_b, brand=brand_x)
+    return {
+        "cat_a": cat_a,
+        "cat_b": cat_b,
+        "brand_x": brand_x,
+        "brand_y": brand_y,
+        "ax1": make_variant(product=p_ax, price=1_000_000),
+        "ax2": make_variant(product=p_ax, price=2_000_000),
+        "ay": make_variant(product=p_ay, price=3_000_000),
+        "bx": make_variant(product=p_bx, price=4_000_000),
+    }
+
+
+@pytest.mark.django_db
+class TestBulkPriceUpdateDryRun:
+
+    def test_default_is_dry_run_and_changes_nothing(self, admin_client, two_categories):
+        from dashboard.models import PriceAdjustmentLog
+
+        d = two_categories
+        resp = admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "percent_increase",
+                "value": 10,
+                "category_id": d["cat_a"].id,
+            },  # note: dry_run omitted
+            format="json",
+        )
+
+        assert resp.status_code == 200
+        assert resp.data["dry_run"] is True
+        assert resp.data["affected_count"] == 3
+        by_id = {row["variant_id"]: row for row in resp.data["preview"]}
+        assert by_id[d["ax1"].id]["old_price"] == 1_000_000
+        assert by_id[d["ax1"].id]["new_price"] == 1_100_000
+        assert by_id[d["ay"].id]["new_price"] == 3_300_000
+        # …and nothing was written
+        assert _price(d["ax1"]) == 1_000_000
+        assert _price(d["ax2"]) == 2_000_000
+        assert _price(d["ay"]) == 3_000_000
+        assert PriceAdjustmentLog.objects.count() == 0
+
+    def test_omitted_dry_run_stays_true_for_form_encoded_requests_too(
+        self, admin_client, two_categories
+    ):
+        """DRF reads an absent BooleanField as False for form bodies — the
+        safe default must survive that."""
+        d = two_categories
+        resp = admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "fixed_decrease",
+                "value": 100_000,
+                "category_id": d["cat_a"].id,
+            },
+            format="multipart",
+        )
+        assert resp.status_code == 200
+        assert resp.data["dry_run"] is True
+        assert _price(d["ax1"]) == 1_000_000
+
+    def test_explicit_dry_run_true(self, admin_client, two_categories):
+        d = two_categories
+        resp = admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "percent_decrease",
+                "value": 50,
+                "brand_id": d["brand_x"].id,
+                "dry_run": True,
+            },
+            format="json",
+        )
+        assert resp.data["dry_run"] is True and resp.data["affected_count"] == 3
+        assert _price(d["bx"]) == 4_000_000
+
+    def test_preview_is_capped_at_50_but_count_is_the_true_total(
+        self, admin_client, make_category, make_product, make_variant
+    ):
+        cat = make_category("Bulk")
+        product = make_product(name="Many", category=cat)
+        for _ in range(55):
+            make_variant(product=product, price=1_000_000)
+
+        resp = admin_client.post(
+            BULK_URL,
+            {"adjustment_type": "fixed_increase", "value": 10, "category_id": cat.id},
+            format="json",
+        )
+
+        assert resp.data["affected_count"] == 55
+        assert len(resp.data["preview"]) == 50
+
+    def test_dry_run_does_not_fire_price_signals(self, admin_client, two_categories):
+        from unittest.mock import patch
+
+        d = two_categories
+        with patch("shop.signals.invalidate_product_list_cache") as invalidate:
+            admin_client.post(
+                BULK_URL,
+                {
+                    "adjustment_type": "percent_decrease",
+                    "value": 10,
+                    "category_id": d["cat_a"].id,
+                },
+                format="json",
+            )
+        invalidate.assert_not_called()
+
+
+@pytest.mark.django_db
+class TestBulkPriceUpdateCommit:
+
+    def _commit(self, client, **payload):
+        return client.post(BULK_URL, {"dry_run": False, **payload}, format="json")
+
+    def test_commit_applies_and_refetch_confirms(self, admin_client, two_categories):
+        d = two_categories
+        resp = self._commit(
+            admin_client,
+            adjustment_type="percent_increase",
+            value=10,
+            category_id=d["cat_a"].id,
+        )
+
+        assert resp.status_code == 200
+        assert resp.data["dry_run"] is False
+        assert resp.data["matched_count"] == 3
+        assert resp.data["updated_count"] == 3
+        assert _price(d["ax1"]) == 1_100_000
+        assert _price(d["ax2"]) == 2_200_000
+        assert _price(d["ay"]) == 3_300_000
+        assert _price(d["bx"]) == 4_000_000  # other category untouched
+
+    @pytest.mark.parametrize(
+        "adjustment_type,value,start,expected",
+        [
+            ("percent_increase", 10, 1_000_000, 1_100_000),
+            ("percent_increase", 100, 1_000_000, 2_000_000),
+            ("percent_decrease", 25, 1_000_000, 750_000),
+            ("percent_decrease", 100, 500_000, 0),  # fully discounted → 0
+            ("fixed_increase", 150_000, 1_000_000, 1_150_000),
+            ("fixed_decrease", 300_000, 1_000_000, 700_000),
+            ("fixed_decrease", 300_000, 200_000, 0),  # would go negative → floor 0
+            ("fixed_decrease", 200_000, 200_000, 0),  # exactly zero
+            # percentages land on the whole-Toman grid (DB CHECK: price % 10 = 0):
+            ("percent_increase", 7, 999_900, 1_069_890),  # 1,069,893 → …890
+            ("percent_decrease", 50, 10_050, 5_030),  # 5,025 → tie rounds UP
+            ("percent_increase", 1, 12_340, 12_460),  # 12,463.4 → …460
+        ],
+    )
+    def test_each_adjustment_type_is_mathematically_correct(
+        self, admin_client, make_variant, adjustment_type, value, start, expected
+    ):
+        v = make_variant(price=start)
+
+        resp = self._commit(
+            admin_client,
+            adjustment_type=adjustment_type,
+            value=value,
+            variant_ids=[v.id],
+        )
+
+        assert resp.status_code == 200
+        new_price = _price(v)
+        assert new_price == expected
+        assert type(new_price) is int
+        assert new_price >= 0 and new_price % 10 == 0
+
+    def test_dry_run_preview_matches_what_commit_then_writes(
+        self, admin_client, two_categories
+    ):
+        d = two_categories
+        payload = {
+            "adjustment_type": "percent_decrease",
+            "value": 15,
+            "brand_id": d["brand_x"].id,
+        }
+        preview = admin_client.post(BULK_URL, payload, format="json").data["preview"]
+        self._commit(admin_client, **payload)
+
+        for row in preview:
+            from shop.models import ProductVariant
+
+            assert (
+                ProductVariant.objects.get(pk=row["variant_id"]).price
+                == row["new_price"]
+            )
+
+    def test_only_active_variants_are_adjusted(
+        self, admin_client, make_category, make_product, make_variant
+    ):
+        cat = make_category("C")
+        product = make_product(category=cat)
+        active = make_variant(product=product, price=1_000_000)
+        inactive = make_variant(product=product, price=1_000_000, is_active=False)
+
+        resp = self._commit(
+            admin_client, adjustment_type="fixed_increase", value=10, category_id=cat.id
+        )
+
+        assert resp.data["updated_count"] == 1
+        assert _price(active) == 1_000_010
+        assert _price(inactive) == 1_000_000
+
+    def test_unchanged_variants_are_skipped_but_counted_as_matched(
+        self, admin_client, make_variant
+    ):
+        free = make_variant(price=0)
+        resp = self._commit(
+            admin_client,
+            adjustment_type="fixed_decrease",
+            value=100_000,
+            variant_ids=[free.id],
+        )
+        assert resp.data["matched_count"] == 1
+        assert resp.data["updated_count"] == 0
+        assert _price(free) == 0
+
+    def test_legacy_product_price_is_never_touched(self, admin_client, two_categories):
+        from shop.models import Product
+
+        d = two_categories
+        product = d["ax1"].product
+        before = Product.objects.get(pk=product.pk).price
+
+        self._commit(
+            admin_client,
+            adjustment_type="percent_increase",
+            value=50,
+            category_id=d["cat_a"].id,
+        )
+
+        assert Product.objects.get(pk=product.pk).price == before
+
+    def test_commit_is_all_or_nothing(self, admin_client, two_categories):
+        from unittest.mock import patch
+
+        from dashboard.models import PriceAdjustmentLog
+        from shop.models import ProductVariant
+
+        d = two_categories
+        real_save = ProductVariant.save
+        calls = {"n": 0}
+
+        def flaky_save(self, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("boom")
+            return real_save(self, *args, **kwargs)
+
+        with patch.object(ProductVariant, "save", flaky_save):
+            with pytest.raises(RuntimeError):
+                self._commit(
+                    admin_client,
+                    adjustment_type="percent_increase",
+                    value=10,
+                    category_id=d["cat_a"].id,
+                )
+
+        assert _price(d["ax1"]) == 1_000_000  # first save rolled back too
+        assert _price(d["ax2"]) == 2_000_000
+        assert PriceAdjustmentLog.objects.count() == 0
+
+
+@pytest.mark.django_db
+class TestBulkPriceUpdateScoping:
+
+    def _commit(self, client, **payload):
+        return client.post(BULK_URL, {"dry_run": False, **payload}, format="json")
+
+    def test_category_filter_only_affects_that_categorys_variants(
+        self, admin_client, two_categories
+    ):
+        d = two_categories
+        self._commit(
+            admin_client,
+            adjustment_type="fixed_increase",
+            value=10,
+            category_id=d["cat_b"].id,
+        )
+        assert _price(d["bx"]) == 4_000_010
+        for key in ("ax1", "ax2", "ay"):
+            assert (
+                _price(d[key])
+                == {
+                    "ax1": 1_000_000,
+                    "ax2": 2_000_000,
+                    "ay": 3_000_000,
+                }[key]
+            )
+
+    def test_brand_filter_only_affects_that_brands_variants(
+        self, admin_client, two_categories
+    ):
+        d = two_categories
+        self._commit(
+            admin_client,
+            adjustment_type="fixed_increase",
+            value=10,
+            brand_id=d["brand_y"].id,
+        )
+        assert _price(d["ay"]) == 3_000_010
+        assert _price(d["ax1"]) == 1_000_000 and _price(d["bx"]) == 4_000_000
+
+    def test_variant_ids_filter_affects_exactly_those_variants(
+        self, admin_client, two_categories
+    ):
+        d = two_categories
+        resp = self._commit(
+            admin_client,
+            adjustment_type="fixed_increase",
+            value=10,
+            variant_ids=[d["ax2"].id, d["bx"].id],
+        )
+        assert resp.data["updated_count"] == 2
+        assert _price(d["ax2"]) == 2_000_010
+        assert _price(d["bx"]) == 4_000_010
+        assert _price(d["ax1"]) == 1_000_000
+        assert _price(d["ay"]) == 3_000_000
+
+    def test_filters_combine_with_and(self, admin_client, two_categories):
+        d = two_categories
+        resp = self._commit(
+            admin_client,
+            adjustment_type="fixed_increase",
+            value=10,
+            category_id=d["cat_a"].id,
+            brand_id=d["brand_x"].id,
+        )
+        assert resp.data["updated_count"] == 2  # ax1, ax2 only
+        assert _price(d["ay"]) == 3_000_000  # cat_a but brand_y
+        assert _price(d["bx"]) == 4_000_000  # brand_x but cat_b
+
+    def test_unknown_variant_ids_match_nothing(self, admin_client, two_categories):
+        resp = self._commit(
+            admin_client,
+            adjustment_type="fixed_increase",
+            value=10,
+            variant_ids=[999_999],
+        )
+        assert resp.status_code == 200
+        assert resp.data["matched_count"] == 0 and resp.data["updated_count"] == 0
+
+
+@pytest.mark.django_db
+class TestBulkPriceUpdateValidation:
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {},
+            {"category_id": None},
+            {"brand_id": None, "category_id": None},
+            {"variant_ids": []},
+        ],
+    )
+    def test_no_scope_is_rejected_by_the_serializer(
+        self, admin_client, two_categories, extra
+    ):
+        resp = admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "percent_increase",
+                "value": 10,
+                "dry_run": False,
+                **extra,
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "Specify at least one of" in str(resp.data)
+        assert _price(two_categories["ax1"]) == 1_000_000
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"adjustment_type": "percent_increase", "value": 101},
+            {"adjustment_type": "percent_decrease", "value": 101},
+            {"adjustment_type": "fixed_increase", "value": 15},  # not whole Toman
+            {"adjustment_type": "fixed_decrease", "value": 1_005},
+            {"adjustment_type": "percent_increase", "value": 0},
+            {"adjustment_type": "percent_increase", "value": -5},
+            {"adjustment_type": "percent_increase", "value": "ten"},
+            {"adjustment_type": "double_it", "value": 10},
+            {"value": 10},
+            {"adjustment_type": "percent_increase"},
+        ],
+    )
+    def test_bad_parameters_are_rejected_and_change_nothing(
+        self, admin_client, two_categories, payload
+    ):
+        d = two_categories
+        resp = admin_client.post(
+            BULK_URL,
+            {**payload, "category_id": d["cat_a"].id, "dry_run": False},
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert _price(d["ax1"]) == 1_000_000
+
+    def test_percent_boundary_100_is_allowed(self, admin_client, two_categories):
+        d = two_categories
+        resp = admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "percent_increase",
+                "value": 100,
+                "category_id": d["cat_a"].id,
+            },
+            format="json",
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.parametrize("field", ["category_id", "brand_id"])
+    def test_nonexistent_category_or_brand_is_a_400_not_a_silent_noop(
+        self, admin_client, field
+    ):
+        resp = admin_client.post(
+            BULK_URL,
+            {"adjustment_type": "fixed_increase", "value": 10, field: 999_999},
+            format="json",
+        )
+        assert resp.status_code == 400 and field in resp.data
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    def test_price_above_the_maximum_is_rejected_in_preview_and_commit(
+        self, admin_client, make_variant, dry_run
+    ):
+        from core.money import MAX_RIAL_AMOUNT
+
+        near_cap = make_variant(price=MAX_RIAL_AMOUNT - 100)
+        fine = make_variant(price=1_000_000)
+
+        resp = admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "percent_increase",
+                "value": 50,
+                "variant_ids": [near_cap.id, fine.id],
+                "dry_run": dry_run,
+            },
+            format="json",
+        )
+
+        assert resp.status_code == 400
+        assert resp.data["variant_ids"] == [near_cap.id]
+        assert _price(near_cap) == MAX_RIAL_AMOUNT - 100
+        assert _price(fine) == 1_000_000  # whole request rejected, nothing applied
+
+
+@pytest.mark.django_db
+class TestBulkPriceUpdateAuditLog:
+
+    def test_commit_writes_one_log_row_with_actor_and_counts(
+        self, admin_client, admin_user, two_categories
+    ):
+        from dashboard.models import PriceAdjustmentLog
+
+        d = two_categories
+        resp = admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "percent_decrease",
+                "value": 20,
+                "category_id": d["cat_a"].id,
+                "dry_run": False,
+            },
+            format="json",
+        )
+
+        assert PriceAdjustmentLog.objects.count() == 1
+        log = PriceAdjustmentLog.objects.get()
+        assert resp.data["log_id"] == log.id
+        assert log.actor == admin_user
+        assert log.adjustment_type == "percent_decrease"
+        assert log.value == 20
+        assert log.category_id == d["cat_a"].id
+        assert log.brand_id is None
+        assert log.matched_count == 3 and log.affected_count == 3
+        assert log.created_at is not None
+        # old → new prices are kept, so the change can be audited or reversed
+        assert sorted(log.changes) == sorted(
+            [
+                [d["ax1"].id, 1_000_000, 800_000],
+                [d["ax2"].id, 2_000_000, 1_600_000],
+                [d["ay"].id, 3_000_000, 2_400_000],
+            ]
+        )
+
+    def test_log_records_variant_ids_scope(self, admin_client, two_categories):
+        from dashboard.models import PriceAdjustmentLog
+
+        d = two_categories
+        admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "fixed_increase",
+                "value": 10,
+                "variant_ids": [d["ax1"].id],
+                "dry_run": False,
+            },
+            format="json",
+        )
+        assert PriceAdjustmentLog.objects.get().variant_ids == [d["ax1"].id]
+
+    def test_superuser_is_recorded_as_actor(
+        self, superuser_client, superuser_user, two_categories
+    ):
+        from dashboard.models import PriceAdjustmentLog
+
+        superuser_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "fixed_increase",
+                "value": 10,
+                "variant_ids": [two_categories["ax1"].id],
+                "dry_run": False,
+            },
+            format="json",
+        )
+        assert PriceAdjustmentLog.objects.get().actor == superuser_user
+
+    def test_no_log_for_dry_runs_or_rejected_requests(
+        self, admin_client, two_categories
+    ):
+        from dashboard.models import PriceAdjustmentLog
+
+        d = two_categories
+        admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "fixed_increase",
+                "value": 10,
+                "category_id": d["cat_a"].id,
+            },
+            format="json",
+        )
+        admin_client.post(
+            BULK_URL,
+            {"adjustment_type": "fixed_increase", "value": 10, "dry_run": False},
+            format="json",
+        )
+        assert PriceAdjustmentLog.objects.count() == 0
+
+    def test_actor_survives_in_log_row_after_user_deletion(
+        self, admin_client, admin_user, two_categories
+    ):
+        from dashboard.models import PriceAdjustmentLog
+
+        admin_client.post(
+            BULK_URL,
+            {
+                "adjustment_type": "fixed_increase",
+                "value": 10,
+                "variant_ids": [two_categories["ax1"].id],
+                "dry_run": False,
+            },
+            format="json",
+        )
+        admin_user.delete()
+        log = PriceAdjustmentLog.objects.get()
+        assert log.actor is None and log.affected_count == 1
+
+
+@pytest.mark.django_db
+class TestBulkPriceUpdateStillFiresVariantSignals:
+    """A queryset .update() would skip these — the reason commit uses save()."""
+
+    def test_product_list_cache_is_invalidated(self, admin_client, two_categories):
+        from unittest.mock import patch
+
+        d = two_categories
+        with patch("shop.signals.invalidate_product_list_cache") as invalidate:
+            admin_client.post(
+                BULK_URL,
+                {
+                    "adjustment_type": "percent_increase",
+                    "value": 10,
+                    "category_id": d["cat_a"].id,
+                    "dry_run": False,
+                },
+                format="json",
+            )
+        assert invalidate.called
+
+    def test_price_snapshot_baseline_follows_and_drop_notification_is_queued(
+        self,
+        admin_client,
+        make_product,
+        make_variant,
+        django_capture_on_commit_callbacks,
+    ):
+        from unittest.mock import patch
+
+        from shop.models import ProductPriceSnapshot
+
+        product = make_product(name="Serum")
+        variant = make_variant(product=product, price=1_000_000)  # baseline snapshot
+        assert product.price_snapshots.first().price == 1_000_000
+
+        with patch("shop.signals.notify_price_drop_subscribers") as task:
+            with django_capture_on_commit_callbacks(execute=True):
+                admin_client.post(
+                    BULK_URL,
+                    {
+                        "adjustment_type": "percent_decrease",
+                        "value": 20,
+                        "variant_ids": [variant.id],
+                        "dry_run": False,
+                    },
+                    format="json",
+                )
+
+        newest = ProductPriceSnapshot.objects.filter(product=product).first()
+        assert newest.price == 800_000
+        task.delay.assert_called_once_with(product.id, 1_000_000, 800_000)
+
+
+@pytest.mark.django_db
+class TestBulkPriceUpdatePermissions:
+
+    PAYLOAD = {
+        "adjustment_type": "fixed_increase",
+        "value": 10,
+        "variant_ids": [1],
+        "dry_run": False,
+    }
+
+    def test_non_admin_gets_403_and_nothing_changes(
+        self, customer_client, two_categories
+    ):
+        from dashboard.models import PriceAdjustmentLog
+
+        d = two_categories
+        resp = customer_client.post(
+            BULK_URL, {**self.PAYLOAD, "variant_ids": [d["ax1"].id]}, format="json"
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert _price(d["ax1"]) == 1_000_000
+        assert PriceAdjustmentLog.objects.count() == 0
+
+    def test_anonymous_is_rejected(self, anon_client):
+        resp = anon_client.post(BULK_URL, self.PAYLOAD, format="json")
+        assert resp.status_code in (401, 403)
+
+    def test_get_is_not_allowed(self, admin_client):
+        assert admin_client.get(BULK_URL).status_code == 405
+
+    def test_admin_and_superuser_allowed(
+        self, admin_client, superuser_client, two_categories
+    ):
+        payload = {
+            "adjustment_type": "fixed_increase",
+            "value": 10,
+            "variant_ids": [two_categories["ax1"].id],
+        }
+        assert admin_client.post(BULK_URL, payload, format="json").status_code == 200
+        assert (
+            superuser_client.post(BULK_URL, payload, format="json").status_code == 200
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Bulk product + variant import (CSV / Excel)
+# ══════════════════════════════════════════════════════════════════════════════
+
+import csv as _csv  # noqa: E402
+import io as _io  # noqa: E402
+from datetime import date as _date  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
+
+IMPORT_URL = "/api/dashboard/admin/products/bulk-import/"
+TEMPLATE_URL = "/api/dashboard/admin/products/import-template/"
+
+_NUMERIC = {
+    "price", "original_price", "stock", "low_stock_threshold", "volume_ml",
+    "weight_g", "spf",
+}  # fmt: skip
+_BOOLS = {"is_active", "is_cruelty_free", "is_vegan", "is_organic"}
+_DATES = {"manufacture_date", "expiration_date"}
+
+
+def _valid_ean13():
+    from shop.validators import _compute_ean13_check_digit
+
+    base = "629104150021"
+    return base + str(_compute_ean13_check_digit(base))
+
+
+def _columns_for(rows):
+    """Header: required columns plus any column used by any row (schema order)."""
+    from dashboard.product_import import IMPORT_COLUMN_NAMES, REQUIRED_COLUMN_NAMES
+
+    used = set(REQUIRED_COLUMN_NAMES)
+    for row in rows:
+        used |= set(row)
+    return [c for c in IMPORT_COLUMN_NAMES if c in used]
+
+
+def make_csv(rows, columns=None, delimiter=",", bom=False):
+    columns = columns or _columns_for(rows)
+    buffer = _io.StringIO()
+    writer = _csv.writer(buffer, delimiter=delimiter)
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow([row.get(c, "") for c in columns])
+    data = buffer.getvalue().encode("utf-8")
+    return (b"\xef\xbb\xbf" + data) if bom else data
+
+
+def make_xlsx(rows, columns=None):
+    """The same rows as real, TYPED Excel cells (ints, floats, bools, dates)."""
+    from openpyxl import Workbook
+
+    columns = columns or _columns_for(rows)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(columns)
+    for row in rows:
+        cells = []
+        for column in columns:
+            text = row.get(column, "")
+            if text == "":
+                cells.append(None)
+            elif column in _NUMERIC:
+                # a float for spf exercises Excel's habit of storing 50 as 50.0
+                cells.append(float(text) if column == "spf" else int(text))
+            elif column in _BOOLS and text in ("true", "false"):
+                cells.append(text == "true")
+            elif column in _DATES:
+                cells.append(_date.fromisoformat(text))
+            else:
+                cells.append(text)
+        sheet.append(cells)
+    buffer = _io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+FORMATS = {
+    "csv": (make_csv, "catalog.csv", "text/csv"),
+    "xlsx": (
+        make_xlsx,
+        "catalog.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ),
+}
+
+
+def post_import(client, content, name="catalog.csv", **fields):
+    upload = SimpleUploadedFile(name, content)
+    return client.post(IMPORT_URL, {"file": upload, **fields}, format="multipart")
+
+
+@pytest.fixture
+def taxonomy(make_category, make_brand):
+    return {
+        "skincare": make_category("Skincare"),
+        "makeup": make_category("Makeup"),
+        "brand": make_brand("BrandX"),
+    }
+
+
+def good_rows():
+    """3 valid rows → 2 products (Hydra Serum ×2 variants, Sun Cream ×1)."""
+    serum = {
+        "product_name": "Hydra Serum",
+        "category": "Skincare",
+        "brand": "BrandX",
+        "skin_type": "dry",
+        "gender": "female",
+        "is_cruelty_free": "true",
+        "is_vegan": "false",
+        "is_organic": "yes",
+        "ingredients": "Aqua, Glycerin, Sodium Hyaluronate",
+        "description": "A hydrating serum.",
+        "country_of_origin": "France",
+    }
+    return [
+        {
+            **serum,
+            "color": "Rose",
+            "color_hex": "#E8A0BF",
+            "price": "1250000",
+            "stock": "25",
+            "volume_ml": "30",
+            "barcode": _valid_ean13(),
+            "manufacture_date": "2026-01-15",
+            "expiration_date": "2028-01-15",
+            "batch_number": "B2601",
+        },
+        {
+            **serum,
+            "color": "Nude",
+            "color_hex": "#D2B48C",
+            "price": "1850000",
+            "stock": "10",
+            "volume_ml": "50",
+        },
+        {
+            "product_name": "Sun Cream",
+            "category": "Skincare",
+            "brand": "BrandX",
+            "price": "900000",
+            "stock": "5",
+            "weight_g": "100",
+            "spf": "50",
+            "skin_type": "all",
+        },
+    ]
+
+
+def catalog_state():
+    """Everything the import is supposed to have written, as plain data."""
+    from shop.models import Color, Product, ProductVariant
+
+    products = {
+        p.name: {
+            "category": p.category.name,
+            "brand": p.brand.name if p.brand else None,
+            "skin_type": p.skin_type,
+            "hair_type": p.hair_type,
+            "gender": p.gender,
+            "spf": p.spf,
+            "cruelty_free": p.is_cruelty_free,
+            "vegan": p.is_vegan,
+            "organic": p.is_organic,
+            "ingredients": p.ingredients,
+            "country": p.country_of_origin,
+            "description": p.description,
+            "slug": bool(p.slug),
+        }
+        for p in Product.objects.select_related("category", "brand")
+    }
+    variants = sorted(
+        (
+            v.product.name,
+            v.color.name if v.color else None,
+            v.price,
+            v.stock,
+            v.volume_ml,
+            v.weight_g,
+            v.barcode,
+            v.manufacture_date,
+            v.expiration_date,
+            v.batch_number,
+            bool(v.sku),
+        )
+        for v in ProductVariant.objects.select_related("product", "color")
+    )
+    colors = sorted(Color.objects.values_list("name", "hex_code"))
+    return products, variants, colors
+
+
+EXPECTED_PRODUCTS = {
+    "Hydra Serum": {
+        "category": "Skincare",
+        "brand": "BrandX",
+        "skin_type": "dry",
+        "hair_type": "",
+        "gender": "female",
+        "spf": None,
+        "cruelty_free": True,
+        "vegan": False,
+        "organic": True,
+        "ingredients": "Aqua, Glycerin, Sodium Hyaluronate",
+        "country": "France",
+        "description": "A hydrating serum.",
+        "slug": True,
+    },
+    "Sun Cream": {
+        "category": "Skincare",
+        "brand": "BrandX",
+        "skin_type": "all",
+        "hair_type": "",
+        "gender": "unisex",  # model default when the column is blank
+        "spf": 50,
+        "cruelty_free": False,
+        "vegan": False,
+        "organic": False,
+        "ingredients": "",
+        "country": "",
+        "description": "",
+        "slug": True,
+    },
+}
+
+
+@pytest.mark.django_db
+class TestBulkImportDryRunAndCommit:
+
+    def test_dry_run_previews_and_creates_nothing(self, admin_client, taxonomy):
+        from shop.models import Color, Product, ProductVariant
+
+        resp = post_import(admin_client, make_csv(good_rows()))  # dry_run omitted
+
+        assert resp.status_code == 200
+        assert resp.data["dry_run"] is True
+        assert resp.data["total_rows"] == 3
+        assert resp.data["created_count"] == 3
+        assert resp.data["updated_count"] == 0
+        assert resp.data["products_created_count"] == 2
+        assert resp.data["error_count"] == 0
+        # a real preview: rows, actions and the SKUs the run generated
+        preview = resp.data["preview"]
+        assert [r["row"] for r in preview] == [2, 3, 4]
+        assert {r["action"] for r in preview} == {"created"}
+        assert [r["product_name"] for r in preview] == [
+            "Hydra Serum",
+            "Hydra Serum",
+            "Sun Cream",
+        ]
+        assert all(r["sku"] for r in preview)
+        assert [r["product_created"] for r in preview] == [True, False, True]
+        # …and nothing persisted
+        assert Product.objects.count() == 0
+        assert ProductVariant.objects.count() == 0
+        assert Color.objects.count() == 0
+
+    @pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+    def test_commit_creates_everything_with_all_attributes(
+        self, admin_client, taxonomy, fmt
+    ):
+        build, name, _ct = FORMATS[fmt]
+
+        resp = post_import(admin_client, build(good_rows()), name=name, dry_run="false")
+
+        assert resp.status_code == 200, resp.data
+        assert resp.data["dry_run"] is False
+        assert resp.data["created_count"] == 3 and resp.data["error_count"] == 0
+        products, variants, colors = catalog_state()
+        assert products == EXPECTED_PRODUCTS
+        ean = _valid_ean13()
+        assert variants == sorted(
+            [
+                ("Hydra Serum", "Rose", 1_250_000, 25, 30, None, ean,
+                 _date(2026, 1, 15), _date(2028, 1, 15), "B2601", True),
+                ("Hydra Serum", "Nude", 1_850_000, 10, 50, None, "",
+                 None, None, "", True),
+                ("Sun Cream", None, 900_000, 5, None, 100, "",
+                 None, None, "", True),
+            ]
+        )  # fmt: skip
+        assert colors == [("Nude", "#D2B48C"), ("Rose", "#E8A0BF")]
+
+    def test_csv_and_xlsx_parse_to_identical_rows(self):
+        from dashboard.product_import import parse_import_file
+
+        rows = good_rows()
+        from_csv = parse_import_file(SimpleUploadedFile("a.csv", make_csv(rows)))
+        from_xlsx = parse_import_file(SimpleUploadedFile("a.xlsx", make_xlsx(rows)))
+        assert from_csv == from_xlsx
+
+    def test_csv_and_xlsx_dry_runs_report_identically(self, admin_client, taxonomy):
+        keys = ("created_count", "updated_count", "products_created_count",
+                "error_count", "errors", "total_rows")  # fmt: skip
+        out = {}
+        for fmt, (build, name, _ct) in FORMATS.items():
+            resp = post_import(admin_client, build(good_rows()), name=name)
+            out[fmt] = {k: resp.data[k] for k in keys}
+        assert out["csv"] == out["xlsx"]
+
+    def test_commit_then_reimport_is_idempotent(self, admin_client, taxonomy):
+        from shop.models import ProductVariant
+
+        post_import(admin_client, make_csv(good_rows()), dry_run="false")
+        before = catalog_state()
+
+        resp = post_import(admin_client, make_csv(good_rows()), dry_run="false")
+
+        assert resp.data["created_count"] == 0
+        assert resp.data["updated_count"] == 3
+        assert resp.data["error_count"] == 0
+        assert ProductVariant.objects.count() == 3
+        assert catalog_state() == before
+
+    @pytest.mark.parametrize("value", ["banana", "maybe"])
+    def test_unrecognised_dry_run_is_a_400(self, admin_client, taxonomy, value):
+        resp = post_import(admin_client, make_csv(good_rows()), dry_run=value)
+        assert resp.status_code == 400 and "dry_run" in resp.data
+
+    @pytest.mark.parametrize("value", ["false", "False", "0"])
+    def test_false_spellings_commit(self, admin_client, taxonomy, value):
+        resp = post_import(admin_client, make_csv(good_rows()), dry_run=value)
+        assert resp.data["dry_run"] is False and resp.data["created_count"] == 3
+
+
+@pytest.mark.django_db
+class TestBulkImportUpdates:
+
+    def _existing(self, make_product, make_variant, taxonomy, **kwargs):
+        product = make_product(
+            name="Hydra Serum", category=taxonomy["skincare"], brand=taxonomy["brand"]
+        )
+        return make_variant(product=product, sku="SER-001", price=1_000_000, **kwargs)
+
+    @pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+    def test_existing_sku_updates_instead_of_duplicating(
+        self, admin_client, taxonomy, make_product, make_variant, fmt
+    ):
+        from shop.models import ProductVariant
+
+        variant = self._existing(make_product, make_variant, taxonomy, stock=3)
+        build, name, _ct = FORMATS[fmt]
+        rows = [
+            {
+                "product_name": "Hydra Serum",
+                "category": "Skincare",
+                "sku": "SER-001",
+                "price": "1400000",
+                "stock": "40",
+                "volume_ml": "30",
+            }
+        ]
+
+        resp = post_import(admin_client, build(rows), name=name, dry_run="false")
+
+        assert resp.data["created_count"] == 0 and resp.data["updated_count"] == 1
+        assert resp.data["products_created_count"] == 0
+        assert ProductVariant.objects.count() == 1  # no duplicate
+        variant.refresh_from_db()
+        assert (variant.price, variant.stock, variant.volume_ml) == (1_400_000, 40, 30)
+
+    def test_update_without_sku_matches_product_color_and_size(
+        self, admin_client, taxonomy, make_product, make_variant
+    ):
+        from shop.models import Color, ProductVariant
+
+        rose = Color.objects.create(name="Rose", hex_code="#E8A0BF")
+        variant = self._existing(make_product, make_variant, taxonomy)
+        variant.color, variant.volume_ml = rose, 30
+        variant.save()
+        rows = [
+            {
+                "product_name": "Hydra Serum",
+                "category": "Skincare",
+                "color": "rose",  # case-insensitive
+                "volume_ml": "30",
+                "price": "1111110",
+            }
+        ]
+
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+
+        assert resp.data["updated_count"] == 1 and resp.data["created_count"] == 0
+        assert ProductVariant.objects.count() == 1
+        variant.refresh_from_db()
+        assert variant.price == 1_111_110 and variant.sku == "SER-001"
+
+    def test_new_size_of_an_existing_product_adds_a_variant(
+        self, admin_client, taxonomy, make_product, make_variant
+    ):
+        from shop.models import Product, ProductVariant
+
+        self._existing(make_product, make_variant, taxonomy)
+        rows = [
+            {
+                "product_name": "Hydra Serum",
+                "category": "Skincare",
+                "volume_ml": "100",
+                "price": "2500000",
+            }
+        ]
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+
+        assert resp.data["created_count"] == 1
+        assert resp.data["products_created_count"] == 0
+        assert Product.objects.count() == 1
+        assert ProductVariant.objects.count() == 2
+
+    def test_a_brand_new_color_never_matches_a_colorless_variant(
+        self, admin_client, taxonomy, make_product, make_variant
+    ):
+        from shop.models import ProductVariant
+
+        plain = self._existing(make_product, make_variant, taxonomy)  # no color
+        rows = [
+            {
+                "product_name": "Hydra Serum",
+                "category": "Skincare",
+                "color": "Coral",
+                "color_hex": "#FF7F50",
+                "price": "1500000",
+            }
+        ]
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+
+        assert resp.data["created_count"] == 1 and resp.data["updated_count"] == 0
+        assert ProductVariant.objects.count() == 2
+        plain.refresh_from_db()
+        assert plain.price == 1_000_000 and plain.color is None
+
+    def test_blank_cells_leave_existing_values_unchanged(
+        self, admin_client, taxonomy, make_product, make_variant
+    ):
+        variant = self._existing(make_product, make_variant, taxonomy, stock=7)
+        variant.batch_number = "KEEP-ME"
+        variant.save()
+        product = variant.product
+        product.ingredients = "Original list"
+        product.save()
+        # A narrow "stock refresh" sheet: required columns present, cells blank.
+        rows = [
+            {
+                "product_name": "Hydra Serum",
+                "category": "",
+                "sku": "SER-001",
+                "price": "",
+                "stock": "99",
+            }
+        ]
+
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+
+        assert resp.data["updated_count"] == 1 and resp.data["error_count"] == 0
+        variant.refresh_from_db()
+        product.refresh_from_db()
+        assert variant.stock == 99
+        assert variant.price == 1_000_000 and variant.batch_number == "KEEP-ME"
+        assert product.ingredients == "Original list"
+        assert product.category_id == taxonomy["skincare"].id
+
+    def test_update_changes_product_level_fields(
+        self, admin_client, taxonomy, make_product, make_variant
+    ):
+        variant = self._existing(make_product, make_variant, taxonomy)
+        rows = [
+            {
+                "product_name": "Hydra Serum",
+                "category": "Makeup",
+                "sku": "SER-001",
+                "price": "1000000",
+                "skin_type": "oily",
+                "spf": "30",
+            }
+        ]
+        post_import(admin_client, make_csv(rows), dry_run="false")
+        product = variant.product
+        product.refresh_from_db()
+        assert product.category_id == taxonomy["makeup"].id
+        assert (product.skin_type, product.spf) == ("oily", 30)
+
+    def test_sku_belonging_to_another_product_is_an_error(
+        self, admin_client, taxonomy, make_product, make_variant
+    ):
+        variant = self._existing(make_product, make_variant, taxonomy)
+        rows = [
+            {
+                "product_name": "Some Other Product",
+                "category": "Skincare",
+                "sku": "SER-001",
+                "price": "500000",
+            }
+        ]
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+
+        assert resp.data["error_count"] == 1
+        assert "belongs to product 'Hydra Serum'" in resp.data["errors"][0]["error"]
+        variant.refresh_from_db()
+        assert variant.price == 1_000_000  # untouched
+
+    def test_stock_change_is_audited_only_after_commit(
+        self,
+        admin_client,
+        admin_user,
+        taxonomy,
+        make_product,
+        make_variant,
+        django_capture_on_commit_callbacks,
+    ):
+        from unittest.mock import patch
+
+        from shop.models import StockMovement
+
+        variant = self._existing(make_product, make_variant, taxonomy, stock=0)
+        rows = [
+            {
+                "product_name": "Hydra Serum",
+                "category": "Skincare",
+                "sku": "SER-001",
+                "price": "1000000",
+                "stock": "12",
+            }
+        ]
+
+        # Dry run: callbacks are discarded with the rollback → nothing, and
+        # in particular no back-in-stock notification.
+        with patch("shop.signals.notify_stock_alert_subscribers") as notify:
+            with django_capture_on_commit_callbacks(execute=True):
+                post_import(admin_client, make_csv(rows))
+        assert StockMovement.objects.count() == 0
+        notify.delay.assert_not_called()
+
+        with patch("shop.signals.notify_stock_alert_subscribers") as notify:
+            with django_capture_on_commit_callbacks(execute=True):
+                post_import(admin_client, make_csv(rows), dry_run="false")
+        movement = StockMovement.objects.get()
+        assert movement.variant == variant
+        assert (movement.quantity_delta, movement.stock_after) == (12, 12)
+        assert movement.reason == StockMovement.Reason.MANUAL
+        assert movement.actor == admin_user and "row 2" in movement.note
+        notify.delay.assert_called_once_with(variant.id)  # 0 → 12 restock
+
+    def test_price_drop_alerts_fire_only_for_a_real_import(
+        self,
+        admin_client,
+        taxonomy,
+        make_product,
+        make_variant,
+        django_capture_on_commit_callbacks,
+    ):
+        """ProductVariant.save() queues a wishlist price-drop task on commit —
+        a dry run must never leak that."""
+        from unittest.mock import patch
+
+        product = make_product(
+            name="Hydra Serum", category=taxonomy["skincare"], brand=taxonomy["brand"]
+        )
+        variant = make_variant(product=product, sku="SER-001", price=1_000_000)
+        rows = [
+            {
+                "product_name": "Hydra Serum",
+                "category": "Skincare",
+                "sku": "SER-001",
+                "price": "800000",
+            }
+        ]
+
+        with patch("shop.signals.notify_price_drop_subscribers") as task:
+            with django_capture_on_commit_callbacks(execute=True):
+                post_import(admin_client, make_csv(rows))  # dry run
+        task.delay.assert_not_called()
+        variant.refresh_from_db()
+        assert variant.price == 1_000_000
+
+        with patch("shop.signals.notify_price_drop_subscribers") as task:
+            with django_capture_on_commit_callbacks(execute=True):
+                post_import(admin_client, make_csv(rows), dry_run="false")
+        task.delay.assert_called_once_with(product.id, 1_000_000, 800_000)
+
+
+@pytest.mark.django_db
+class TestBulkImportPerRowErrors:
+
+    def test_bad_category_is_a_row_error_and_valid_rows_still_succeed(
+        self, admin_client, taxonomy
+    ):
+        from shop.models import Product, ProductVariant
+
+        rows = good_rows()
+        rows.insert(
+            1,
+            {
+                "product_name": "Mystery Cream",
+                "category": "Skincar",  # typo
+                "price": "700000",
+            },
+        )
+
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+
+        assert resp.status_code == 200
+        assert resp.data["created_count"] == 3  # the three valid rows
+        assert resp.data["error_count"] == 1
+        (error,) = resp.data["errors"]
+        assert error["row"] == 3  # sheet row: header=1, first data row=2
+        assert "category: 'Skincar' does not exist" in error["error"]
+        assert "Did you mean 'Skincare'?" in error["error"]
+        assert not Product.objects.filter(name="Mystery Cream").exists()
+        assert ProductVariant.objects.count() == 3
+        assert Product.objects.count() == 2
+
+    @pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+    def test_errors_are_identical_for_both_formats(self, admin_client, taxonomy, fmt):
+        build, name, _ct = FORMATS[fmt]
+        rows = [
+            {"product_name": "A", "category": "Nope", "price": "100000"},
+            {"product_name": "B", "category": "Skincare", "price": "100005"},
+            {"product_name": "C", "category": "Skincare", "price": "100000"},
+        ]
+        resp = post_import(admin_client, build(rows), name=name)
+        assert resp.data["created_count"] == 1
+        assert [e["row"] for e in resp.data["errors"]] == [2, 3]
+
+    def test_a_failure_after_the_product_was_written_leaves_no_orphan(
+        self, admin_client, taxonomy
+    ):
+        from shop.models import Product, ProductVariant
+
+        rows = [
+            {
+                "product_name": "Half Done",
+                "category": "Skincare",
+                "price": "500000",
+                "barcode": "1234567890123",  # bad EAN-13 check digit
+            },
+            {"product_name": "Fine", "category": "Skincare", "price": "500000"},
+        ]
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+
+        assert resp.data["error_count"] == 1
+        assert "barcode" in resp.data["errors"][0]["error"]
+        assert not Product.objects.filter(name="Half Done").exists()
+        assert Product.objects.filter(name="Fine").exists()
+        assert ProductVariant.objects.count() == 1
+
+    def test_a_database_error_does_not_poison_the_rest_of_the_batch(
+        self, admin_client, taxonomy
+    ):
+        from unittest.mock import patch
+
+        from django.db import connection
+        from shop.models import Product, ProductVariant
+
+        real_save = ProductVariant.save
+
+        def exploding_save(self, *args, **kwargs):
+            if self.sku == "BOOM":
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT 1/0")  # aborts the transaction
+            return real_save(self, *args, **kwargs)
+
+        rows = [
+            {"product_name": "P1", "category": "Skincare", "price": "100000"},
+            {"product_name": "P2", "category": "Skincare", "price": "100000",
+             "sku": "BOOM"},
+            {"product_name": "P3", "category": "Skincare", "price": "100000"},
+        ]  # fmt: skip
+        with patch.object(ProductVariant, "save", exploding_save):
+            resp = post_import(admin_client, make_csv(rows), dry_run="false")
+
+        assert resp.status_code == 200
+        assert resp.data["created_count"] == 2
+        assert [e["row"] for e in resp.data["errors"]] == [3]
+        assert resp.data["errors"][0]["error"] == (
+            "Unexpected error while processing this row."  # no internals leaked
+        )
+        assert set(Product.objects.values_list("name", flat=True)) == {"P1", "P3"}
+
+    def test_error_list_is_capped_but_the_count_is_true(self, admin_client, taxonomy):
+        rows = [
+            {"product_name": f"P{i}", "category": "Nope", "price": "100000"}
+            for i in range(150)
+        ]
+        resp = post_import(admin_client, make_csv(rows))
+        assert resp.data["error_count"] == 150
+        assert len(resp.data["errors"]) == 100
+
+    def test_all_problems_in_one_row_are_reported_together(
+        self, admin_client, taxonomy
+    ):
+        rows = [
+            {
+                "product_name": "Messy",
+                "category": "Skincare",
+                "price": "12x",
+                "stock": "-3",
+                "spf": "150",
+                "is_vegan": "maybe",
+                "skin_type": "scaly",
+                "expiration_date": "1405/03/01",
+            }
+        ]
+        resp = post_import(admin_client, make_csv(rows))
+        message = resp.data["errors"][0]["error"]
+        for fragment in (
+            "price: '12x'",
+            "stock: '-3'",
+            "spf: 150",
+            "is_vegan: 'maybe'",
+            "skin_type: 'scaly'",
+            "expiration_date: '1405/03/01'",
+            "Jalali",
+        ):
+            assert fragment in message, fragment
+
+
+@pytest.mark.django_db
+class TestBulkImportLookupRules:
+
+    def _one(self, **row):
+        base = {"product_name": "X", "category": "Skincare", "price": "100000"}
+        return make_csv([{**base, **row}])
+
+    def test_unknown_brand_is_an_error_not_auto_created(self, admin_client, taxonomy):
+        from shop.models import Brand
+
+        resp = post_import(admin_client, self._one(brand="BrandXX"), dry_run="false")
+        assert "brand: 'BrandXX' does not exist. Did you mean 'BrandX'?" in (
+            resp.data["errors"][0]["error"]
+        )
+        assert Brand.objects.count() == 1
+
+    def test_unknown_category_is_never_auto_created(self, admin_client, taxonomy):
+        from shop.models import Category
+
+        before = Category.objects.count()
+        post_import(admin_client, self._one(category="Brand New"), dry_run="false")
+        assert Category.objects.count() == before
+
+    def test_new_color_is_created_when_a_hex_is_given(self, admin_client, taxonomy):
+        from shop.models import Color
+
+        resp = post_import(
+            admin_client, self._one(color="Coral", color_hex="#FF7F50"), dry_run="false"
+        )
+        assert resp.data["created_count"] == 1
+        assert Color.objects.get(name="Coral").hex_code == "#FF7F50"
+
+    def test_new_color_without_a_hex_is_an_error(self, admin_client, taxonomy):
+        from shop.models import Color
+
+        resp = post_import(admin_client, self._one(color="Coral"), dry_run="false")
+        assert "add color_hex" in resp.data["errors"][0]["error"]
+        assert Color.objects.count() == 0
+
+    def test_existing_color_with_a_different_hex_is_an_error(
+        self, admin_client, taxonomy
+    ):
+        from shop.models import Color
+
+        Color.objects.create(name="Coral", hex_code="#FF7F50")
+        resp = post_import(
+            admin_client, self._one(color="coral", color_hex="#000000"), dry_run="false"
+        )
+        assert "conflicts with the existing color" in resp.data["errors"][0]["error"]
+
+    def test_bad_hex_format(self, admin_client, taxonomy):
+        resp = post_import(
+            admin_client, self._one(color="Coral", color_hex="orange"), dry_run="false"
+        )
+        assert "#RRGGBB" in resp.data["errors"][0]["error"]
+
+    def test_category_path_disambiguates(self, admin_client, make_category, make_brand):
+        from shop.models import Product
+
+        face = make_category("Face")
+        eyes = make_category("Eyes")
+        make_category("Care", parent=face)
+        under_eyes = make_category("Care", parent=eyes)
+
+        ambiguous = post_import(
+            admin_client, make_csv([{"product_name": "A", "category": "Care",
+                                     "price": "100000"}])
+        )  # fmt: skip
+        assert "ambiguous" in ambiguous.data["errors"][0]["error"]
+        assert "Eyes > Care" in ambiguous.data["errors"][0]["error"]
+
+        resp = post_import(
+            admin_client,
+            make_csv([{"product_name": "A", "category": "Eyes > Care",
+                       "price": "100000"}]),
+            dry_run="false",
+        )  # fmt: skip
+        assert resp.data["created_count"] == 1
+        assert Product.objects.get(name="A").category_id == under_eyes.id
+
+    def test_persian_digits_and_character_variants(self, admin_client, make_category):
+        from shop.models import Brand, Product, ProductVariant
+
+        make_category("مراقبت پوست")
+        Brand.objects.create(name="کلینیک")
+        rows = [
+            {
+                "product_name": "سرم آبرسان",
+                "category": "مراقبت پوست",
+                "brand": "كلينيك",  # Arabic kaf/yeh typed by mistake
+                "price": "۱٬۲۵۰٬۰۰۰",
+                "stock": "۲۵",
+            }
+        ]
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+        assert resp.data["error_count"] == 0, resp.data["errors"]
+        variant = ProductVariant.objects.get()
+        assert (variant.price, variant.stock) == (1_250_000, 25)
+        assert Product.objects.get().brand.name == "کلینیک"
+
+    def test_duplicate_variant_in_one_file_is_an_error_on_the_second(
+        self, admin_client, taxonomy
+    ):
+        from shop.models import ProductVariant
+
+        rows = [
+            {"product_name": "Dup", "category": "Skincare", "price": "100000",
+             "volume_ml": "30"},
+            {"product_name": "Dup", "category": "Skincare", "price": "200000",
+             "volume_ml": "30"},
+        ]  # fmt: skip
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+        assert resp.data["created_count"] == 1
+        assert resp.data["errors"][0]["row"] == 3
+        assert "Duplicate of row 2" in resp.data["errors"][0]["error"]
+        assert ProductVariant.objects.get().price == 100_000
+
+    def test_conflicting_product_level_values_across_rows(self, admin_client, taxonomy):
+        rows = [
+            {"product_name": "Same", "category": "Skincare", "price": "100000",
+             "volume_ml": "30", "skin_type": "dry"},
+            {"product_name": "Same", "category": "Skincare", "price": "100000",
+             "volume_ml": "50", "skin_type": "oily"},
+        ]  # fmt: skip
+        resp = post_import(admin_client, make_csv(rows), dry_run="false")
+        assert resp.data["created_count"] == 1
+        assert "skin_type: conflicts with the value given on row 2" in (
+            resp.data["errors"][0]["error"]
+        )
+
+    def test_new_product_requires_category_and_price(self, admin_client, taxonomy):
+        rows = [
+            {"product_name": "NoCat", "category": "", "price": "100000"},
+            {"product_name": "NoPrice", "category": "Skincare", "price": ""},
+            {"product_name": "", "category": "Skincare", "price": "100000"},
+        ]
+        resp = post_import(admin_client, make_csv(rows))
+        messages = [e["error"] for e in resp.data["errors"]]
+        assert "category: this is required for a new product." in messages[0]
+        assert "price: this is required for a new product." in messages[1]
+        assert "product_name: this is required." in messages[2]
+
+    def test_non_toman_price_is_rejected_by_model_validation(
+        self, admin_client, taxonomy
+    ):
+        resp = post_import(admin_client, self._one(price="100005"))
+        assert "whole number of Toman" in resp.data["errors"][0]["error"]
+
+    def _one(self, **row):
+        base = {"product_name": "X", "category": "Skincare", "price": "100000"}
+        return make_csv([{**base, **row}])
+
+
+@pytest.mark.django_db
+class TestBulkImportFileLevelErrors:
+
+    def _assert_file_error(self, resp, fragment):
+        assert resp.status_code == 400, resp.data
+        assert fragment in str(resp.data["file"])
+
+    def test_no_file(self, admin_client):
+        resp = admin_client.post(IMPORT_URL, {}, format="multipart")
+        assert resp.status_code == 400 and "file" in resp.data
+
+    def test_unsupported_extension(self, admin_client):
+        self._assert_file_error(
+            post_import(admin_client, b"x", name="catalog.txt"), "Unsupported file type"
+        )
+
+    def test_old_xls_gets_a_helpful_message(self, admin_client):
+        self._assert_file_error(
+            post_import(admin_client, b"x", name="catalog.xls"), ".xls"
+        )
+
+    def test_unknown_column_is_rejected_with_a_pointer_to_the_template(
+        self, admin_client
+    ):
+        content = make_csv(
+            [{"product_name": "A", "category": "C", "price": "1", "skin_typ": "dry"}],
+            columns=["product_name", "category", "price", "skin_typ"],
+        )
+        resp = post_import(admin_client, content)
+        self._assert_file_error(resp, "Unknown column(s): skin_typ")
+        self._assert_file_error(resp, "template")
+
+    def test_missing_required_column(self, admin_client):
+        content = make_csv(
+            [{"product_name": "A", "category": "C"}],
+            columns=["product_name", "category"],
+        )
+        self._assert_file_error(
+            post_import(admin_client, content), "Missing required column(s): price"
+        )
+
+    def test_staff_only_fields_are_not_importable(self, admin_client):
+        content = make_csv(
+            [{"product_name": "A", "category": "C", "price": "1"}],
+            columns=["product_name", "category", "price", "regulatory_verified"],
+        )
+        self._assert_file_error(
+            post_import(admin_client, content), "regulatory_verified"
+        )
+
+    def test_duplicate_column(self, admin_client):
+        content = b"product_name,category,price,price\nA,C,1,2\n"
+        self._assert_file_error(post_import(admin_client, content), "Duplicate")
+
+    def test_header_variants_are_forgiven(self, admin_client, taxonomy):
+        content = "Product Name,CATEGORY,Price\nA,Skincare,100000\n".encode()
+        resp = post_import(admin_client, content)
+        assert resp.status_code == 200 and resp.data["created_count"] == 1
+
+    def test_empty_and_header_only_files(self, admin_client):
+        self._assert_file_error(post_import(admin_client, b""), "empty")
+        self._assert_file_error(
+            post_import(admin_client, b"product_name,category,price\n"), "no data rows"
+        )
+
+    def test_non_utf8_csv(self, admin_client):
+        content = "product_name,category,price\nسرم,C,1\n".encode("cp1256")
+        self._assert_file_error(post_import(admin_client, content), "UTF-8")
+
+    def test_corrupt_xlsx(self, admin_client):
+        self._assert_file_error(
+            post_import(admin_client, b"PK\x03\x04garbage", name="c.xlsx"),
+            "valid .xlsx",
+        )
+        self._assert_file_error(
+            post_import(admin_client, b"not a zip", name="c.xlsx"), "valid .xlsx"
+        )
+
+    def test_too_many_rows(self, admin_client):
+        rows = [
+            {"product_name": f"P{i}", "category": "C", "price": "10"}
+            for i in range(1001)
+        ]
+        self._assert_file_error(
+            post_import(admin_client, make_csv(rows)), "limit is 1000"
+        )
+
+    def test_file_too_large(self, admin_client):
+        big = b"product_name,category,price\n" + b"A,C,1\n" * (1024 * 1024)
+        self._assert_file_error(post_import(admin_client, big), "larger than 5 MB")
+
+    def test_semicolon_delimiter_and_bom_are_handled(self, admin_client, taxonomy):
+        resp = post_import(admin_client, make_csv(good_rows(), delimiter=";", bom=True))
+        assert resp.status_code == 200 and resp.data["created_count"] == 3
+
+    def test_blank_rows_are_skipped_but_still_numbered(self, admin_client, taxonomy):
+        content = (
+            "product_name,category,price\n"
+            "A,Skincare,100000\n"
+            ",,\n"
+            "B,Nope,100000\n"
+        ).encode()
+        resp = post_import(admin_client, content)
+        assert resp.data["total_rows"] == 2
+        assert resp.data["errors"][0]["row"] == 4  # the real sheet row
+
+
+@pytest.mark.django_db
+class TestImportTemplate:
+
+    def test_csv_template_header_matches_what_the_importer_expects(self, admin_client):
+        from dashboard.product_import import IMPORT_COLUMN_NAMES
+
+        resp = admin_client.get(TEMPLATE_URL)
+
+        assert resp.status_code == 200
+        assert resp["Content-Type"].startswith("text/csv")
+        assert "product-import-template.csv" in resp["Content-Disposition"]
+        assert resp.content.startswith(b"\xef\xbb\xbf")  # Excel-friendly UTF-8
+        records = list(_csv.reader(_io.StringIO(resp.content.decode("utf-8-sig"))))
+        assert records[0] == IMPORT_COLUMN_NAMES
+        assert len(records) == 2  # header + one example row
+        assert len(records[1]) == len(IMPORT_COLUMN_NAMES)
+
+    def test_xlsx_template_has_products_and_instructions_sheets(self, admin_client):
+        from dashboard.product_import import IMPORT_COLUMN_NAMES, REQUIRED_COLUMN_NAMES
+        from openpyxl import load_workbook
+
+        resp = admin_client.get(TEMPLATE_URL, {"file_type": "xlsx"})
+
+        assert resp.status_code == 200
+        assert "spreadsheetml" in resp["Content-Type"]
+        workbook = load_workbook(_io.BytesIO(resp.content))
+        assert workbook.sheetnames == ["products", "instructions"]
+        header = [c.value for c in workbook["products"][1]]
+        assert header == IMPORT_COLUMN_NAMES
+        guide = {
+            row[0].value: row[1].value
+            for row in workbook["instructions"].iter_rows(min_row=2)
+        }
+        assert set(guide) == set(IMPORT_COLUMN_NAMES)
+        assert {c for c, req in guide.items() if req == "yes"} == set(
+            REQUIRED_COLUMN_NAMES
+        )
+
+    @pytest.mark.parametrize("file_type", ["csv", "xlsx"])
+    def test_the_template_round_trips_through_the_importer(
+        self, admin_client, make_category, make_brand, file_type
+    ):
+        """The example row must be importable as-is once its category/brand exist."""
+        from shop.models import Product, ProductVariant
+
+        make_category("Skincare")
+        make_brand("Example Brand")
+        template = admin_client.get(TEMPLATE_URL, {"file_type": file_type}).content
+
+        dry = post_import(admin_client, template, name=f"t.{file_type}")
+        assert dry.status_code == 200, dry.data
+        assert dry.data["error_count"] == 0, dry.data["errors"]
+        assert dry.data["created_count"] == 1
+
+        commit = post_import(
+            admin_client, template, name=f"t.{file_type}", dry_run="false"
+        )
+        assert commit.data["created_count"] == 1
+        variant = ProductVariant.objects.select_related("product", "color").get()
+        assert variant.product.name == "Example Hydrating Serum"
+        assert (variant.price, variant.stock, variant.volume_ml) == (1_250_000, 25, 30)
+        assert variant.color.hex_code == "#E8A0BF"
+        assert variant.expiration_date == _date(2028, 1, 15)
+        assert Product.objects.get().is_cruelty_free is True
+
+    def test_template_without_its_categories_fails_per_row_not_per_file(
+        self, admin_client
+    ):
+        template = admin_client.get(TEMPLATE_URL).content
+        resp = post_import(admin_client, template)
+        assert resp.status_code == 200
+        assert resp.data["error_count"] == 1
+        assert "category: 'Skincare' does not exist" in resp.data["errors"][0]["error"]
+
+    def test_bad_file_type(self, admin_client):
+        assert admin_client.get(TEMPLATE_URL, {"file_type": "pdf"}).status_code == 400
+
+    def test_docs_describe_every_column(self):
+        """docs/bulk-product-import.md is part of the contract: keep it complete."""
+        from dashboard.product_import import IMPORT_COLUMN_NAMES
+
+        doc = (
+            _Path(__file__).resolve().parents[2] / "docs" / "bulk-product-import.md"
+        ).read_text(encoding="utf-8")
+        missing = [c for c in IMPORT_COLUMN_NAMES if f"`{c}`" not in doc]
+        assert not missing, f"undocumented columns: {missing}"
+
+
+@pytest.mark.django_db
+class TestBulkImportPermissions:
+
+    def test_non_admin_gets_403_on_both_endpoints(self, customer_client, taxonomy):
+        from shop.models import Product
+
+        resp = post_import(customer_client, make_csv(good_rows()), dry_run="false")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert Product.objects.count() == 0
+        assert (
+            customer_client.get(TEMPLATE_URL).status_code == status.HTTP_403_FORBIDDEN
+        )
+
+    def test_anonymous_is_rejected(self, anon_client):
+        assert post_import(anon_client, b"x").status_code in (401, 403)
+        assert anon_client.get(TEMPLATE_URL).status_code in (401, 403)
+
+    def test_admin_and_superuser_allowed(
+        self, admin_client, superuser_client, taxonomy
+    ):
+        for client in (admin_client, superuser_client):
+            assert post_import(client, make_csv(good_rows())).status_code == 200
+            assert client.get(TEMPLATE_URL).status_code == 200
+
+    def test_wrong_methods(self, admin_client):
+        assert admin_client.get(IMPORT_URL).status_code == 405
+        assert admin_client.post(TEMPLATE_URL).status_code == 405
+
+    def test_import_only_accepts_multipart(self, admin_client):
+        resp = admin_client.post(IMPORT_URL, {"dry_run": True}, format="json")
+        assert resp.status_code == 415
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Catalog export (the reverse of the bulk import)
+# ══════════════════════════════════════════════════════════════════════════════
+
+CATALOG_EXPORT_URL = "/api/dashboard/admin/products/bulk-export/"
+
+
+@pytest.fixture
+def export_catalog(db):
+    """
+    A catalog exercising every export concern: all cosmetics attributes,
+    multi-variant products, a colourless / inactive / out-of-stock variant,
+    Persian text, text that looks like a formula, an ambiguous category name
+    (Face > Care vs Eyes > Care) and a product with no category or brand.
+
+    The LEGACY Product.price / Product.stock are deliberately junk (10 / 0):
+    price and stock filters must read the variants, not those dead fields.
+    """
+    from shop.models import Brand, Category, Color, Product, ProductVariant
+
+    skincare = Category.objects.create(name="Skincare")
+    sun_care = Category.objects.create(name="Sun Care", parent=skincare)
+    face = Category.objects.create(name="Face")
+    eyes = Category.objects.create(name="Eyes")
+    face_care = Category.objects.create(name="Care", parent=face)
+    eyes_care = Category.objects.create(name="Care", parent=eyes)
+    persian_cat = Category.objects.create(name="مراقبت پوست")
+    brand_x = Brand.objects.create(name="BrandX")
+    brand_y = Brand.objects.create(name="BrandY")
+    persian_brand = Brand.objects.create(name="کلینیک")
+    rose = Color.objects.create(name="Rose", hex_code="#E8A0BF")
+    nude = Color.objects.create(name="Nude", hex_code="#D2B48C")
+
+    def product(name, **kwargs):
+        return Product.objects.create(name=name, price=10, stock=0, **kwargs)
+
+    serum = product(
+        "Hydra Serum",
+        category=skincare,
+        brand=brand_x,
+        skin_type="dry",
+        gender="female",
+        is_cruelty_free=True,
+        is_organic=True,
+        short_description="Lightweight serum",
+        description="- Hydrating, gentle",  # leading "-" → quote-prefixed in CSV
+        ingredients="Aqua,\nGlycerin,\nSodium Hyaluronate",  # multi-line
+        usage_instructions="Apply 2-3 drops.",
+        warnings='=HYPERLINK("http://example.com")',  # looks like a formula
+        country_of_origin="France",
+        irc_regulatory_code="IRC-123",
+        is_sale=True,
+    )
+    sun = product(
+        "Sun Cream",
+        category=sun_care,
+        brand=brand_y,
+        skin_type="all",
+        spf=50,
+        is_new=True,
+    )
+    persian = product(
+        "سرم آبرسان",
+        category=persian_cat,
+        brand=persian_brand,
+        description="کرم مرطوب کننده، مناسب پوست خشک",
+    )
+    eye = product("Eye Care Cream", category=eyes_care, brand=brand_x)
+    face_gel = product("Face Care Gel", category=face_care, brand=brand_x)
+    orphan = product("Orphan Product")  # no category, no brand
+
+    def variant(prod, sku, price, **kwargs):
+        return ProductVariant.objects.create(
+            product=prod, sku=sku, price=price, **kwargs
+        )
+
+    v = {
+        "rose": variant(
+            serum, "SER-ROSE-30", 1_250_000, color=rose, original_price=1_500_000,
+            stock=25, low_stock_threshold=8, volume_ml=30, barcode=_valid_ean13(),
+            manufacture_date=_date(2026, 1, 15), expiration_date=_date(2028, 1, 15),
+            batch_number="B2601",
+        ),
+        "nude": variant(
+            serum, "SER-NUDE-50", 1_850_000, color=nude, stock=0, volume_ml=50,
+            is_active=False,
+        ),
+        "sun": variant(sun, "SUN-100", 900_000, stock=5, weight_g=100),
+        "persian": variant(persian, "PER-1", 700_000, stock=3),
+        "eye": variant(eye, "EYE-1", 650_000, stock=2),
+        "face": variant(face_gel, "FACE-1", 640_000, stock=4),
+        "orphan": variant(orphan, "ORPHAN-1", 500_000, stock=1),
+    }  # fmt: skip
+    return {
+        "variants": v,
+        "skincare": skincare,
+        "brand_x": brand_x,
+        "serum": serum,
+    }
+
+
+def get_export(client, fmt="csv", **params):
+    """(response, raw bytes) for an export request."""
+    resp = client.get(CATALOG_EXPORT_URL, {"format": fmt, **params})
+    if getattr(resp, "streaming", False):
+        return resp, b"".join(resp.streaming_content)
+    return resp, resp.content
+
+
+def parsed(content, fmt):
+    """An export file as the importer sees it: [(row_number, {column: str})]."""
+    from dashboard.product_import import parse_import_file
+
+    return parse_import_file(SimpleUploadedFile(f"export.{fmt}", content))
+
+
+def by_sku(rows):
+    return {cells["sku"]: cells for _, cells in rows}
+
+
+def db_snapshot():
+    """Every importable value, read straight from the models, keyed by SKU."""
+    from shop.models import ProductVariant
+
+    out = {}
+    for v in ProductVariant.objects.select_related("product", "color"):
+        p = v.product
+        out[v.sku] = {
+            "product": (p.id, p.name, p.category_id, p.brand_id),
+            "product_attrs": (
+                p.skin_type, p.hair_type, p.gender, p.spf, p.is_cruelty_free,
+                p.is_vegan, p.is_organic, p.short_description, p.description,
+                p.ingredients, p.usage_instructions, p.warnings,
+                p.country_of_origin, p.irc_regulatory_code, p.regulatory_verified,
+            ),
+            "variant": (
+                v.color_id, v.price, v.original_price, v.stock,
+                v.low_stock_threshold, v.volume_ml, v.weight_g, v.barcode,
+                v.manufacture_date, v.expiration_date, v.batch_number, v.is_active,
+            ),
+        }  # fmt: skip
+    return out
+
+
+SER_ROSE_EXPECTED = {
+    "product_name": "Hydra Serum",
+    "category": "Skincare",
+    "brand": "BrandX",
+    "sku": "SER-ROSE-30",
+    "color": "Rose",
+    "color_hex": "#E8A0BF",
+    "price": "1250000",
+    "original_price": "1500000",
+    "stock": "25",
+    "low_stock_threshold": "8",
+    "volume_ml": "30",
+    "weight_g": "",
+    "barcode": _valid_ean13(),
+    "manufacture_date": "2026-01-15",
+    "expiration_date": "2028-01-15",
+    "batch_number": "B2601",
+    "is_active": "true",
+    "skin_type": "dry",
+    "hair_type": "",
+    "gender": "female",
+    "spf": "",
+    "is_cruelty_free": "true",
+    "is_vegan": "false",
+    "is_organic": "true",
+    "short_description": "Lightweight serum",
+    "description": "- Hydrating, gentle",
+    "ingredients": "Aqua,\nGlycerin,\nSodium Hyaluronate",
+    "usage_instructions": "Apply 2-3 drops.",
+    "warnings": '=HYPERLINK("http://example.com")',
+    "country_of_origin": "France",
+    "irc_regulatory_code": "IRC-123",
+}
+
+
+@pytest.mark.django_db
+class TestCatalogExportContent:
+
+    @pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+    def test_unfiltered_export_has_every_variant_once_with_every_attribute(
+        self, admin_client, export_catalog, fmt
+    ):
+        from dashboard.product_import import IMPORT_COLUMN_NAMES
+
+        resp, content = get_export(admin_client, fmt)
+
+        assert resp.status_code == 200
+        rows = parsed(content, fmt)
+        assert len(rows) == 7  # one row per VARIANT, none missing or doubled
+        skus = [cells["sku"] for _, cells in rows]
+        assert sorted(skus) == sorted(
+            ["SER-ROSE-30", "SER-NUDE-50", "SUN-100", "PER-1", "EYE-1", "FACE-1",
+             "ORPHAN-1"]
+        )  # fmt: skip
+        assert all(list(cells) == IMPORT_COLUMN_NAMES for _, cells in rows)
+        cells = by_sku(rows)
+        # every cosmetics attribute, from the actual Product/ProductVariant data
+        assert cells["SER-ROSE-30"] == SER_ROSE_EXPECTED
+        # a second variant of the same product repeats the parent's attributes
+        nude = cells["SER-NUDE-50"]
+        for column in ("product_name", "category", "brand", "skin_type", "gender",
+                       "is_cruelty_free", "is_organic", "description", "ingredients",
+                       "warnings", "country_of_origin", "irc_regulatory_code"):  # fmt: skip
+            assert nude[column] == SER_ROSE_EXPECTED[column], column
+        assert (nude["color"], nude["color_hex"], nude["price"], nude["stock"]) == (
+            "Nude",
+            "#D2B48C",
+            "1850000",
+            "0",
+        )
+        assert nude["is_active"] == "false"  # inactive variants are exported
+        assert nude["original_price"] == "" and nude["barcode"] == ""
+        # colourless, weight-measured, SPF product
+        sun = cells["SUN-100"]
+        assert (sun["color"], sun["color_hex"], sun["weight_g"], sun["volume_ml"]) == (
+            "",
+            "",
+            "100",
+            "",
+        )
+        assert (sun["spf"], sun["skin_type"], sun["gender"]) == ("50", "all", "unisex")
+        assert (sun["category"], sun["brand"]) == ("Sun Care", "BrandY")
+        # Persian text survives untouched
+        persian = cells["PER-1"]
+        assert persian["product_name"] == "سرم آبرسان"
+        assert persian["brand"] == "کلینیک" and persian["category"] == "مراقبت پوست"
+        assert persian["description"] == "کرم مرطوب کننده، مناسب پوست خشک"
+        # no category / brand → blank cells
+        assert cells["ORPHAN-1"]["category"] == "" and cells["ORPHAN-1"]["brand"] == ""
+
+    def test_ambiguous_category_names_are_written_as_full_paths(
+        self, admin_client, export_catalog
+    ):
+        cells = by_sku(parsed(get_export(admin_client)[1], "csv"))
+        assert cells["EYE-1"]["category"] == "Eyes > Care"
+        assert cells["FACE-1"]["category"] == "Face > Care"
+        assert cells["SUN-100"]["category"] == "Sun Care"  # unique → plain name
+
+    def test_a_products_variants_are_adjacent(self, admin_client, export_catalog):
+        rows = parsed(get_export(admin_client)[1], "csv")
+        names = [cells["product_name"] for _, cells in rows]
+        assert names == sorted(names, key=lambda n: (n,))  # grouped by name
+        serum_positions = [i for i, n in enumerate(names) if n == "Hydra Serum"]
+        assert serum_positions == list(
+            range(serum_positions[0], serum_positions[0] + 2)
+        )
+
+    def test_empty_catalog_exports_just_the_header(self, admin_client, db):
+        from dashboard.product_import import IMPORT_COLUMN_NAMES
+
+        _, content = get_export(admin_client)
+        lines = content.decode("utf-8-sig").splitlines()
+        assert lines == [",".join(IMPORT_COLUMN_NAMES)]
+        resp, xlsx = get_export(admin_client, "xlsx")
+        assert resp.status_code == 200 and xlsx.startswith(b"PK")
+
+    def test_export_row_covers_exactly_the_import_schema(self, export_catalog):
+        from dashboard.product_import import (
+            IMPORT_COLUMN_NAMES,
+            export_category_labels,
+            export_row,
+        )
+
+        row = export_row(export_catalog["variants"]["rose"], export_category_labels())
+        assert list(row) == IMPORT_COLUMN_NAMES
+
+
+@pytest.mark.django_db
+class TestCatalogExportFilters:
+
+    def _skus(self, client, **params):
+        resp, content = get_export(client, "csv", **params)
+        assert resp.status_code == 200, content
+        records = list(_csv.reader(_io.StringIO(content.decode("utf-8-sig"))))
+        sku_col = records[0].index("sku")
+        return {record[sku_col] for record in records[1:]}
+
+    def test_category_filter_only_returns_that_categorys_variants(
+        self, admin_client, export_catalog
+    ):
+        skus = self._skus(admin_client, category=export_catalog["skincare"].id)
+        # Hydra Serum's two variants; Sun Cream lives in the CHILD category
+        # (exact match, same as the admin product list).
+        assert skus == {"SER-ROSE-30", "SER-NUDE-50"}
+
+    def test_brand_filter(self, admin_client, export_catalog):
+        skus = self._skus(admin_client, brand=export_catalog["brand_x"].id)
+        assert skus == {"SER-ROSE-30", "SER-NUDE-50", "EYE-1", "FACE-1"}
+
+    def test_product_flag_filters(self, admin_client, export_catalog):
+        assert self._skus(admin_client, is_sale="true") == {
+            "SER-ROSE-30",
+            "SER-NUDE-50",
+        }
+        assert self._skus(admin_client, is_new="true") == {"SUN-100"}
+
+    def test_search_uses_the_product_lists_search_fields(
+        self, admin_client, export_catalog
+    ):
+        assert self._skus(admin_client, search="serum") == {
+            "SER-ROSE-30",
+            "SER-NUDE-50",
+        }
+        assert self._skus(admin_client, search="BrandY") == {"SUN-100"}  # brand name
+
+    def test_filters_combine(self, admin_client, export_catalog):
+        skus = self._skus(
+            admin_client, brand=export_catalog["brand_x"].id, is_sale="true"
+        )
+        assert skus == {"SER-ROSE-30", "SER-NUDE-50"}
+
+    def test_price_and_stock_filters_read_the_variants_not_legacy_product_fields(
+        self, admin_client, export_catalog
+    ):
+        # Every legacy Product.price is 10 and Product.stock 0 in this fixture;
+        # these only work if the real variant values are used.
+        assert self._skus(admin_client, min_price=1_000_000) == {
+            "SER-ROSE-30",
+            "SER-NUDE-50",
+        }
+        assert self._skus(admin_client, max_price=640_000) == {
+            "FACE-1",
+            "ORPHAN-1",
+        }
+        assert self._skus(admin_client, min_price=650_000, max_price=900_000) == {
+            "SUN-100",
+            "PER-1",
+            "EYE-1",
+        }
+        in_stock = self._skus(admin_client, in_stock="true")
+        assert "SER-NUDE-50" not in in_stock and "SER-ROSE-30" in in_stock
+        assert self._skus(admin_client, in_stock="false") == {"SER-NUDE-50"}
+
+    def test_product_and_variant_level_filters_combine(
+        self, admin_client, export_catalog
+    ):
+        skus = self._skus(
+            admin_client, brand=export_catalog["brand_x"].id, min_price=1_500_000
+        )
+        assert skus == {"SER-NUDE-50"}
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"category": "abc"},
+            {"brand": "x"},
+            {"min_price": "cheap"},
+            {"in_stock": "maybe"},
+            {"in_stock": "ture"},
+            {"is_sale": "yes"},
+            {"is_new": "1"},
+        ],
+    )
+    def test_malformed_filters_are_a_400_not_an_unfiltered_export(
+        self, admin_client, export_catalog, params
+    ):
+        resp = admin_client.get(CATALOG_EXPORT_URL, params)
+        assert resp.status_code == 400
+        assert list(resp.data)[0] in params
+
+    def test_filtered_to_nothing_is_a_header_only_file(
+        self, admin_client, export_catalog
+    ):
+        assert self._skus(admin_client, search="no-such-product") == set()
+
+
+@pytest.mark.django_db
+class TestCatalogExportRoundTrip:
+    """The point of the task: what we export is exactly what the importer reads."""
+
+    @pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+    def test_exported_file_reimports_as_pure_updates_with_zero_errors(
+        self, admin_client, export_catalog, fmt
+    ):
+        _, content = get_export(admin_client, fmt)
+
+        resp = post_import(admin_client, content, name=f"export.{fmt}")  # dry run
+
+        assert resp.status_code == 200, resp.data
+        assert resp.data["errors"] == [], resp.data["errors"]
+        assert resp.data["error_count"] == 0
+        assert resp.data["total_rows"] == 7
+        assert resp.data["created_count"] == 0  # nothing mistaken for a new row
+        assert resp.data["updated_count"] == 7
+        assert resp.data["products_created_count"] == 0
+        assert {r["action"] for r in resp.data["preview"]} == {"updated"}
+        assert {r["sku"] for r in resp.data["preview"]} == {
+            "SER-ROSE-30", "SER-NUDE-50", "SUN-100", "PER-1", "EYE-1", "FACE-1",
+            "ORPHAN-1",
+        }  # fmt: skip
+
+    @pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+    def test_committing_the_exported_file_changes_nothing(
+        self, admin_client, export_catalog, fmt
+    ):
+        from shop.models import (
+            Brand,
+            Category,
+            Color,
+            Product,
+            ProductVariant,
+            StockMovement,
+        )
+
+        before = db_snapshot()
+        counts = (
+            Product.objects.count(),
+            ProductVariant.objects.count(),
+            Category.objects.count(),
+            Brand.objects.count(),
+            Color.objects.count(),
+            StockMovement.objects.count(),
+        )
+        _, content = get_export(admin_client, fmt)
+
+        resp = post_import(admin_client, content, name=f"export.{fmt}", dry_run="false")
+
+        assert resp.data["error_count"] == 0 and resp.data["updated_count"] == 7
+        assert db_snapshot() == before  # every value, byte for byte
+        assert counts == (
+            Product.objects.count(),
+            ProductVariant.objects.count(),
+            Category.objects.count(),
+            Brand.objects.count(),
+            Color.objects.count(),
+            StockMovement.objects.count(),
+        )
+
+    def test_filtered_exports_round_trip_too(self, admin_client, export_catalog):
+        _, content = get_export(admin_client, "csv", brand=export_catalog["brand_x"].id)
+        resp = post_import(admin_client, content)
+        assert resp.data["error_count"] == 0
+        assert (resp.data["created_count"], resp.data["updated_count"]) == (0, 4)
+
+    @pytest.mark.parametrize("fmt", ["csv", "xlsx"])
+    def test_export_edit_reimport_changes_only_what_was_edited(
+        self, admin_client, export_catalog, fmt
+    ):
+        from shop.models import ProductVariant
+
+        before = db_snapshot()
+        _, content = get_export(admin_client, fmt)
+        edited = edit_cell(
+            content, fmt, "SER-ROSE-30", {"price": "1300000", "stock": "40"}
+        )
+
+        resp = post_import(admin_client, edited, name=f"edited.{fmt}", dry_run="false")
+
+        assert resp.data["error_count"] == 0 and resp.data["updated_count"] == 7
+        rose = ProductVariant.objects.get(sku="SER-ROSE-30")
+        assert (rose.price, rose.stock) == (1_300_000, 40)
+        after = db_snapshot()
+        changed = {sku for sku in before if before[sku] != after[sku]}
+        assert changed == {"SER-ROSE-30"}  # nothing else moved
+
+    def test_csv_and_xlsx_exports_hold_equivalent_data(
+        self, admin_client, export_catalog
+    ):
+        csv_rows = parsed(get_export(admin_client, "csv")[1], "csv")
+        xlsx_rows = parsed(get_export(admin_client, "xlsx")[1], "xlsx")
+        assert csv_rows == xlsx_rows
+
+
+def edit_cell(content, fmt, sku, changes):
+    """Edit one variant's cells in an exported file, the way an admin would."""
+    from dashboard.product_import import IMPORT_COLUMN_NAMES
+
+    if fmt == "csv":
+        records = list(_csv.reader(_io.StringIO(content.decode("utf-8-sig"))))
+        sku_col = records[0].index("sku")
+        for record in records[1:]:
+            if record[sku_col] == sku:
+                for column, value in changes.items():
+                    record[IMPORT_COLUMN_NAMES.index(column)] = value
+        buffer = _io.StringIO()
+        _csv.writer(buffer).writerows(records)
+        return buffer.getvalue().encode("utf-8")
+
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(_io.BytesIO(content))
+    sheet = workbook["products"]
+    sku_col = IMPORT_COLUMN_NAMES.index("sku") + 1
+    for row in range(2, sheet.max_row + 1):
+        if sheet.cell(row=row, column=sku_col).value == sku:
+            for column, value in changes.items():
+                sheet.cell(
+                    row=row, column=IMPORT_COLUMN_NAMES.index(column) + 1
+                ).value = int(value)
+    buffer = _io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+@pytest.mark.django_db
+class TestCatalogExportFileFormats:
+
+    def test_csv_is_streamed_utf8_with_bom_and_protects_formula_cells(
+        self, admin_client, export_catalog
+    ):
+        resp, content = get_export(admin_client, "csv")
+
+        assert resp.streaming is True
+        assert resp["Content-Type"].startswith("text/csv")
+        assert resp["Content-Disposition"].startswith(
+            'attachment; filename="catalog_export_'
+        )
+        assert resp["Content-Disposition"].endswith('.csv"')
+        assert content.startswith(b"\xef\xbb\xbf")
+        text = content.decode("utf-8-sig")
+        # spreadsheet apps would execute these; quote-prefixed like the orders export
+        assert "'- Hydrating, gentle" in text
+        assert "'=HYPERLINK" in text
+        # …and the importer reads them back as the original text
+        cells = by_sku(parsed(content, "csv"))["SER-ROSE-30"]
+        assert cells["description"] == "- Hydrating, gentle"
+        assert cells["warnings"] == '=HYPERLINK("http://example.com")'
+
+    def test_xlsx_has_typed_cells_and_stores_formula_lookalikes_as_text(
+        self, admin_client, export_catalog
+    ):
+        from openpyxl import load_workbook
+
+        resp, content = get_export(admin_client, "xlsx")
+
+        assert resp["Content-Type"].endswith("spreadsheetml.sheet")
+        assert resp["Content-Disposition"].endswith('.xlsx"')
+        sheet = load_workbook(_io.BytesIO(content))["products"]
+        from dashboard.product_import import IMPORT_COLUMN_NAMES
+
+        header = [c.value for c in sheet[1]]
+        assert header == IMPORT_COLUMN_NAMES
+        row = next(
+            r
+            for r in sheet.iter_rows(min_row=2)
+            if r[header.index("sku")].value == "SER-ROSE-30"
+        )
+        cell = {name: row[i] for i, name in enumerate(header)}
+        assert cell["price"].value == 1_250_000 and isinstance(cell["price"].value, int)
+        assert cell["is_active"].value is True
+        assert cell["is_cruelty_free"].value is True
+        assert cell["expiration_date"].value.date() == _date(2028, 1, 15)
+        assert isinstance(cell["barcode"].value, str)  # text: keeps leading zeros
+        # text that looks like a formula is a string cell, never evaluated
+        assert cell["warnings"].data_type == "s"
+        assert cell["warnings"].value == '=HYPERLINK("http://example.com")'
+
+    def test_control_characters_do_not_break_the_xlsx_export(
+        self, admin_client, export_catalog
+    ):
+        product = export_catalog["serum"]
+        product.description = "bell\x07 and vertical tab\x0b here"
+        product.save()
+        resp, content = get_export(admin_client, "xlsx")
+        assert resp.status_code == 200 and content.startswith(b"PK")
+
+    def test_format_can_be_chosen_by_query_param_file_type_or_accept_header(
+        self, admin_client, export_catalog
+    ):
+        assert get_export(admin_client, "xlsx")[1].startswith(b"PK")
+        assert admin_client.get(
+            CATALOG_EXPORT_URL, {"file_type": "xlsx"}
+        ).content.startswith(b"PK")
+        assert admin_client.get(CATALOG_EXPORT_URL).streaming  # default: CSV
+        accept_xlsx = admin_client.get(
+            CATALOG_EXPORT_URL,
+            HTTP_ACCEPT="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        assert accept_xlsx.content.startswith(b"PK")
+        assert admin_client.get(CATALOG_EXPORT_URL, HTTP_ACCEPT="text/csv").streaming
+
+    def test_unknown_formats_are_rejected(self, admin_client, export_catalog):
+        assert (
+            admin_client.get(CATALOG_EXPORT_URL, {"file_type": "pdf"}).status_code
+            == 400
+        )
+        assert (
+            admin_client.get(CATALOG_EXPORT_URL, {"file_type": "json"}).status_code
+            == 400
+        )
+        assert (
+            admin_client.get(CATALOG_EXPORT_URL, {"format": "pdf"}).status_code == 404
+        )
+
+    def test_xlsx_export_is_capped_but_csv_is_not(
+        self, admin_client, export_catalog, monkeypatch
+    ):
+        from dashboard import product_import
+
+        monkeypatch.setattr(product_import, "MAX_XLSX_EXPORT_ROWS", 3)
+
+        resp = admin_client.get(CATALOG_EXPORT_URL, {"format": "xlsx"})
+        assert resp.status_code == 400
+        assert (
+            "format=csv" in resp.data["detail"] and "7 variants" in resp.data["detail"]
+        )
+        # a narrower filter fits under the cap
+        small = admin_client.get(
+            CATALOG_EXPORT_URL, {"format": "xlsx", "is_new": "true"}
+        )
+        assert small.status_code == 200
+        assert len(parsed(get_export(admin_client, "csv")[1], "csv")) == 7
+
+
+@pytest.mark.django_db
+class TestImporterReadsExportedCsvCells:
+
+    def test_quote_prefix_on_formula_characters_is_removed_on_csv_import_only(self):
+        from dashboard.product_import import parse_import_file
+
+        csv_bytes = (
+            "product_name,category,price,description,warnings,ingredients\n"
+            "A,C,1,'- bullet,'=SUM(1),'plain quote\n"
+        ).encode()
+        ((_, cells),) = parse_import_file(SimpleUploadedFile("a.csv", csv_bytes))
+        assert cells["description"] == "- bullet"
+        assert cells["warnings"] == "=SUM(1)"
+        assert cells["ingredients"] == "'plain quote"  # not a formula lead: untouched
+
+    def test_xlsx_cells_are_never_unprefixed(self):
+        from dashboard.product_import import parse_import_file
+
+        content = make_xlsx(
+            [
+                {
+                    "product_name": "A",
+                    "category": "C",
+                    "price": "1",
+                    "description": "'- x",
+                }
+            ]
+        )
+        ((_, cells),) = parse_import_file(SimpleUploadedFile("a.xlsx", content))
+        assert cells["description"] == "'- x"
+
+    def test_docs_describe_the_export(self):
+        doc = (
+            _Path(__file__).resolve().parents[2] / "docs" / "bulk-product-import.md"
+        ).read_text(encoding="utf-8")
+        assert "bulk-export" in doc and "round-trip" in doc.lower()
+
+
+@pytest.mark.django_db
+class TestCatalogExportPermissions:
+
+    def test_non_admin_gets_403(self, customer_client, export_catalog):
+        for params in ({}, {"format": "xlsx"}, {"format": "csv"}):
+            assert (
+                customer_client.get(CATALOG_EXPORT_URL, params).status_code
+                == status.HTTP_403_FORBIDDEN
+            )
+
+    def test_anonymous_is_rejected(self, anon_client, export_catalog):
+        assert anon_client.get(CATALOG_EXPORT_URL).status_code in (401, 403)
+
+    def test_admin_and_superuser_allowed(
+        self, admin_client, superuser_client, export_catalog
+    ):
+        assert admin_client.get(CATALOG_EXPORT_URL).status_code == 200
+        assert superuser_client.get(CATALOG_EXPORT_URL).status_code == 200
+
+    def test_write_methods_are_not_allowed(self, admin_client):
+        assert admin_client.post(CATALOG_EXPORT_URL).status_code == 405

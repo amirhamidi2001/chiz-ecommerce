@@ -1,14 +1,17 @@
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 
 from accounts.models import UserType
 from cart.models import CartItem
+from core.money import percent_of
+from dashboard.models import PriceAdjustmentLog
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.db.models import Avg, BigIntegerField, Count, F, Q, Sum
+from django.db.models import Avg, BigIntegerField, Count, F, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce, TruncDate, TruncMonth
 from django.utils import timezone
 from order.models import Order, OrderItem
-from shop.models import Product, ProductVariant, Review
+from promotions.models import Coupon
+from shop.models import Product, ProductVariant, Review, StockMovement
 
 User = get_user_model()
 
@@ -26,8 +29,83 @@ def _pct_change(current, previous) -> float:
     return round(((cur - prev) / prev) * 100, 1)
 
 
-def get_date_range(period: str):
-    """Return (start, end) aware datetimes for a named period."""
+_MIN_CUSTOM_YEAR = 2000
+_MAX_CUSTOM_SPAN = timedelta(days=3660)  # ~10 years
+
+
+class InvalidDateRange(ValueError):
+    """A custom start/end pair is missing, malformed, or not start < end.
+
+    Raised by get_date_range()/parse_custom_range(); the admin overview view
+    turns it into a 400 instead of letting it surface as a 500.
+    """
+
+
+def _parse_bound(raw, name: str, *, end_of_day: bool):
+    """
+    Parse one custom-range bound into an aware datetime.
+
+    Accepts a date ("2026-11-01"), an ISO datetime ("2026-11-01T09:30:00",
+    with or without offset), or an already-built date/datetime. A bare date
+    is interpreted in the project time zone (Asia/Tehran): the start bound
+    becomes 00:00 of that day and the end bound the last instant of it, so
+    `start=2026-11-01&end=2026-11-07` covers all seven days inclusive.
+    """
+    if isinstance(raw, datetime):
+        value = raw
+    elif isinstance(raw, date):
+        value = datetime.combine(raw, time.max if end_of_day else time.min)
+    else:
+        text = str(raw).strip()
+        try:
+            if "T" in text or " " in text:
+                value = datetime.fromisoformat(text)
+            else:
+                day = date.fromisoformat(text)
+                value = datetime.combine(day, time.max if end_of_day else time.min)
+        except ValueError:
+            raise InvalidDateRange(
+                f"'{name}' must be an ISO date (YYYY-MM-DD) or datetime."
+            ) from None
+    try:
+        if timezone.is_naive(value):
+            value = timezone.make_aware(value, timezone.get_current_timezone())
+    except (ValueError, OverflowError):
+        raise InvalidDateRange(f"'{name}' is out of the supported range.") from None
+    return value
+
+
+def parse_custom_range(start_param, end_param):
+    """Validate a custom range and return (start, end) aware datetimes."""
+    if not start_param or not end_param:
+        raise InvalidDateRange(
+            "period=custom requires both 'start' and 'end' query parameters."
+        )
+    start = _parse_bound(start_param, "start", end_of_day=False)
+    end = _parse_bound(end_param, "end", end_of_day=True)
+    if start >= end:
+        raise InvalidDateRange("'start' must be earlier than 'end'.")
+    # Bounds that would overflow the previous-period arithmetic (or make the
+    # daily chart absurdly large) are rejected up front instead of 500-ing.
+    if start.year < _MIN_CUSTOM_YEAR or end - start > _MAX_CUSTOM_SPAN:
+        raise InvalidDateRange(
+            f"Custom range must start in {_MIN_CUSTOM_YEAR} or later "
+            f"and span at most {_MAX_CUSTOM_SPAN.days} days."
+        )
+    return start, end
+
+
+def get_date_range(period: str, start_param=None, end_param=None):
+    """
+    Return (start, end) aware datetimes.
+
+    Named presets: "7d", "30d", "90d", "1y" (unknown names fall back to 30d,
+    as before). "custom" uses the explicit start/end and is strict: missing,
+    malformed, or reversed bounds raise InvalidDateRange rather than being
+    silently replaced by a preset.
+    """
+    if period == "custom":
+        return parse_custom_range(start_param, end_param)
     end = timezone.now()
     mapping = {"7d": 7, "30d": 30, "90d": 90, "1y": 365}
     days = mapping.get(period, 30)
@@ -37,8 +115,15 @@ def get_date_range(period: str):
 # ─── Admin Analytics ─────────────────────────────────────────────────────────
 
 
-def get_admin_overview(period: str = "30d") -> dict:
-    start, end = get_date_range(period)
+def get_admin_overview(period: str = "30d", start=None, end=None) -> dict:
+    """
+    Current-vs-previous-period KPIs plus a daily revenue chart.
+
+    `period` is a preset ("7d"/"30d"/"90d"/"1y") or "custom" with explicit
+    `start`/`end` (see get_date_range). The comparison window is the same
+    length, immediately before `start`. All money values are int Rial.
+    """
+    start, end = get_date_range(period, start, end)
     delta = end - start
     prev_start, prev_end = start - delta, start
 
@@ -72,10 +157,8 @@ def get_admin_overview(period: str = "30d") -> dict:
     # "Low stock products" / "Out of stock products", that copy is now
     # slightly inaccurate and should be updated to say "variants" —
     # not fixed here since it's a frontend-only concern.
-    low_stock = ProductVariant.objects.filter(
-        stock__gt=0, stock__lte=F("low_stock_threshold"), is_active=True
-    ).count()
-    out_of_stock = ProductVariant.objects.filter(stock=0, is_active=True).count()
+    low_stock = low_stock_variants_qs().count()
+    out_of_stock = out_of_stock_variants_qs().count()
 
     # Daily revenue chart
     revenue_chart = list(
@@ -150,22 +233,85 @@ def get_monthly_revenue(months: int = 12) -> list:
     ]
 
 
-def get_top_products(limit: int = 10) -> list:
+def _items_in_range(start=None, end=None):
+    """
+    OrderItems whose parent order was created within [start, end].
+
+    Either bound may be omitted (open-ended); with neither this is all-time
+    history. The view layer always supplies both or neither.
+    """
+    qs = OrderItem.objects.all()
+    if start is not None:
+        qs = qs.filter(order__created_at__gte=start)
+    if end is not None:
+        qs = qs.filter(order__created_at__lte=end)
+    return qs
+
+
+# Σ(unit_price × quantity) in whole Rial. Explicit BigIntegerField keeps the
+# result an int regardless of how Django would infer the mixed
+# RialField × PositiveIntegerField expression.
+def _line_revenue():
+    return Coalesce(
+        Sum(F("unit_price") * F("quantity"), output_field=BigIntegerField()), 0
+    )
+
+
+def get_top_products(limit: int = 10, start=None, end=None) -> list:
+    """Best-selling products by units sold, optionally within a date range."""
     rows = (
-        OrderItem.objects.values("product_id", "product_name")
-        .annotate(
-            total_sold=Sum("quantity"),
-            revenue=Coalesce(
-                Sum(F("unit_price") * F("quantity"), output_field=BigIntegerField()),
-                0,
-            ),
-        )
-        .order_by("-total_sold")[:limit]
+        _items_in_range(start, end)
+        .values("product_id", "product_name")
+        .annotate(total_sold=Sum("quantity"), revenue=_line_revenue())
+        .order_by("-total_sold", "-revenue", "product_name")[:limit]
     )
     return [
         {
             "product_id": r["product_id"],
             "product_name": r["product_name"],
+            "total_sold": r["total_sold"],
+            "revenue": int(r["revenue"]),
+        }
+        for r in rows
+    ]
+
+
+def get_top_variants(limit: int = 10, start=None, end=None) -> list:
+    """
+    Best-selling variants (shade/size) by units sold, optionally within a
+    date range.
+
+    Built from the frozen OrderItem snapshot (variant_sku,
+    variant_attributes_json), so it reports what was actually sold even if
+    the variant was later renamed or deleted. Rows with a blank variant_sku
+    (pre-Epic-3 orders, or an unpopulated snapshot) are excluded.
+
+    Aggregation is by variant_sku alone — SKUs are globally unique, so that
+    IS the variant. Grouping by name/attributes too would split one variant
+    into several rows after a product or colour rename. The name and
+    attributes shown are the most recent snapshot among the matching items.
+    """
+    qs = _items_in_range(start, end).exclude(variant_sku="")
+    rows = list(
+        qs.values("variant_sku")
+        .annotate(total_sold=Sum("quantity"), revenue=_line_revenue())
+        .order_by("-total_sold", "-revenue", "variant_sku")[:limit]
+    )
+    if not rows:
+        return []
+
+    latest = {
+        item["variant_sku"]: item
+        for item in qs.filter(variant_sku__in=[r["variant_sku"] for r in rows])
+        .order_by("variant_sku", "-order__created_at", "-id")
+        .distinct("variant_sku")  # PostgreSQL DISTINCT ON (project is PG-only)
+        .values("variant_sku", "product_name", "variant_attributes_json")
+    }
+    return [
+        {
+            "variant_sku": r["variant_sku"],
+            "product_name": latest[r["variant_sku"]]["product_name"],
+            "variant_attributes": latest[r["variant_sku"]]["variant_attributes_json"],
             "total_sold": r["total_sold"],
             "revenue": int(r["revenue"]),
         }
@@ -196,12 +342,274 @@ def get_product_stats() -> dict:
         # matching comment in get_admin_overview() above. Follow-up:
         # update frontend label copy ("... products") if it hasn't
         # already been adjusted for the variant-based catalog.
-        "out_of_stock": ProductVariant.objects.filter(stock=0, is_active=True).count(),
-        "low_stock": ProductVariant.objects.filter(
-            stock__gt=0, stock__lte=F("low_stock_threshold"), is_active=True
-        ).count(),
+        "out_of_stock": out_of_stock_variants_qs().count(),
+        "low_stock": low_stock_variants_qs().count(),
         "avg_rating": float(Product.objects.aggregate(a=Avg("rating"))["a"] or 0),
     }
+
+
+# ─── Inventory lists ──────────────────────────────────────────────────────────
+#
+# The dashboard's low_stock / out_of_stock COUNTS and the lists below are all
+# built from these two querysets, so a number on the overview can never
+# disagree with the list an admin clicks into from it.
+
+
+def low_stock_variants_qs():
+    """Active variants at or below THEIR OWN low_stock_threshold (but not 0)."""
+    return ProductVariant.objects.filter(
+        is_active=True, stock__gt=0, stock__lte=F("low_stock_threshold")
+    )
+
+
+def out_of_stock_variants_qs():
+    """Active variants with no stock. Deactivated ones are not restockable."""
+    return ProductVariant.objects.filter(is_active=True, stock=0)
+
+
+def get_low_stock_variants(limit: int = 50) -> list:
+    """Low-stock variants, lowest stock first (most urgent), ties by SKU."""
+    variants = (
+        low_stock_variants_qs()
+        .select_related("product", "color")
+        .order_by("stock", "sku")[:limit]
+    )
+    return [
+        {
+            "variant_id": v.id,
+            "product_id": v.product_id,
+            "sku": v.sku,
+            "product_name": v.product.name,
+            "color": v.color.name if v.color else None,
+            "stock": v.stock,
+            "low_stock_threshold": v.low_stock_threshold,
+        }
+        for v in variants
+    ]
+
+
+def get_out_of_stock_variants(limit: int = 50) -> list:
+    """
+    Out-of-stock variants, most recently sold out first.
+
+    "When it ran out" is the time of the variant's latest StockMovement, NOT
+    ProductVariant.updated_at: every stock write in the codebase is
+    save(update_fields=["stock"]), which never touches the auto_now
+    updated_at. updated_at is only the fallback for a variant with no
+    movement history (e.g. seeded directly).
+    """
+    last_movement = (
+        StockMovement.objects.filter(variant=OuterRef("pk"))
+        .order_by("-created_at")
+        .values("created_at")[:1]
+    )
+    variants = (
+        out_of_stock_variants_qs()
+        .select_related("product", "color")
+        .annotate(
+            last_stock_change_at=Coalesce(Subquery(last_movement), F("updated_at"))
+        )
+        .order_by("-last_stock_change_at", "-id")[:limit]
+    )
+    return [
+        {
+            "variant_id": v.id,
+            "product_id": v.product_id,
+            "sku": v.sku,
+            "product_name": v.product.name,
+            "color": v.color.name if v.color else None,
+            "last_stock_change_at": v.last_stock_change_at,
+        }
+        for v in variants
+    ]
+
+
+# ─── Expiry reports ───────────────────────────────────────────────────────────
+#
+# Mirrors shop.admin.NearExpiryFilter (the Django-admin filter) as dashboard
+# data; the near-expiry window and the expired set are disjoint by
+# construction (expiration_date >= today vs < today).
+
+
+def _expiry_today() -> date:
+    """
+    The "today" used for every expiry comparison.
+
+    Deliberately `timezone.now().date()` (the UTC date), NOT
+    `timezone.localdate()`: shop.tasks.deactivate_expired_variants and
+    NearExpiryFilter both use it, and the expired-but-still-active report
+    below is a cross-check on that task. If it used a different day boundary
+    it would flag healthy variants for a few hours every night (the Tehran
+    date runs ahead of the UTC date). Moving the whole expiry feature to
+    calendar-local days is a separate, cross-cutting change.
+    """
+    return timezone.now().date()
+
+
+def near_expiry_variants_qs(days: int = 90):
+    """Active variants expiring from today through today + `days` (inclusive)."""
+    today = _expiry_today()
+    return ProductVariant.objects.filter(
+        is_active=True,
+        expiration_date__isnull=False,
+        expiration_date__gte=today,
+        expiration_date__lte=today + timedelta(days=days),
+    )
+
+
+def expired_still_active_variants_qs():
+    """Variants past their expiration_date that are still is_active=True."""
+    return ProductVariant.objects.filter(
+        is_active=True,
+        expiration_date__isnull=False,
+        expiration_date__lt=_expiry_today(),
+    )
+
+
+def _expiry_rows(qs, limit: int) -> list:
+    today = _expiry_today()
+    variants = qs.select_related("product", "color").order_by("expiration_date", "sku")[
+        :limit
+    ]
+    return [
+        {
+            "variant_id": v.id,
+            "product_id": v.product_id,
+            "sku": v.sku,
+            "product_name": v.product.name,
+            "color": v.color.name if v.color else None,
+            "expiration_date": v.expiration_date.isoformat(),
+            # negative once expired (days overdue)
+            "days_until_expiry": (v.expiration_date - today).days,
+            "stock": v.stock,
+        }
+        for v in variants
+    ]
+
+
+def get_near_expiry_variants(days: int = 90, limit: int = 50) -> list:
+    """Active variants expiring within `days` days, soonest first."""
+    return _expiry_rows(near_expiry_variants_qs(days), limit)
+
+
+def get_expired_still_active_variants(limit: int = 50) -> list:
+    """
+    Already-expired variants that are still active, most overdue first.
+
+    A safety net independent of the nightly sweep
+    (shop.tasks.deactivate_expired_variants). Rows with days_until_expiry of
+    -1 can simply be waiting for tonight's run; entries that stay on the list
+    for several days (very negative days_until_expiry) point at a sweep that
+    isn't running, or at a deliberate reactivation.
+    """
+    return _expiry_rows(expired_still_active_variants_qs(), limit)
+
+
+# ─── Coupon performance ───────────────────────────────────────────────────────
+
+
+def coupon_usage_qs():
+    """
+    Every coupon annotated with its COMPLETED-redemption figures.
+
+    Only redemptions tied to an order (order__isnull=False) count — the same
+    rule promotions.services.validate_coupon() applies to max_uses — so a
+    coupon merely applied to a not-yet-checked-out cart never inflates the
+    report. Cancelling an order (or a failed payment) deletes its
+    CouponRedemption (order.services.coupon), so cancelled orders drop out
+    of every figure without a status filter here.
+
+    All three aggregates ride the same single `redemptions` join and the
+    redemption→order link is one-to-one, so no row fan-out can multiply
+    the sums.
+    """
+    completed = Q(redemptions__order__isnull=False)
+    return Coupon.objects.annotate(
+        redemption_count=Count("redemptions", filter=completed),
+        total_discount_given=Coalesce(
+            Sum("redemptions__discount_amount", filter=completed), 0
+        ),
+        total_order_value=Coalesce(
+            Sum("redemptions__order__subtotal", filter=completed), 0
+        ),
+    )
+
+
+def get_coupon_usage_report(limit: int = 50) -> list:
+    """
+    Coupon performance, most-redeemed first (ties: most discount given, then
+    code). Coupons never redeemed are included, with zeros, at the bottom.
+
+    * total_discount_given — Σ of each completed redemption's frozen
+      discount_amount (Rial).
+    * total_order_value — Σ of those orders' subtotal (Rial): the gross
+      value the coupon was applied to, i.e. "drove X at a cost of Y".
+    * usage_rate_pct — redemption_count as a % of max_uses; None for an
+      unlimited coupon (max_uses is None) — render it as "Unlimited". A
+      max_uses of 0 means nothing can be redeemed (validate_coupon rejects
+      it immediately), so it is reported as fully used (100.0) rather than
+      divided by zero or mislabelled as unlimited. It can exceed 100 if
+      max_uses was lowered after redemptions happened.
+    """
+    coupons = coupon_usage_qs().order_by(
+        "-redemption_count", "-total_discount_given", "code"
+    )[:limit]
+
+    def usage_rate(c):
+        if c.max_uses is None:
+            return None
+        if c.max_uses == 0:
+            return 100.0
+        return round(c.redemption_count / c.max_uses * 100, 1)
+
+    return [
+        {
+            "coupon_id": c.id,
+            "code": c.code,
+            "discount_type": c.discount_type,
+            "redemption_count": c.redemption_count,
+            "max_uses": c.max_uses,
+            "usage_rate_pct": usage_rate(c),
+            "total_discount_given": int(c.total_discount_given),
+            "total_order_value": int(c.total_order_value),
+            "is_active": c.is_active,
+            "valid_until": c.valid_until.isoformat(),
+        }
+        for c in coupons
+    ]
+
+
+# ─── Bulk price adjustment ────────────────────────────────────────────────────
+
+
+def apply_price_adjustment(price: int, adjustment_type: str, value: int) -> int:
+    """
+    New integer-Rial price after one adjustment.
+
+    Percentages go through core.money.percent_of — the project's single
+    rounding rule (nearest whole Toman, ties up) — so a result is ALWAYS a
+    multiple of 10 and satisfies the DB's whole-Toman CHECK constraint on
+    ProductVariant.price; naive round(price * 1.07) would not. Fixed
+    amounts must themselves be whole-Toman (the serializer enforces it), so
+    the sum stays on the grid. Every decrease is floored at 0.
+    """
+    kinds = PriceAdjustmentLog.AdjustmentType
+    if adjustment_type == kinds.PERCENT_INCREASE:
+        return percent_of(price, 100 + value)
+    if adjustment_type == kinds.PERCENT_DECREASE:
+        return max(0, percent_of(price, 100 - value))
+    if adjustment_type == kinds.FIXED_INCREASE:
+        return price + value
+    if adjustment_type == kinds.FIXED_DECREASE:
+        return max(0, price - value)
+    raise ValueError(f"Unknown adjustment_type: {adjustment_type!r}")
+
+
+def plan_price_adjustment(variants, adjustment_type: str, value: int) -> list:
+    """[(variant, new_price), …] for every variant in `variants`, in order."""
+    return [
+        (v, apply_price_adjustment(v.price, adjustment_type, value)) for v in variants
+    ]
 
 
 def get_recent_orders(limit: int = 10) -> list:
