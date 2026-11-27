@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { dashboardAPI, downloadOrderInvoice } from "../services/api";
+import { useNavigate } from "react-router-dom";
+import { useCart } from "../context/CartContext";
+import { dashboardAPI } from "../services/api";
 import { saveBlob } from "../utils/download";
+import OrderTimeline from "./OrderTimeline";
 import ShipmentTrackingWidget from "./ShipmentTrackingWidget";
 import { formatToman } from '../utils/money';
 import { formatJalaliDate } from '../utils/jalaliDate';
@@ -15,7 +18,110 @@ const STATUS_STYLES = {
 
 const fmt = (n) => formatToman(n);
 
+// Reordering only makes sense for a finished order. Pending/processing/shipped
+// orders are still in flight (the customer just bought these), so no button there;
+// a cancelled one is a plausible "I changed my mind / fixed my cart, put it back".
+const REORDER_STATUSES = ["delivered", "cancelled"];
+
+// ─── Reorder ──────────────────────────────────────────────────────────────────
+// Re-adds a past order's items to the cart. The server always partly succeeds, so
+// the result says what went in AND what did not (and why), instead of leaving the
+// customer wondering why their cart is missing something.
+const ReorderButton = ({ order }) => {
+  const navigate = useNavigate();
+  const { refreshCart } = useCart();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+
+  if (!REORDER_STATUSES.includes(order.status)) return null;
+
+  const handleReorder = async () => {
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const { data } = await dashboardAPI.reorderOrder(order.id);
+      setResult(data);
+      // Header badge / cart page must reflect the new items straight away.
+      if (data.added_count > 0) await refreshCart();
+    } catch {
+      setError("Could not reorder these items. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unavailable = result?.unavailable ?? [];
+
+  return (
+    <div data-testid="reorder">
+      <button
+        type="button"
+        data-testid="reorder-button"
+        onClick={handleReorder}
+        disabled={busy}
+        aria-busy={busy}
+        className="text-sm font-medium text-teal-700 hover:text-teal-900 disabled:opacity-50 flex items-center gap-1"
+      >
+        <i className="bi bi-arrow-repeat" aria-hidden="true"></i>
+        {busy ? "Adding to cart…" : "Reorder"}
+      </button>
+
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>
+      )}
+
+      {result && (
+        <div
+          role="status"
+          data-testid="reorder-result"
+          className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm space-y-2"
+        >
+          <p
+            data-testid="reorder-summary"
+            className={result.added_count > 0 ? "font-medium text-teal-700" : "font-medium text-gray-700"}
+          >
+            {result.added_count > 0
+              ? `${result.added_count} item${result.added_count > 1 ? "s" : ""} added to your cart`
+              : "None of these items could be added to your cart"}
+          </p>
+
+          {unavailable.length > 0 && (
+            <div data-testid="reorder-unavailable">
+              <p className="text-gray-600">Not added:</p>
+              <ul className="list-disc ps-5 text-gray-600">
+                {unavailable.map((entry, i) => (
+                  <li key={`${entry.product_name}-${i}`}>
+                    <span className="font-medium">{entry.product_name}</span>
+                    {" — "}{entry.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {result.added_count > 0 && (
+            <button
+              type="button"
+              data-testid="reorder-go-to-cart"
+              onClick={() => navigate("/cart")}
+              className="bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition"
+            >
+              Go to cart
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Order detail modal ───────────────────────────────────────────────────────
+// An invoice only makes sense once payment is confirmed: pending (unpaid) and
+// cancelled orders don't offer one.
+const INVOICE_STATUSES = ["processing", "shipped", "delivered"];
+
 const OrderDetailModal = ({ orderId, onClose }) => {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -28,13 +134,13 @@ const OrderDetailModal = ({ orderId, onClose }) => {
     setInvoiceBusy(true);
     setInvoiceError("");
     try {
-      const { data } = await downloadOrderInvoice(orderId);
+      const { data } = await dashboardAPI.downloadInvoice(orderId);
       saveBlob(
         new Blob([data], { type: "application/pdf" }),
         `invoice_${order?.order_number || orderId}.pdf`,
       );
     } catch {
-      setInvoiceError("Could not download the invoice. Please try again.");
+      setInvoiceError("دانلود فاکتور با خطا مواجه شد. لطفاً دوباره تلاش کنید.");
     } finally {
       setInvoiceBusy(false);
     }
@@ -72,26 +178,27 @@ const OrderDetailModal = ({ orderId, onClose }) => {
           </div>
         ) : order ? (
           <div className="p-6 space-y-6">
-            {/* Status + Meta */}
+            {/* Status timeline (replaces the flat badge; the list rows keep theirs) */}
+            <OrderTimeline status={order.status} />
+
+            {/* Meta */}
             <div className="flex flex-wrap gap-3 items-center">
-              <span
-                className={`text-xs font-semibold px-3 py-1 rounded-full capitalize ${STATUS_STYLES[order.status]}`}
-              >
-                {order.status}
-              </span>
               <span className="text-sm text-gray-500">
                 Placed {formatJalaliDate(order.created_at)}
               </span>
+              {INVOICE_STATUSES.includes(order.status) && (
               <button
                 type="button"
                 data-testid="download-invoice"
                 onClick={handleDownloadInvoice}
                 disabled={invoiceBusy}
+                aria-busy={invoiceBusy}
                 className="ms-auto text-sm font-medium text-teal-700 hover:text-teal-900 disabled:opacity-50 flex items-center gap-1"
               >
                 <i className="bi bi-file-earmark-pdf"></i>
                 {invoiceBusy ? "Preparing…" : "Download Invoice"}
               </button>
+              )}
             </div>
             {invoiceError && (
               <p role="alert" className="text-sm text-red-600 -mt-3">
@@ -99,11 +206,16 @@ const OrderDetailModal = ({ orderId, onClose }) => {
               </p>
             )}
 
-            {/* Shipment tracking (Task 7.2.2.3) */}
-            <div>
-              <h5 className="font-semibold text-gray-700 mb-2">Shipment</h5>
-              <ShipmentTrackingWidget shipment={order.shipment} />
-            </div>
+            <ReorderButton order={order} />
+
+            {/* Shipment tracking (Task 7.2.2.3). A cancelled order that never shipped has
+                nothing to track, so "Not yet shipped" would be misleading there. */}
+            {(order.shipment || order.status !== "cancelled") && (
+              <div>
+                <h5 className="font-semibold text-gray-700 mb-2">Shipment</h5>
+                <ShipmentTrackingWidget shipment={order.shipment} />
+              </div>
+            )}
 
             {/* Items */}
             <div>
@@ -312,12 +424,15 @@ const OrdersTab = () => {
                 </div>
               )}
 
-              <button
-                onClick={() => setSelectedOrderId(order.id)}
-                className="mt-3 text-sm text-teal-600 hover:underline font-medium"
-              >
-                View Details <span className="icon-directional" aria-hidden="true">→</span>
-              </button>
+              <div className="mt-3 flex flex-wrap items-start gap-x-5 gap-y-2">
+                <button
+                  onClick={() => setSelectedOrderId(order.id)}
+                  className="text-sm text-teal-600 hover:underline font-medium"
+                >
+                  View Details <span className="icon-directional" aria-hidden="true">→</span>
+                </button>
+                <ReorderButton order={order} />
+              </div>
             </div>
           ))}
         </div>

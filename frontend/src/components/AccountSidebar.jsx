@@ -9,6 +9,7 @@ const MENU = [
   { id: "wishlist", label: "Wishlist", icon: "bi-heart" },
   { id: "reviews", label: "My Reviews", icon: "bi-star" },
   { id: "addresses", label: "Addresses", icon: "bi-geo-alt" },
+  { id: "payments", label: "Payment History", icon: "bi-receipt" },
   { id: "settings", label: "Account Settings", icon: "bi-gear" },
 ];
 

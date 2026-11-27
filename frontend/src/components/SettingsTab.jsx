@@ -120,7 +120,8 @@ const SettingsTab = () => {
     }
   };
 
-  // ── Save email preferences (auto-called on toggle change) ─────────────
+  // ── Save notification preferences (auto-called on toggle change) ──────
+  // Returns true when the server accepted the change.
   const savePreferences = async (updated) => {
     setPrefAlert(null);
     setPrefLoading(true);
@@ -131,17 +132,23 @@ const SettingsTab = () => {
         newsletter:    updated.newsletter,
       });
       setPrefAlert({ type: 'success', msg: 'Preferences saved.' });
+      return true;
     } catch {
       setPrefAlert({ type: 'error', msg: 'Failed to save preferences. Please try again.' });
+      return false;
     } finally {
       setPrefLoading(false);
     }
   };
 
-  const handleToggle = (key) => {
+  // Optimistic flip, rolled back if the save fails: these switches decide whether
+  // real SMS/emails go out, so one must never show "on" while the server holds "off".
+  const handleToggle = async (key) => {
+    const previous = profile;
     const updated = { ...profile, [key]: !profile[key] };
     setProfile(updated);
-    savePreferences(updated);
+    const saved = await savePreferences(updated);
+    if (!saved) setProfile(previous);
   };
 
   // ── Change password ───────────────────────────────────────────────────
@@ -220,8 +227,12 @@ const SettingsTab = () => {
   ];
 
   const prefToggles = [
-    { key: 'order_updates', label: 'Order Updates',  desc: 'Receive notifications about your order status' },
-    { key: 'promotions',    label: 'Promotions',     desc: 'Receive emails about new promotions and deals' },
+    // What each flag really gates on the backend (notifications/services.py
+    // _default_channels_for): order_updates -> order SMS + email; promotions ->
+    // wishlist price-drop and back-in-stock emails. One switch per category, not
+    // per channel, is a deliberate, documented decision (see the audit note).
+    { key: 'order_updates', label: 'Order Updates',  desc: 'SMS and email updates about your order status and shipping' },
+    { key: 'promotions',    label: 'Promotions',     desc: 'Emails when a wishlisted product drops in price or a sold-out item is back in stock' },
     { key: 'newsletter',    label: 'Newsletter',     desc: 'Subscribe to our weekly newsletter' },
   ];
 
@@ -303,10 +314,10 @@ const SettingsTab = () => {
           </form>
         </div>
 
-        {/* ── Email Preferences ────────────────────────────────────────── */}
+        {/* ── Notification Preferences ────────────────────────────────────────── */}
         <div className="bg-white border rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold">Email Preferences</h3>
+            <h3 className="text-lg font-semibold">Notification Preferences</h3>
             {prefLoading && (
               <span className="flex items-center gap-1.5 text-xs text-gray-400">
                 <Spinner /> Saving…

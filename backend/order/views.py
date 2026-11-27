@@ -1,7 +1,12 @@
 from accounts.models import UserType
+from cart.models import CartItem
+from cart.views import get_or_create_cart
 from core.money import rial_to_toman
+from django.db import transaction
+from django.db.models import F
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.translation import gettext as _
 from payments.models import PaymentTransaction, RefundRequest
 from payments.serializers import RefundRequestCreateSerializer, RefundRequestSerializer
@@ -240,3 +245,85 @@ class OrderInvoiceView(APIView):
             f'attachment; filename="invoice_{order.order_number}.pdf"'
         )
         return response
+
+
+def _reorder_unavailable_reason(variant):
+    """
+    Why `variant` can't be put back in a cart, or None if it can.
+
+    Must agree with what the cart itself accepts
+    (cart.serializers.CartItemSerializer.validate_variant_id: active, in stock,
+    and not past its expiration_date; a NULL date is not "expired"). The expiry
+    rule matters because deactivate_expired_variants only runs nightly, so an
+    expired variant can still be is_active=True for hours. The messages reuse
+    the cart's own (already translated) strings.
+
+    Returns (reason_code, message).
+    """
+    if variant is None or not variant.is_active:
+        return "unavailable", _("This product variant is unavailable.")
+    if variant.expiration_date is not None and variant.expiration_date < (
+        timezone.now().date()
+    ):
+        return "unavailable", _(
+            "This product has expired and is no longer available for purchase."
+        )
+    if variant.stock < 1:
+        return "out_of_stock", _("This product variant is out of stock.")
+    return None
+
+
+class OrderReorderView(APIView):
+    """
+    POST /api/orders/<id>/reorder/ → put a past order's items back in the cart.
+
+    Always partly succeeds: every item that can be bought again is added and
+    the rest are listed with a reason, so one discontinued item never blocks
+    the whole reorder (same pattern as the wishlist "move all to cart").
+    A historical item can fail three ways: its variant was deleted
+    (OrderItem.variant is SET_NULL), deactivated/expired, or is out of stock.
+
+    Quantities are added to whatever is already in the cart for that variant.
+    They are NOT capped at current stock: the cart doesn't cap either, and
+    checkout's stock lock is the authoritative check.
+
+    Only the order's owner can reorder it; anyone else (and guest orders,
+    which have no owner) gets 404, same as not existing.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        order = get_object_or_404(Order, pk=pk, user=request.user)
+        cart = get_or_create_cart(request)
+
+        added, unavailable = [], []
+        with transaction.atomic():
+            for item in order.items.select_related("variant", "variant__product"):
+                variant = item.variant
+                problem = _reorder_unavailable_reason(variant)
+                if problem:
+                    code, message = problem
+                    unavailable.append(
+                        {
+                            "product_name": item.product_name,
+                            "reason": message,
+                            "reason_code": code,
+                        }
+                    )
+                    continue
+                cart_item, created = CartItem.objects.get_or_create(
+                    cart=cart, variant=variant, defaults={"quantity": item.quantity}
+                )
+                if not created:
+                    # F() so a concurrent add can't be overwritten by a stale read.
+                    CartItem.objects.filter(pk=cart_item.pk).update(
+                        quantity=F("quantity") + item.quantity,
+                        updated_at=timezone.now(),
+                    )
+                added.append(item.product_name)
+
+        return Response(
+            {"added_count": len(added), "added": added, "unavailable": unavailable},
+            status=status.HTTP_200_OK,
+        )

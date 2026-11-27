@@ -5,13 +5,18 @@ import {
   provinceLabel,
   isValidPostalCode,
 } from "../constants/provinces";
+import { toWesternDigits } from "../utils/numerals";
 
-// This platform ships within Iran only (see the backend's "IR" default on
-// Address.country). The field is left as a select rather than a hidden
-// constant so the UI doesn't have to change if international shipping is
-// ever added — matching the backend, which deliberately kept country a
-// plain CharField rather than locking it to a single choice.
-const COUNTRIES = [{ code: "IR", name: "Iran" }];
+// This platform ships within Iran only, so there is no country picker: offering
+// one would imply shipping abroad. The form still submits country "IR" (and keeps
+// whatever country an existing address already has). The backend deliberately
+// keeps Address.country a plain CharField with an "IR" default rather than a
+// single-choice field; locking it down is an optional backend follow-up and is
+// not needed for this UI.
+const countryName = (code) => (!code || code === "IR" ? "Iran" : code);
+
+// DRF returns field errors as arrays of strings; render them as one line.
+const errText = (v) => (Array.isArray(v) ? v.join(" ") : v);
 
 const EMPTY_FORM = {
   label: "home", first_name: "", last_name: "", phone: "",
@@ -25,13 +30,13 @@ const EMPTY_FORM = {
 // focus after a single character.
 const Field = ({ name, label, type = "text", half, form, errors, onChange }) => (
   <div className={half ? "col-span-1" : "col-span-2"}>
-    <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+    <label htmlFor={`addr-${name}`} className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
     <input
-      type={type} name={name} value={form[name]} onChange={onChange}
+      id={`addr-${name}`} type={type} name={name} value={form[name]} onChange={onChange}
       className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500 ${errors[name] ? "border-red-400 bg-red-50" : "border-gray-200"
         }`}
     />
-    {errors[name] && <p className="text-red-500 text-xs mt-0.5">{errors[name]}</p>}
+    {errors[name] && <p className="text-red-500 text-xs mt-0.5">{errText(errors[name])}</p>}
   </div>
 );
 
@@ -53,7 +58,7 @@ const AddressModal = ({ address, onClose, onSave }) => {
     );
     // Mirror the backend's 10-digit Iranian postal code validator so the
     // user gets the error inline instead of via a round-trip 400.
-    if (form.postal_code?.trim() && !isValidPostalCode(form.postal_code)) {
+    if (form.postal_code?.trim() && !isValidPostalCode(toWesternDigits(form.postal_code))) {
       errs.postal_code = "Enter a valid 10-digit Iranian postal code.";
     }
     return errs;
@@ -65,11 +70,22 @@ const AddressModal = ({ address, onClose, onSave }) => {
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setSaving(true);
     try {
-      await onSave(form);
+      // Persian/Arabic-Indic digits are fine to type; the API gets Western digits.
+      await onSave({ ...form, postal_code: toWesternDigits(form.postal_code).trim() });
       onClose();
     } catch (err) {
-      const data = err?.response?.data || {};
-      setErrors(data);
+      const data = err?.response?.data;
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        // Field errors render under their inputs; anything else (detail,
+        // non_field_errors, errors for fields without an input) goes in the banner.
+        const shown = ["first_name", "last_name", "phone", "address_line", "city", "province", "postal_code"];
+        const general = Object.entries(data)
+          .filter(([k]) => !shown.includes(k))
+          .map(([k, v]) => (["detail", "non_field_errors"].includes(k) ? errText(v) : `${k}: ${errText(v)}`));
+        setErrors({ ...data, _general: general.join(" ") || undefined });
+      } else {
+        setErrors({ _general: "Could not save the address. Please try again." });
+      }
     } finally {
       setSaving(false);
     }
@@ -86,12 +102,17 @@ const AddressModal = ({ address, onClose, onSave }) => {
             <i className="bi bi-x-lg text-xl"></i>
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6">
+        <form onSubmit={handleSubmit} className="p-6" noValidate>
+          {errors._general && (
+            <p role="alert" className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {errors._general}
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-4">
             {/* Label */}
             <div className="col-span-2">
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Label</label>
-              <select name="label" value={form.label} onChange={handleChange}
+              <label htmlFor="addr-label" className="block text-xs font-semibold text-gray-600 mb-1">Label</label>
+              <select id="addr-label" name="label" value={form.label} onChange={handleChange}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500">
                 <option value="home">Home</option>
                 <option value="office">Office</option>
@@ -100,26 +121,16 @@ const AddressModal = ({ address, onClose, onSave }) => {
             </div>
             <Field name="first_name" label="First Name" half {...fieldProps} />
             <Field name="last_name" label="Last Name" half {...fieldProps} />
-            <Field name="phone" label="Phone" half {...fieldProps} />
-            <div className="col-span-1">
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Country</label>
-              <select name="country" value={form.country} onChange={handleChange}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500">
-                {COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>{c.name}</option>
-                ))}
-              </select>
-            </div>
+            <Field name="phone" label="Phone" {...fieldProps} />
             <Field name="address_line" label="Address Line" {...fieldProps} />
             <Field name="apartment" label="Apartment / Suite (optional)" {...fieldProps} />
             <Field name="city" label="City" half {...fieldProps} />
 
             {/* Province — choices must match the backend's IranProvince enum */}
             <div className="col-span-1">
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Province</label>
+              <label htmlFor="addr-province" className="block text-xs font-semibold text-gray-600 mb-1">Province</label>
               <select
-                name="province" value={form.province} onChange={handleChange}
-                aria-label="Province"
+                id="addr-province" name="province" value={form.province} onChange={handleChange}
                 className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-teal-500 ${errors.province ? "border-red-400 bg-red-50" : "border-gray-200"
                   }`}
               >
@@ -128,7 +139,7 @@ const AddressModal = ({ address, onClose, onSave }) => {
                   <option key={p.value} value={p.value}>{p.label}</option>
                 ))}
               </select>
-              {errors.province && <p className="text-red-500 text-xs mt-0.5">{errors.province}</p>}
+              {errors.province && <p className="text-red-500 text-xs mt-0.5">{errText(errors.province)}</p>}
             </div>
 
             <Field name="postal_code" label="Postal Code (10 digits)" half {...fieldProps} />
@@ -163,24 +174,33 @@ const AddressModal = ({ address, onClose, onSave }) => {
 const AddressesTab = () => {
   const [addresses, setAddresses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [modal, setModal] = useState(null); // null | "new" | address object
   const [deleting, setDeleting] = useState(null);
+  const [settingDefault, setSettingDefault] = useState(null);
   const [toast, setToast] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const fetchAddresses = () => {
-    setLoading(true);
+  // Loading/error flags are only set in promise callbacks or event handlers. A
+  // refetch after save/default-change is "quiet" (no skeleton flash); only the
+  // first load and an explicit retry show the skeleton.
+  useEffect(() => {
+    let ignore = false;
     dashboardAPI.getAddresses()
-      .then(({ data }) => setAddresses(data.results ?? data))
-      .catch(() => { })
-      .finally(() => setLoading(false));
-  };
+      .then(({ data }) => { if (!ignore) setAddresses(data.results ?? data); })
+      // A failed load must not masquerade as "No addresses saved".
+      .catch(() => { if (!ignore) setLoadError(true); })
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
+  }, [reloadKey]);
 
-  useEffect(() => { fetchAddresses(); }, []);
+  const refetch = () => setReloadKey((k) => k + 1);
+  const retryLoad = () => { setLoadError(false); setLoading(true); refetch(); };
 
   const handleSave = async (formData) => {
     if (modal && modal !== "new") {
@@ -190,7 +210,7 @@ const AddressesTab = () => {
       await dashboardAPI.createAddress(formData);
       showToast("Address added");
     }
-    fetchAddresses();
+    refetch();
   };
 
   const handleDelete = async (id) => {
@@ -208,12 +228,15 @@ const AddressesTab = () => {
   };
 
   const handleSetDefault = async (addr) => {
+    setSettingDefault(addr.id);
     try {
       await dashboardAPI.updateAddress(addr.id, { is_default: true });
-      fetchAddresses();
+      refetch();
       showToast("Default address updated");
     } catch {
       showToast("Failed to update", "error");
+    } finally {
+      setSettingDefault(null);
     }
   };
 
@@ -250,6 +273,13 @@ const AddressesTab = () => {
             <div key={i} className="h-48 bg-gray-100 rounded-xl animate-pulse" />
           ))}
         </div>
+      ) : loadError ? (
+        <div role="alert" className="text-center py-12 text-red-600">
+          <p className="font-medium">Could not load your addresses.</p>
+          <button type="button" onClick={retryLoad} className="mt-3 text-sm text-teal-600 hover:underline font-medium">
+            Try again
+          </button>
+        </div>
       ) : addresses.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <i className="bi bi-geo-alt text-5xl mb-4 block"></i>
@@ -258,7 +288,7 @@ const AddressesTab = () => {
       ) : (
         <div className="grid md:grid-cols-2 gap-6">
           {addresses.map((addr) => (
-            <div key={addr.id}
+            <div key={addr.id} data-testid="address-card" data-default={addr.is_default}
               className={`bg-white border rounded-xl p-5 shadow-sm hover:shadow-md transition ${addr.is_default ? "border-teal-500" : "border-gray-100"
                 }`}>
               <div className="flex justify-between items-start mb-3">
@@ -276,7 +306,7 @@ const AddressesTab = () => {
                 <p className="font-medium">{addr.full_name}</p>
                 <p>{addr.address_line}{addr.apartment && `, ${addr.apartment}`}</p>
                 <p>{addr.city}, {provinceLabel(addr.province)} {addr.postal_code}</p>
-                <p>{addr.country}</p>
+                <p>{countryName(addr.country)}</p>
                 <p className="mt-1 text-gray-500">
                   <i className="bi bi-telephone me-1"></i>{addr.phone}
                 </p>
@@ -287,16 +317,16 @@ const AddressesTab = () => {
                   <i className="bi bi-pencil"></i> Edit
                 </button>
                 <button onClick={() => handleDelete(addr.id)} disabled={deleting === addr.id}
-                  className="flex items-center gap-1 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition">
+                  className="disabled:opacity-60 flex items-center gap-1 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition">
                   {deleting === addr.id
                     ? <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
                     : <><i className="bi bi-trash"></i> Delete</>
                   }
                 </button>
                 {!addr.is_default && (
-                  <button onClick={() => handleSetDefault(addr)}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 transition">
-                    Set Default
+                  <button onClick={() => handleSetDefault(addr)} disabled={settingDefault === addr.id}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 transition disabled:opacity-60">
+                    {settingDefault === addr.id ? "Saving…" : "Set Default"}
                   </button>
                 )}
               </div>

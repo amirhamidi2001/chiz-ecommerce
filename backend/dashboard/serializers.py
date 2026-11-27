@@ -10,6 +10,7 @@ from django.db.models import Sum
 from django.utils.translation import gettext as _
 from order.models import Order, OrderItem
 from order.services.state_machine import is_valid_transition
+from payments.models import PaymentTransaction
 from promotions.models import Coupon
 from rest_framework import serializers
 from shipping.serializers import ShipmentSerializer
@@ -308,6 +309,42 @@ class UserOrderDetailSerializer(serializers.ModelSerializer):
             "items",
             "shipment",
         ]
+
+
+# ─── Payment history ─────────────────────────────────────────────────────────
+
+
+class UserPaymentTransactionSerializer(serializers.ModelSerializer):
+    """
+    One real PaymentTransaction (Epic 6 Task 6.1.1.2) for the customer's
+    "Payment History" tab. Deliberately an allow-list: `authority` and
+    `raw_callback_payload` (gateway internals / audit data) are NOT exposed;
+    `ref_id` is, because it is the receipt number a customer quotes to their bank.
+    """
+
+    order_id = serializers.IntegerField(read_only=True)
+    order_number = serializers.CharField(source="order.order_number", read_only=True)
+    gateway_display = serializers.CharField(
+        source="get_gateway_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    amount = RialSerializerField(read_only=True)
+
+    class Meta:
+        model = PaymentTransaction
+        fields = [
+            "id",
+            "order_id",
+            "order_number",
+            "gateway",
+            "gateway_display",
+            "status",
+            "status_display",
+            "amount",
+            "ref_id",
+            "created_at",
+        ]
+        read_only_fields = fields
 
 
 # ─── Reviews ─────────────────────────────────────────────────────────────────

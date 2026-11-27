@@ -188,6 +188,61 @@ describe('SettingsTab — email preferences (toggles)', () => {
   });
 });
 
+describe('SettingsTab — notification preferences honesty', () => {
+  const toggleFor = (label) =>
+    within(screen.getByText(label).closest('div').parentElement).getByRole('checkbox');
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    api.get.mockResolvedValue({ data: PROFILE });
+    api.patch.mockResolvedValue({ data: PROFILE });
+    renderTab();
+    await waitFor(() => screen.getByDisplayValue('Jane'));
+  });
+
+  it('is titled for all channels and describes what each switch really controls', () => {
+    expect(screen.getByRole('heading', { name: 'Notification Preferences' })).toBeInTheDocument();
+    expect(screen.queryByText('Email Preferences')).toBeNull();
+    // order_updates gates SMS AND email; promotions gates price-drop / back-in-stock emails
+    expect(screen.getByText(/SMS and email updates about your order/i)).toBeInTheDocument();
+    expect(screen.getByText(/price|back in stock/i)).toBeInTheDocument();
+  });
+
+  it('sends the flipped value for exactly the toggled flag, with the others unchanged', async () => {
+    const user = userEvent.setup();
+    await user.click(toggleFor('Order Updates'));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    expect(api.patch).toHaveBeenCalledWith('/auth/profile/', {
+      order_updates: false,
+      promotions: false,
+      newsletter: true,
+    });
+  });
+
+  it('rolls the switch back when the save fails (UI must match the server)', async () => {
+    api.patch.mockRejectedValueOnce(new Error('500'));
+    const user = userEvent.setup();
+    expect(toggleFor('Promotions')).not.toBeChecked();
+
+    await user.click(toggleFor('Promotions'));
+
+    expect(await screen.findByText(/Failed to save preferences/i)).toBeInTheDocument();
+    await waitFor(() => expect(toggleFor('Promotions')).not.toBeChecked());
+    expect(toggleFor('Promotions')).toBeEnabled(); // and can be retried
+  });
+
+  it('keeps the new value when the save succeeds', async () => {
+    const user = userEvent.setup();
+    await user.click(toggleFor('Promotions'));
+    expect(await screen.findByText('Preferences saved.')).toBeInTheDocument();
+    expect(toggleFor('Promotions')).toBeChecked();
+  });
+
+  it('shows no monetary values anywhere on the settings page', () => {
+    expect(document.body.textContent).not.toMatch(/[$]|تومان|Toman|USD|\d{1,3}(,\d{3})+/);
+  });
+});
+
 describe('SettingsTab — change password', () => {
   beforeEach(async () => {
     api.get.mockResolvedValue({ data: PROFILE });

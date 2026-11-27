@@ -51,6 +51,11 @@ urlpatterns = [
         "notifications/", views.NotificationSettingsView.as_view(), name="notifications"
     ),
     path("summary/", views.UserSummaryView.as_view(), name="summary"),
+    path(
+        "customer/payment-history/",
+        views.UserPaymentHistoryView.as_view(),
+        name="payment-history",
+    ),
     # ── Admin analytics ───────────────────────────────────────────────────────
     path("admin/overview/", views.AdminOverviewView.as_view(), name="admin-overview"),
     path(

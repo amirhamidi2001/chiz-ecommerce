@@ -21,8 +21,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 from order.models import Order
 from order.services.cancellation import cancel_order
 from order.services.state_machine import is_valid_transition
+from payments.models import PaymentTransaction
 from promotions.models import Coupon
-from rest_framework import filters, status, viewsets
+from rest_framework import filters, generics, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, ValidationError
 from rest_framework.pagination import PageNumberPagination
@@ -74,6 +75,7 @@ from .serializers import (
     ProfileUpdateSerializer,
     UserOrderDetailSerializer,
     UserOrderListSerializer,
+    UserPaymentTransactionSerializer,
     UserReviewSerializer,
     WishlistSerializer,
 )
@@ -394,6 +396,30 @@ class UserOrderViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == "retrieve":
             return UserOrderDetailSerializer
         return UserOrderListSerializer
+
+
+class UserPaymentHistoryView(generics.ListAPIView):
+    """
+    GET /dashboard/customer/payment-history/
+
+    The signed-in customer's own PaymentTransaction records (gateway, amount,
+    status, date), newest first. Ownership is enforced in get_queryset() via
+    `order__user` — never from a query param — so another user's transactions
+    (and guest orders, whose `order.user` is NULL) can never appear here.
+    Pending and failed attempts are included on purpose: a customer chasing a
+    "money left my account" problem needs to see them next to the successes.
+    """
+
+    permission_classes = [IsAuthenticated]
+    pagination_class = DashboardPagination
+    serializer_class = UserPaymentTransactionSerializer
+
+    def get_queryset(self):
+        return (
+            PaymentTransaction.objects.filter(order__user=self.request.user)
+            .select_related("order")
+            .order_by("-created_at", "-id")
+        )
 
 
 class UserReviewViewSet(viewsets.ModelViewSet):

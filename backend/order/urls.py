@@ -4,6 +4,7 @@ from .views import (
     OrderDetailView,
     OrderInvoiceView,
     OrderListCreateView,
+    OrderReorderView,
     RefundRequestCreateView,
 )
 
@@ -13,6 +14,7 @@ urlpatterns = [
     path("", OrderListCreateView.as_view(), name="order-list-create"),
     path("<int:pk>/", OrderDetailView.as_view(), name="order-detail"),
     path("<int:pk>/invoice/", OrderInvoiceView.as_view(), name="order-invoice"),
+    path("<int:pk>/reorder/", OrderReorderView.as_view(), name="order-reorder"),
     path(
         "<int:pk>/refund-request/",
         RefundRequestCreateView.as_view(),
